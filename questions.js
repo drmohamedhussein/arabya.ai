@@ -232,6 +232,7 @@ if (typeof window !== 'undefined') {
       ensureArabyaDefaultExamsSeeded();
       patchArabyaDirectLinks();
       enforceArabyaUniqueStudentCodes();
+      applyArabyaTeacherSafeMode();
     }, 0);
   });
 }
@@ -335,6 +336,16 @@ function enforceArabyaUniqueStudentCodes() {
       alert(validation.message);
     }
   }, true);
+}
+
+function applyArabyaTeacherSafeMode() {
+  window.shouldApplyStudentExamRestrictions = function() {
+    try {
+      if (localStorage.getItem("arabya_active_teacher_username")) return false;
+    } catch (e) {}
+    var state = window.systemState || {};
+    return !!(state.isExamActive && state.activeView === "exam-runner-view" && !state.activeTeacher);
+  };
 }
 
 function ensureArabyaDefaultExamsSeeded() {
