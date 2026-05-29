@@ -12,16 +12,15 @@ const defaultExams = [
     faculty: "كلية دار العلوم",
     level: "الفرقة الأولى",
     examType: "أعمال فصلية",
-    totalScore: 100, // المجموع النهائي للاختبار
+    totalScore: 100,
     questions: [
-      // 9 اختيار من متعدد وصواب/خطأ، مع تعيين 10 نقاط لكل سؤال
       {
         id: 1,
         type: "multiple",
         question: "ما هو الفعل المرفوع دائماً إذا لم يسبقه ناصب ولا جازم؟",
         options: ["الفعل الماضي", "فعل الأمر", "الفعل المضارع"],
         correctAnswer: 2,
-        points: 10 // درجة هذا السؤال الفردي
+        points: 10
       },
       {
         id: 2,
@@ -87,7 +86,6 @@ const defaultExams = [
         correctAnswer: 0,
         points: 10
       },
-      // سؤال مقالي
       {
         id: 10,
         type: "essay",
@@ -106,9 +104,8 @@ const defaultExams = [
     faculty: "كلية اللغة العربية",
     level: "الفرقة الثانية",
     examType: "نهائي",
-    totalScore: 100, // المجموع النهائي للاختبار
+    totalScore: 100,
     questions: [
-      // 9 أسئلة موضوعية، مع تعيين 10 نقاط لكل سؤال
       {
         id: 1,
         type: "multiple",
@@ -181,7 +178,6 @@ const defaultExams = [
         correctAnswer: 1,
         points: 10
       },
-      // سؤال مقالي
       {
         id: 10,
         type: "essay",
@@ -194,12 +190,10 @@ const defaultExams = [
   }
 ];
 
-// تصدير أو إتاحته للمتصفح
 if (typeof window !== 'undefined') {
   window.defaultExams = defaultExams;
 }
 
-// تحسينات واجهة ARABYA.NET التي تعمل فوق التطبيق الثابت بدون خادم خلفي.
 if (typeof window !== 'undefined') {
   document.addEventListener("DOMContentLoaded", function() {
     setTimeout(function() {
@@ -237,6 +231,7 @@ if (typeof window !== 'undefined') {
       enhanceArabyaTeacherDashboard();
       ensureArabyaDefaultExamsSeeded();
       patchArabyaDirectLinks();
+      enforceArabyaUniqueStudentCodes();
     }, 0);
   });
 }
@@ -251,6 +246,95 @@ function arabyaGetResults() {
 
 function arabyaGetExams() {
   try { return JSON.parse(localStorage.getItem("arabya_exams_db") || "[]"); } catch(e) { return window.defaultExams || []; }
+}
+
+function normalizeArabyaStudentCode(code) {
+  return String(code || "").trim().toLowerCase();
+}
+
+function arabyaFindStudentsByCode(code) {
+  var normalized = normalizeArabyaStudentCode(code);
+  if (!normalized) return [];
+  return arabyaGetStudents().filter(function(student) {
+    return normalizeArabyaStudentCode(student.code) === normalized;
+  });
+}
+
+function validateArabyaStudentIdentity(id, code, currentId) {
+  var cleanCode = String(code || "").trim();
+  if (!cleanCode) {
+    return { ok: false, message: "كود الاشتراك في الموقع إلزامي، وهو معرف هوية الطالب داخل المنصة." };
+  }
+
+  var codeOwners = arabyaFindStudentsByCode(cleanCode);
+  if (codeOwners.length > 1) {
+    return { ok: false, message: "هذا الكود مكرر داخل قاعدة الطلاب، ولا يمكن استخدامه حتى يقوم المعلم بتخصيص كود مختلف لكل طالب." };
+  }
+
+  var effectiveId = String(currentId || id || "");
+  var otherOwner = codeOwners.find(function(student) {
+    return String(student.id || "") !== effectiveId;
+  });
+  if (otherOwner) {
+    return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك وحدك أو تواصل مع المعلم." };
+  }
+
+  var sameIdStudent = arabyaGetStudents().find(function(student) {
+    return String(student.id || "") === String(id || "");
+  });
+  if (sameIdStudent && normalizeArabyaStudentCode(sameIdStudent.code) && normalizeArabyaStudentCode(sameIdStudent.code) !== normalizeArabyaStudentCode(cleanCode)) {
+    return { ok: false, message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. لا يمكن الدخول إلا بالكود الأصلي الخاص بهذا الطالب." };
+  }
+
+  return { ok: true };
+}
+
+function enforceArabyaUniqueStudentCodes() {
+  var resultsPanel = document.getElementById("student-profile-results");
+  if (resultsPanel) {
+    var panelHeader = resultsPanel.previousElementSibling;
+    var title = panelHeader ? panelHeader.querySelector(".panel-title") : null;
+    var hint = panelHeader ? panelHeader.querySelector("div[style*='font-size']") : null;
+    if (title) title.textContent = "نتائج الامتحانات";
+    if (hint) hint.textContent = "درجاتك محفوظة للعرض فقط ولا يمكن تعديلها من حساب الطالب";
+  }
+
+  document.addEventListener("click", function(event) {
+    var startBtn = event.target.closest && event.target.closest("#student-start-exam-btn");
+    var registerBtn = event.target.closest && event.target.closest("#student-register-submit-btn");
+    var profileBtn = event.target.closest && event.target.closest("#student-profile-submit-btn, #student-profile-login-btn");
+    var teacherSaveBtn = event.target.closest && event.target.closest("button[onclick='saveNewStudentByTeacher()']");
+    var validation = null;
+
+    if (startBtn) {
+      validation = validateArabyaStudentIdentity(
+        (document.getElementById("student-id-input") || {}).value,
+        (document.getElementById("student-access-code") || {}).value
+      );
+    } else if (registerBtn) {
+      validation = validateArabyaStudentIdentity(
+        (document.getElementById("student-reg-id") || {}).value,
+        (document.getElementById("student-reg-code") || {}).value
+      );
+    } else if (profileBtn) {
+      var profileCode = ((document.getElementById("student-profile-code-input") || {}).value || (document.getElementById("student-access-code") || {}).value || "").trim();
+      var matches = arabyaFindStudentsByCode(profileCode);
+      if (!profileCode) validation = { ok: false, message: "اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي." };
+      else if (matches.length > 1) validation = { ok: false, message: "هذا الكود مكرر ولا يمكن استخدامه للدخول حتى يتم تصحيح قاعدة الطلاب بواسطة المعلم." };
+    } else if (teacherSaveBtn) {
+      validation = validateArabyaStudentIdentity(
+        (document.getElementById("new-student-id") || {}).value,
+        (document.getElementById("new-student-code") || {}).value,
+        window.systemState ? window.systemState.editingStudentId : ""
+      );
+    }
+
+    if (validation && !validation.ok) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      alert(validation.message);
+    }
+  }, true);
 }
 
 function ensureArabyaDefaultExamsSeeded() {
@@ -322,7 +406,7 @@ function ensureArabyaStudentProfileView() {
     '<div id="student-profile-summary" class="profile-summary-grid" aria-live="polite"></div>',
     '<div class="panel-header" style="margin-top:2rem;"><div><div class="panel-title">الامتحانات المتاحة</div><div style="font-size:0.85rem; color:var(--text-muted);">يمكنك بدء أي امتحان من هنا</div></div></div>',
     '<div id="student-profile-exams" class="exams-list-container"></div>',
-    '<div class="panel-header" style="margin-top:2rem;"><div><div class="panel-title">سجل النتائج</div><div style="font-size:0.85rem; color:var(--text-muted);">كل محاولاتك ونتائجك المحفوظة</div></div></div>',
+    '<div class="panel-header" style="margin-top:2rem;"><div><div class="panel-title">نتائج الامتحانات</div><div style="font-size:0.85rem; color:var(--text-muted);">درجاتك محفوظة للعرض فقط ولا يمكن تعديلها من حساب الطالب</div></div></div>',
     '<div id="student-profile-results" class="result-query-list"></div>',
     '</div></div>'
   ].join("");
@@ -348,9 +432,13 @@ function showArabyaStudentProfile(code) {
     alert("اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي.");
     return;
   }
-  var student = arabyaGetStudents().find(function(s) {
-    return String(s.code || "").toLowerCase() === code.toLowerCase();
-  });
+  var matches = arabyaFindStudentsByCode(code);
+  if (matches.length > 1) {
+    if (window.navigateToView) window.navigateToView("student-profile-view");
+    alert("هذا الكود مكرر ولا يمكن استخدامه للدخول حتى يتم تصحيح قاعدة الطلاب بواسطة المعلم.");
+    return;
+  }
+  var student = matches[0];
   if (!student) {
     if (window.navigateToView) window.navigateToView("student-profile-view");
     alert("لم يتم العثور على طالب بهذا الكود. تأكد من الكود أو تواصل مع المعلم.");
@@ -365,7 +453,8 @@ function renderArabyaStudentProfile(student) {
   ensureArabyaStudentProfileView();
   if (!student) {
     var savedCode = localStorage.getItem("arabya_active_student_code") || "";
-    student = arabyaGetStudents().find(function(s) { return s.code === savedCode; });
+    var matches = arabyaFindStudentsByCode(savedCode);
+    student = matches.length === 1 ? matches[0] : null;
   }
   var loginPanel = document.getElementById("student-profile-login-panel");
   var content = document.getElementById("student-profile-content");
@@ -388,7 +477,7 @@ function renderArabyaStudentProfile(student) {
       '<div class="profile-stat-card"><div class="profile-stat-label">رقم ID</div><div class="profile-stat-value">' + arabyaEscape(student.id) + '</div></div>' +
       '<div class="profile-stat-card"><div class="profile-stat-label">كود الاشتراك</div><div class="profile-stat-value">' + arabyaEscape(student.code) + '</div></div>' +
       '<div class="profile-stat-card"><div class="profile-stat-label">تاريخ التسجيل</div><div class="profile-stat-value">' + arabyaEscape(student.timestamp || "غير محدد") + '</div></div>' +
-      '<div class="profile-stat-card"><div class="profile-stat-label">عدد النتائج</div><div class="profile-stat-value">' + results.length + '</div></div>';
+      '<div class="profile-stat-card"><div class="profile-stat-label">نتائج الامتحانات</div><div class="profile-stat-value">' + results.length + '</div></div>';
   }
 
   var examsBox = document.getElementById("student-profile-exams");
