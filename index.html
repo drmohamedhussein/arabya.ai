@@ -32,7 +32,7 @@
   <header class="navbar" role="banner">
     <nav class="nav-container" role="navigation" aria-label="القائمة الرئيسية">
       <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي arabya.ai">
-        <img src="logo.jpg" alt="شعار منصة arabya.ai" class="logo-img-tag">
+        <img src="logo.png" alt="شعار منصة arabya.ai" class="logo-img-tag">
         <span>arabya<span class="ai-text">.ai</span></span>
       </a>
       
@@ -95,6 +95,27 @@
           <div class="service-card-title">بيع وشراء الكتب العربية</div>
           <div class="service-card-desc">سوق إلكتروني متكامل يتيح للمعلمين والطلاب نشر وتبادل الكتب الأكاديمية، الروايات، والمخطوطات العربية النادرة.</div>
         </div>
+        <!-- بطاقات الخدمات التعليمية المضافة حديثاً بناء على طلب المستخدم -->
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">cast_for_education</span></div>
+          <div class="service-card-title">التدريس أونلاين والشروحات</div>
+          <div class="service-card-desc">فصول افتراضية تفاعلية حية ومحاضرات مسجلة لتبسيط علوم اللغة العربية ومناهج التعليم الإسلامي بأسلوب حديث.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">forum</span></div>
+          <div class="service-card-title">التواصل الفعال بين الطالب والمعلم</div>
+          <div class="service-card-desc">قنوات اتصال مباشرة وسريعة تتيح تبادل الأسئلة ومناقشة التقييمات ومتابعة الواجبات اليومية بسهولة تامة.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">record_voice_over</span></div>
+          <div class="service-card-title">شروحات التجويد ومخارج الحروف</div>
+          <div class="service-card-desc">تعلم أحكام التجويد عملياً ونظرياً مع التدريب على مخارج الحروف الصحيحة وتلاوة القرآن الكريم بالتجويد السليم.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">auto_stories</span></div>
+          <div class="service-card-title">الفقه والدراسات الإسلامية</div>
+          <div class="service-card-desc">مناهج متكاملة وميسرة في الفقه العبادات والمعاملات، العقيدة، الحديث، والسيرة النبوية المطهرة لمختلف المستويات.</div>
+        </div>
       </div>
     </section>
 
@@ -105,7 +126,7 @@
     <section id="student-login-view" class="view-section hidden" aria-label="بوابة دخول الطالب">
       <div class="card">
         <div class="card-header">
-          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
           <h2 class="card-title">بوابة اختبارات الطلاب</h2>
           <p class="subtitle">يرجى تسجيل بياناتك واختيار المادة لبدء الامتحان</p>
         </div>
@@ -146,6 +167,53 @@
         <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
           انتقل لبدء الامتحان <span class="material-icons" aria-hidden="true">arrow_back</span>
         </button>
+
+        <div style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('student-register-view');" style="color: var(--secondary); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب؟ سجل حساباً جديداً بالاشتراك</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- بوابة تسجيل حساب طالب جديد -->
+    <section id="student-register-view" class="view-section hidden" aria-label="بوابة تسجيل طالب جديد">
+      <div class="card">
+        <div class="card-header">
+          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <h2 class="card-title">تسجيل حساب طالب جديد</h2>
+          <p class="subtitle">قم بإنشاء حسابك الأكاديمي باستخدام كود الاشتراك المرسل إليك</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-reg-fullname">الاسم بالكامل <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="student-reg-fullname" class="form-control" placeholder="أدخل اسمك الثلاثي أو الرباعي..." required autocomplete="off" aria-required="true">
+            <span class="material-icons input-icon" aria-hidden="true">person</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-reg-id">رقم المعرف (ID) <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="student-reg-id" class="form-control" placeholder="أدخل رقمك الأكاديمي أو الجامعي المميز..." required autocomplete="off" aria-required="true">
+            <span class="material-icons input-icon" aria-hidden="true">badge</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-reg-code">كود الاشتراك بالموقع <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="student-reg-code" class="form-control" placeholder="أدخل كود الاشتراك الذي أرسله لك المعلم..." required autocomplete="off" aria-required="true">
+            <span class="material-icons input-icon" aria-hidden="true">key</span>
+          </div>
+        </div>
+
+        <button id="student-register-submit-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+          إنشاء الحساب والتسجيل <span class="material-icons" aria-hidden="true">how_to_reg</span>
+        </button>
+
+        <div style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('student-login-view');" style="color: var(--secondary); text-decoration: none; font-size: 0.95rem; font-weight: 600;">لديك حساب بالفعل؟ تسجيل الدخول مباشرة</a>
+        </div>
       </div>
     </section>
 
@@ -248,24 +316,16 @@
     <section id="result-search-view" class="view-section hidden" aria-label="بوابة الاستعلام عن النتائج">
       <div class="card">
         <div class="card-header">
-          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
           <h2 class="card-title">بوابة الاستعلام عن النتائج</h2>
-          <p class="subtitle">أدخل اسمك ورقم الـ ID لعرض درجات الاختبارات السابقة وتفاصيل الحلول</p>
+          <p class="subtitle">ابحث عن نتائجك باستخدام الاسم بالكامل، أو رقم المعرف (ID)، أو كود الاشتراك</p>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="search-student-name">الاسم بالكامل:</label>
+          <label class="form-label" for="search-student-query">بيانات البحث:</label>
           <div class="input-wrapper">
-            <input type="text" id="search-student-name" class="form-control" placeholder="أدخل اسمك كما سجلته في الاختبار...">
-            <span class="material-icons input-icon" aria-hidden="true">person</span>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="search-student-id">رقم المعرف (ID):</label>
-          <div class="input-wrapper">
-            <input type="text" id="search-student-id" class="form-control" placeholder="أدخل رقم الـ ID الخاص بك...">
-            <span class="material-icons input-icon" aria-hidden="true">badge</span>
+            <input type="text" id="search-student-query" class="form-control" placeholder="أدخل اسمك، أو رقم هويتك ID، أو كود الاشتراك الموزع...">
+            <span class="material-icons input-icon" aria-hidden="true">search</span>
           </div>
         </div>
 
@@ -286,15 +346,23 @@
     <section id="teacher-login-view" class="view-section hidden" aria-label="بوابة تسجيل دخول المعلم">
       <div class="card" style="max-width: 500px;">
         <div class="card-header">
-          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
           <h2 class="card-title">بوابة الدخول للمعلمين</h2>
-          <p class="subtitle">أدخل الرقم السري للوصول للوحة التحكم الكاملة</p>
+          <p class="subtitle">أدخل بيانات المعلم المسجل للوصول للوحة التحكم</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-login-username">اسم المستخدم للمعلم:</label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-login-username" class="form-control" placeholder="أدخل اسم المعلم أو اسم المستخدم..." autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">person</span>
+          </div>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="teacher-password">الرقم السري للمعلم:</label>
           <div class="input-wrapper">
-            <input type="password" id="teacher-password" class="form-control" placeholder="أدخل الرقم السري (الافتراضي: TEACHER2026)...">
+            <input type="password" id="teacher-password" class="form-control" placeholder="أدخل الرقم السري للجزئية..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">lock</span>
           </div>
         </div>
@@ -302,6 +370,70 @@
         <button id="teacher-submit-login" class="btn btn-primary" style="width: 100%; margin-top:1rem; background:linear-gradient(135deg, var(--accent), #d97706); color:var(--bg-dark);">
           تسجيل الدخول للوحة الإدارة <span class="material-icons" aria-hidden="true">login</span>
         </button>
+
+        <div style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('teacher-register-view');" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- بوابة تسجيل حساب معلم جديد -->
+    <section id="teacher-register-view" class="view-section hidden" aria-label="بوابة تسجيل حساب معلم جديد">
+      <div class="card" style="max-width: 550px;">
+        <div class="card-header">
+          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <h2 class="card-title" style="color: var(--accent);">تسجيل حساب معلم جديد</h2>
+          <p class="subtitle">أنشئ حسابك كمعلم على المنصة وقم بتهيئة رمز الدخول التلقائي</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-reg-name">اسم المعلم بالكامل <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-reg-name" class="form-control" placeholder="أدخل اسمك ثلاثياً..." required>
+            <span class="material-icons input-icon" aria-hidden="true">person</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-reg-username">اسم المستخدم / البريد الإلكتروني <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-reg-username" class="form-control" placeholder="مثال: teacher_mohamed" required autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">alternate_email</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-reg-subject">المادة / التخصص الدراسي <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-reg-subject" class="form-control" placeholder="مثال: لغة عربية ودراسات إسلامية" required>
+            <span class="material-icons input-icon" aria-hidden="true">subject</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-reg-password">الرقم السري للدخول <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="password" id="teacher-reg-password" class="form-control" placeholder="أدخل كلمة مرور قوية..." required autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">lock</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-reg-autocode">رمز الدخول التلقائي للمعلم <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-reg-autocode" class="form-control" placeholder="رمز مخصص للدخول التلقائي أو للمزامنة..." required>
+            <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
+          </div>
+          <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">هذا الرمز سيُستخدم لتوليد رابط الدخول المباشر للوحة التحكم الخاصة بك تلقائياً دون إدخال كلمة مرور.</small>
+        </div>
+
+        <button id="teacher-register-submit-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem; background:linear-gradient(135deg, var(--accent), #d97706); color:var(--bg-dark);">
+          إنشاء حساب المعلم <span class="material-icons" aria-hidden="true">person_add</span>
+        </button>
+
+        <div style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('teacher-login-view');" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">لديك حساب بالفعل؟ تسجيل الدخول كمعلم</a>
+        </div>
       </div>
     </section>
 
@@ -315,9 +447,9 @@
         <!-- القائمة الجانبية للمعلم -->
         <aside class="teacher-sidebar">
           <div style="text-align: center; margin-bottom: 2rem;">
-            <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
+            <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
             <h4 style="color:white; font-size:1.1rem; font-weight:700;">لوحة إدارة arabya.ai</h4>
-            <span style="font-size: 0.8rem; color:var(--text-muted);">حساب المعلم الأكاديمي</span>
+            <span style="font-size: 0.8rem; color:var(--text-muted);" id="teacher-sidebar-subtitle">حساب المعلم الأكاديمي</span>
           </div>
           
           <ul class="teacher-menu" role="tablist" aria-label="خيارات المعلم الجانبية">
@@ -326,6 +458,9 @@
             </li>
             <li class="teacher-menu-item" data-tab="results" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">poll</span> سجل نتائج الطلاب
+            </li>
+            <li class="teacher-menu-item" data-tab="students" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">people</span> الطلاب وأكواد الاشتراك
             </li>
             <li class="teacher-menu-item" data-tab="integration" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">sync</span> الربط بـ Google Sheets
@@ -607,11 +742,73 @@
             </button>
           </div>
 
+          <!-- تبويب إدارة الطلاب وأكواد الاشتراك -->
+          <div id="teacher-tab-students" class="teacher-tab-panel hidden" role="tabpanel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">إدارة حسابات الطلاب وأكواد الاشتراك</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">قم بتسجيل حسابات الطلاب الجدد وتعيين أكواد اشتراكهم وتصديرها واستيرادها</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button id="teacher-add-student-btn" class="btn btn-primary btn-sm" onclick="showAddStudentModal()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">person_add</span> إضافة طالب جديد
+                </button>
+                <button id="teacher-export-students-btn" class="btn btn-outline btn-sm" onclick="exportStudentsToJSON()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download</span> تصدير الطلاب (JSON)
+                </button>
+                <button id="teacher-import-students-btn" class="btn btn-outline btn-sm" style="border-color: var(--secondary); color:var(--secondary);" onclick="document.getElementById('teacher-students-file-input').click()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">upload_file</span> استيراد طلاب (JSON)
+                </button>
+                <input type="file" id="teacher-students-file-input" style="display: none;" accept=".json" onchange="importStudentsFromJSON(event)">
+              </div>
+            </div>
+
+            <!-- فورم إضافة طالب مخفي كـ inline card -->
+            <div id="add-student-form-card" class="exam-builder-card hidden" style="margin-bottom: 1.5rem;">
+              <h4 style="color:var(--secondary); margin-bottom: 1rem; font-weight:700;">تسجيل حساب طالب جديد في النظام</h4>
+              <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:1rem; flex-wrap:wrap;">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="new-student-name">اسم الطالب بالكامل:</label>
+                  <input type="text" id="new-student-name" class="form-control" placeholder="أدخل اسم الطالب...">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="new-student-id">معرف الطالب (ID):</label>
+                  <input type="text" id="new-student-id" class="form-control" placeholder="مثال: STU101">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="new-student-code">كود الاشتراك المخصص:</label>
+                  <input type="text" id="new-student-code" class="form-control" placeholder="مثال: AR_CODE_99">
+                </div>
+              </div>
+              <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1rem;">
+                <button class="btn btn-outline btn-sm" onclick="hideAddStudentModal()">إلغاء</button>
+                <button class="btn btn-primary btn-sm" onclick="saveNewStudentByTeacher()">حفظ الطالب والرمز</button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>اسم الطالب</th>
+                    <th>رقم الـ ID</th>
+                    <th>كود الاشتراك</th>
+                    <th>تاريخ التسجيل</th>
+                    <th>الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody id="teacher-students-table-body">
+                  <!-- تعبأ ديناميكياً -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <!-- تبويب الملف الشخصي للمعلم -->
           <div id="teacher-tab-profile" class="teacher-tab-panel hidden" role="tabpanel">
             <div class="panel-header">
               <div class="panel-title">تعديل البيانات الشخصية</div>
-              <div style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب ورابط الدخول المباشر</div>
             </div>
 
             <div class="form-group">
@@ -630,9 +827,26 @@
               </div>
             </div>
 
+            <div class="form-group">
+              <label class="form-label" for="teacher-profile-autocode">رمز الدخول التلقائي للمعلم:</label>
+              <div class="input-wrapper">
+                <input type="text" id="teacher-profile-autocode" class="form-control" placeholder="أدخل رمز الدخول التلقائي...">
+                <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
+              </div>
+            </div>
+
             <button id="save-teacher-profile-btn" class="btn btn-primary" style="margin-top: 1rem;">
               <span class="material-icons" aria-hidden="true">save</span> حفظ الملف الشخصي
             </button>
+
+            <!-- رابط الدخول التلقائي لوحة التحكم الخاصة بالمعلم -->
+            <div id="teacher-auto-login-box" class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(245, 158, 11, 0.05); border-color: rgba(245, 158, 11, 0.2);">
+              <div>
+                <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط الدخول التلقائي والمستمر للوحة التحكم الخاصة بك (احفظه في المفضلة):</span>
+                <input type="text" id="teacher-auto-login-url" class="exam-link-input" style="color:var(--accent);" readonly>
+              </div>
+              <button class="btn btn-accent btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('teacher-auto-login-url').value).then(() => alert('تم نسخ رابط الدخول التلقائي بنجاح! احفظه لتسجيل الدخول الفوري لاحقاً.'));">نسخ الرابط</button>
+            </div>
           </div>
 
         </div>
@@ -640,6 +854,45 @@
     </section>
 
   </main>
+
+  <!-- تذييل الصفحة الفاخر (Footer) -->
+  <footer class="footer" role="contentinfo">
+    <div class="footer-container">
+      <div class="footer-brand">
+        <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي arabya.ai">
+          <img src="logo.png" alt="شعار منصة arabya.ai" class="logo-img-tag">
+          <span>arabya<span class="ai-text">.ai</span></span>
+        </a>
+        <p class="footer-desc">
+          المنصة التعليمية الأكاديمية الشاملة لعلوم لغة الضاد والدراسات الإسلامية والتقييم والامتحانات الذكية المؤمنة كلياً ضد الغش.
+        </p>
+      </div>
+      
+      <div class="footer-links">
+        <h4>روابط السوشيال ميديا</h4>
+        <div class="social-links-row">
+          <a href="https://facebook.com/ARABYA.AI" target="_blank" class="social-btn facebook" aria-label="تابعنا على فيسبوك">
+            <span class="social-icon-wrapper"><span class="material-icons" style="font-size:1.2rem;vertical-align:middle;">link</span></span> facebook/ARABYA.AI
+          </a>
+          <a href="https://instagram.com/ARABYA.AI" target="_blank" class="social-btn instagram" aria-label="تابعنا على انستغرام">
+            <span class="social-icon-wrapper"><span class="material-icons" style="font-size:1.2rem;vertical-align:middle;">camera_alt</span></span> instagram/ARABYA.AI
+          </a>
+        </div>
+      </div>
+      
+      <div class="footer-developer">
+        <h4>تطوير ودعم المنصة</h4>
+        <p class="dev-signature">تم التطوير من خلال <strong>EGYWEBDEV</strong></p>
+        <a href="https://wa.me/201037890525" target="_blank" class="btn btn-primary btn-sm dev-contact-btn" style="margin-top:0.5rem; text-decoration:none;" aria-label="تواصل مع المطور عبر واتساب">
+          <span class="material-icons">phone</span> +20 10 37890525 (واتساب)
+        </a>
+      </div>
+    </div>
+    
+    <div class="footer-bottom">
+      <p>&copy; 2026 arabya.ai. جميع الحقوق محفوظة لعلوم اللغة العربية والدراسات الأكاديمية.</p>
+    </div>
+  </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
   <script src="questions.js"></script>

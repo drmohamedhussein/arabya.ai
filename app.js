@@ -8,7 +8,11 @@
 let systemState = {
   activeView: "welcome-view",
   
-  // بيانات المعلم والملف الشخصي
+  // المعلم النشط حالياً وقائمة المعلمين
+  activeTeacher: null,
+  teachers: [],
+  
+  // بيانات المعلم والملف الشخصي الافتراضية
   teacherProfile: {
     name: "معلم اللغة العربية",
     subject: "اللغة العربية وآدابها"
@@ -19,6 +23,9 @@ let systemState = {
   
   // قاعدة بيانات نتائج الطلاب المخزنة
   results: [],
+  
+  // قاعدة بيانات الطلاب وأكواد اشتراكاتهم
+  students: [],
   
   // حالة الطالب والاختبار الحالي
   currentStudent: {
@@ -49,7 +56,8 @@ let systemState = {
     entryId: "",
     entryCode: "",
     entryScore: "",
-    entryDetails: ""
+    entryDetails: "",
+    autoEntryCode: "TEACHER2026"
   }
 };
 
@@ -61,21 +69,96 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNavigation();
   setupUIEventListeners();
   setupAntiCheatHandlers();
+  setupStudentAutofill();
   checkUrlParameters();
 });
 
 // تهيئة قواعد البيانات المحلية
 function initDatabase() {
+  // 1. تهيئة قاعدة بيانات المعلمين
+  let savedTeachers = localStorage.getItem("arabya_teachers_db");
+  if (savedTeachers) {
+    try {
+      systemState.teachers = JSON.parse(savedTeachers);
+    } catch(e) {
+      systemState.teachers = [];
+    }
+  }
+  
+  // إذا لم يكن هناك معلمون، نقوم بإنشاء المعلم الافتراضي
+  if (systemState.teachers.length === 0) {
+    const defaultTeacher = {
+      name: "معلم اللغة العربية",
+      username: "معلم اللغة العربية",
+      subject: "اللغة العربية وآدابها",
+      password: "TEACHER2026",
+      autoEntryCode: "TEACHER2026",
+      integrationConfig: {
+        googleFormUrl: "",
+        entryName: "",
+        entryId: "",
+        entryCode: "",
+        entryScore: "",
+        entryDetails: ""
+      }
+    };
+    systemState.teachers.push(defaultTeacher);
+    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+  }
+
+  // محاولة تحميل المعلم النشط من الجلسة السابقة
+  const activeTeacherUsername = localStorage.getItem("arabya_active_teacher_username");
+  if (activeTeacherUsername) {
+    const matched = systemState.teachers.find(t => t.username === activeTeacherUsername);
+    if (matched) {
+      systemState.activeTeacher = matched;
+      systemState.teacherProfile = { name: matched.name, subject: matched.subject };
+      systemState.config = {
+        teacherCode: matched.password,
+        googleFormUrl: matched.integrationConfig?.googleFormUrl || "",
+        entryName: matched.integrationConfig?.entryName || "",
+        entryId: matched.integrationConfig?.entryId || "",
+        entryCode: matched.integrationConfig?.entryCode || "",
+        entryScore: matched.integrationConfig?.entryScore || "",
+        entryDetails: matched.integrationConfig?.entryDetails || "",
+        autoEntryCode: matched.autoEntryCode || matched.password
+      };
+    }
+  } else {
+    // كباك وورد للمحافظة على التوافق
+    systemState.activeTeacher = systemState.teachers[0];
+  }
+  
+  // تحميل إعدادات التكامل القديمة كحالة توافقية
   const savedConfig = localStorage.getItem("arabya_teacher_config");
-  if (savedConfig) {
-    try { systemState.config = { ...systemState.config, ...JSON.parse(savedConfig) }; } catch(e){}
+  if (savedConfig && systemState.activeTeacher) {
+    try { 
+      const parsedConfig = JSON.parse(savedConfig);
+      systemState.config = { ...systemState.config, ...parsedConfig }; 
+      systemState.activeTeacher.integrationConfig = {
+        googleFormUrl: systemState.config.googleFormUrl,
+        entryName: systemState.config.entryName,
+        entryId: systemState.config.entryId,
+        entryCode: systemState.config.entryCode,
+        entryScore: systemState.config.entryScore,
+        entryDetails: systemState.config.entryDetails
+      };
+      saveTeachersToLocalStorage();
+    } catch(e){}
   }
   
   const savedProfile = localStorage.getItem("arabya_teacher_profile");
-  if (savedProfile) {
-    try { systemState.teacherProfile = JSON.parse(savedProfile); } catch(e){}
+  if (savedProfile && systemState.activeTeacher) {
+    try { 
+      const parsedProfile = JSON.parse(savedProfile);
+      systemState.teacherProfile = parsedProfile;
+      systemState.activeTeacher.name = parsedProfile.name;
+      systemState.activeTeacher.subject = parsedProfile.subject;
+      saveTeachersToLocalStorage();
+    } catch(e){}
   }
   
+  // 2. تهيئة قاعدة بيانات الامتحانات
   const savedExams = localStorage.getItem("arabya_exams_db");
   if (savedExams) {
     try {
@@ -88,10 +171,37 @@ function initDatabase() {
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
   }
   
+  // 3. تهيئة نتائج الطلاب
   const savedResults = localStorage.getItem("arabya_results_db");
   if (savedResults) {
     try { systemState.results = JSON.parse(savedResults); } catch(e){}
   }
+
+  // 4. تهيئة قاعدة بيانات الطلاب وأكوادهم
+  const savedStudents = localStorage.getItem("arabya_students_db");
+  if (savedStudents) {
+    try {
+      systemState.students = JSON.parse(savedStudents);
+    } catch(e) {
+      systemState.students = [];
+    }
+  } else {
+    // إنشاء كود اشتراك افتراضي تجريبي
+    systemState.students = [
+      { name: "طالب تجريبي", id: "STU100", code: "ARABYA_FREE", timestamp: new Date().toLocaleDateString("ar-EG") }
+    ];
+    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+  }
+}
+
+// حفظ قاعدة بيانات المعلمين
+function saveTeachersToLocalStorage() {
+  localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+}
+
+// حفظ قاعدة بيانات الطلاب
+function saveStudentsToLocalStorage() {
+  localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
 }
 
 // إعداد نظام التوجيه والتنقل بين الصفحات
@@ -132,9 +242,36 @@ function navigateToView(viewId) {
   }
 }
 
-// فحص معاملات الرابط لفتح امتحان مخصص
+// فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 function checkUrlParameters() {
   const urlParams = new URLSearchParams(window.location.search);
+  
+  // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
+  const autoCode = urlParams.get("teacher_autocode");
+  if (autoCode) {
+    const matched = systemState.teachers.find(t => t.autoEntryCode === autoCode);
+    if (matched) {
+      loginTeacherObject(matched);
+      navigateToView("teacher-dashboard-view");
+      alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً عبر رمز الدخول السريع.`);
+      return;
+    }
+  }
+  
+  // 2. الدخول التلقائي للمعلم عبر اسم المستخدم وكلمة المرور
+  const user = urlParams.get("teacher_username");
+  const pass = urlParams.get("teacher_pass");
+  if (user && pass) {
+    const matched = systemState.teachers.find(t => t.username.toLowerCase() === user.toLowerCase() && t.password === pass);
+    if (matched) {
+      loginTeacherObject(matched);
+      navigateToView("teacher-dashboard-view");
+      alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً.`);
+      return;
+    }
+  }
+
+  // 3. فتح امتحان مخصص للطالب
   const examId = urlParams.get("exam");
   if (examId) {
     const targetExam = systemState.exams.find(e => e.id === examId);
@@ -151,6 +288,24 @@ function checkUrlParameters() {
   }
 }
 
+// تسجيل دخول كائن معلم محدد وتطبيق إعداداته
+function loginTeacherObject(teacher) {
+  systemState.activeTeacher = teacher;
+  localStorage.setItem("arabya_active_teacher_username", teacher.username);
+  
+  systemState.teacherProfile = { name: teacher.name, subject: teacher.subject };
+  systemState.config = {
+    teacherCode: teacher.password,
+    googleFormUrl: teacher.integrationConfig?.googleFormUrl || "",
+    entryName: teacher.integrationConfig?.entryName || "",
+    entryId: teacher.integrationConfig?.entryId || "",
+    entryCode: teacher.integrationConfig?.entryCode || "",
+    entryScore: teacher.integrationConfig?.entryScore || "",
+    entryDetails: teacher.integrationConfig?.entryDetails || "",
+    autoEntryCode: teacher.autoEntryCode || teacher.password
+  };
+}
+
 // ==========================================
 // 2. إدارة أحداث واجهة المستخدم
 // ==========================================
@@ -158,6 +313,16 @@ function setupUIEventListeners() {
   const startExamBtn = document.getElementById("student-start-exam-btn");
   if (startExamBtn) {
     startExamBtn.addEventListener("click", validateStudentAndStart);
+  }
+
+  const studentRegisterBtn = document.getElementById("student-register-submit-btn");
+  if (studentRegisterBtn) {
+    studentRegisterBtn.addEventListener("click", handleStudentRegister);
+  }
+
+  const teacherRegisterBtn = document.getElementById("teacher-register-submit-btn");
+  if (teacherRegisterBtn) {
+    teacherRegisterBtn.addEventListener("click", handleTeacherRegister);
   }
 
   const teacherLoginBtn = document.getElementById("teacher-submit-login");
@@ -245,46 +410,143 @@ function setupUIEventListeners() {
 // ==========================================
 
 function handleTeacherLogin() {
+  const usernameInput = document.getElementById("teacher-login-username").value.trim();
   const passwordInput = document.getElementById("teacher-password").value;
-  if (passwordInput === systemState.config.teacherCode) {
-    navigateToView("teacher-dashboard-view");
-    document.getElementById("teacher-password").value = "";
-  } else {
-    alert("الرقم السري غير صحيح!");
-  }
-}
 
-function loadTeacherDashboardData() {
-  document.getElementById("teacher-profile-name").value = systemState.teacherProfile.name;
-  document.getElementById("teacher-profile-subject").value = systemState.teacherProfile.subject;
-
-  document.getElementById("teacher-config-code").value = systemState.config.teacherCode;
-  document.getElementById("teacher-config-url").value = systemState.config.googleFormUrl;
-  document.getElementById("teacher-config-name").value = systemState.config.entryName;
-  document.getElementById("teacher-config-id").value = systemState.config.entryId;
-  document.getElementById("teacher-config-code-id").value = systemState.config.entryCode;
-  document.getElementById("teacher-config-score").value = systemState.config.entryScore;
-  document.getElementById("teacher-config-details").value = systemState.config.entryDetails;
-
-  renderExamsList();
-  renderStudentResultsTable();
-}
-
-function saveTeacherProfile() {
-  const name = document.getElementById("teacher-profile-name").value.trim();
-  const subject = document.getElementById("teacher-profile-subject").value.trim();
-
-  if (!name || !subject) {
-    alert("يرجى ملء جميع الحقول المطلوبة!");
+  if (!usernameInput || !passwordInput) {
+    alert("يرجى إدخال اسم المعلم والرقم السري!");
     return;
   }
 
+  const matched = systemState.teachers.find(t => 
+    (t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput) && 
+    t.password === passwordInput
+  );
+
+  if (matched) {
+    loginTeacherObject(matched);
+    navigateToView("teacher-dashboard-view");
+    document.getElementById("teacher-password").value = "";
+  } else {
+    alert("بيانات المعلم غير صحيحة أو الحساب غير موجود!");
+  }
+}
+
+function handleTeacherRegister() {
+  const name = document.getElementById("teacher-reg-name").value.trim();
+  const username = document.getElementById("teacher-reg-username").value.trim();
+  const subject = document.getElementById("teacher-reg-subject").value.trim();
+  const password = document.getElementById("teacher-reg-password").value.trim();
+  const autoCode = document.getElementById("teacher-reg-autocode").value.trim();
+
+  if (!name || !username || !subject || !password || !autoCode) {
+    alert("يرجى ملء جميع الحقول الإلزامية لتسجيل الحساب!");
+    return;
+  }
+
+  // فحص عدم تكرار اسم المستخدم
+  const isDuplicate = systemState.teachers.some(t => t.username.toLowerCase() === username.toLowerCase());
+  if (isDuplicate) {
+    alert("اسم المستخدم هذا مسجل بالفعل كمعلم! يرجى اختيار اسم مستخدم آخر.");
+    return;
+  }
+
+  const newTeacher = {
+    name,
+    username,
+    subject,
+    password,
+    autoEntryCode: autoCode,
+    integrationConfig: {
+      googleFormUrl: "",
+      entryName: "",
+      entryId: "",
+      entryCode: "",
+      entryScore: "",
+      entryDetails: ""
+    }
+  };
+
+  systemState.teachers.push(newTeacher);
+  saveTeachersToLocalStorage();
+
+  alert(`تم تسجيل حسابك كمعلم بنجاح يا أستاذ ${name}! يمكنك الدخول الآن.`);
+  navigateToView("teacher-login-view");
+  
+  // تعبئة البيانات تلقائياً
+  document.getElementById("teacher-login-username").value = username;
+  document.getElementById("teacher-password").value = "";
+}
+
+function loadTeacherDashboardData() {
+  if (!systemState.activeTeacher) return;
+  
+  // تحديث عنوان التسمية الجانبية
+  document.getElementById("teacher-sidebar-subtitle").innerText = `المعلم: ${systemState.activeTeacher.name}`;
+
+  document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
+  document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
+  document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
+
+  document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
+  document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
+  document.getElementById("teacher-config-name").value = systemState.activeTeacher.integrationConfig?.entryName || "";
+  document.getElementById("teacher-config-id").value = systemState.activeTeacher.integrationConfig?.entryId || "";
+  document.getElementById("teacher-config-code-id").value = systemState.activeTeacher.integrationConfig?.entryCode || "";
+  document.getElementById("teacher-config-score").value = systemState.activeTeacher.integrationConfig?.entryScore || "";
+  document.getElementById("teacher-config-details").value = systemState.activeTeacher.integrationConfig?.entryDetails || "";
+
+  // توليد وعرض رابط الدخول التلقائي للمعلم
+  const autoUrl = `${window.location.origin}${window.location.pathname}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
+  document.getElementById("teacher-auto-login-url").value = autoUrl;
+
+  renderExamsList();
+  renderStudentResultsTable();
+  renderTeacherStudentsTable();
+}
+
+function saveTeacherProfile() {
+  if (!systemState.activeTeacher) return;
+
+  const name = document.getElementById("teacher-profile-name").value.trim();
+  const subject = document.getElementById("teacher-profile-subject").value.trim();
+  const autoCode = document.getElementById("teacher-profile-autocode").value.trim();
+
+  if (!name || !subject || !autoCode) {
+    alert("يرجى ملء جميع الحقول المطلوبة وحقل رمز الدخول التلقائي!");
+    return;
+  }
+
+  // فحص عدم تكرار رمز الدخول التلقائي مع معلمين آخرين
+  const isCodeDuplicate = systemState.teachers.some(t => t.username !== systemState.activeTeacher.username && t.autoEntryCode === autoCode);
+  if (isCodeDuplicate) {
+    alert("رمز الدخول التلقائي هذا مستخدم بالفعل من قبل معلم آخر! اختر رمزاً فريداً.");
+    return;
+  }
+
+  systemState.activeTeacher.name = name;
+  systemState.activeTeacher.subject = subject;
+  systemState.activeTeacher.autoEntryCode = autoCode;
+  
   systemState.teacherProfile = { name, subject };
+
+  // تحديث القائمة العامة
+  const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+  if (idx !== -1) {
+    systemState.teachers[idx] = systemState.activeTeacher;
+  }
+
+  saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
-  alert("تم حفظ الملف الشخصي بنجاح!");
+  
+  // إعادة التحميل لتحديث الرابط
+  loadTeacherDashboardData();
+  alert("تم حفظ بيانات الملف الشخصي وتحديث رمز الدخول بنجاح!");
 }
 
 function saveTeacherIntegrationConfig() {
+  if (!systemState.activeTeacher) return;
+
   const code = document.getElementById("teacher-config-code").value.trim();
   const url = document.getElementById("teacher-config-url").value.trim();
   const entryName = document.getElementById("teacher-config-name").value.trim();
@@ -294,12 +556,12 @@ function saveTeacherIntegrationConfig() {
   const entryDetails = document.getElementById("teacher-config-details").value.trim();
 
   if (!code) {
-    alert("رمز الدخول لا يمكن أن يكون فارغاً!");
+    alert("الرقم السري لا يمكن أن يكون فارغاً!");
     return;
   }
 
-  systemState.config = {
-    teacherCode: code,
+  systemState.activeTeacher.password = code;
+  systemState.activeTeacher.integrationConfig = {
     googleFormUrl: url,
     entryName,
     entryId,
@@ -308,8 +570,27 @@ function saveTeacherIntegrationConfig() {
     entryDetails
   };
 
+  systemState.config = {
+    teacherCode: code,
+    googleFormUrl: url,
+    entryName,
+    entryId,
+    entryCode,
+    entryScore,
+    entryDetails,
+    autoEntryCode: systemState.activeTeacher.autoEntryCode || code
+  };
+
+  // تحديث القائمة العامة والـ local storage
+  const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+  if (idx !== -1) {
+    systemState.teachers[idx] = systemState.activeTeacher;
+  }
+
+  saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
-  alert("تم حفظ إعدادات المزامنة السحابية بنجاح!");
+  
+  alert("تم حفظ إعدادات التكامل ومزامنة شيتات جوجل بنجاح!");
 }
 
 // عرض الامتحانات
@@ -1377,7 +1658,7 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   }
 }
 
-// المزامنة مع جوجل شيتس
+// المزامنة مع جوجل شيتس (تدعم Web Apps ونماذج جوجل)
 function sendResultToGoogleSheets(scoreString, details) {
   const config = systemState.config;
   const statusEl = document.getElementById("runner-res-sync-status");
@@ -1389,61 +1670,95 @@ function sendResultToGoogleSheets(scoreString, details) {
     return;
   }
 
-  const formData = new URLSearchParams();
-  formData.append(config.entryName, systemState.currentStudent.name);
-  formData.append(config.entryId, systemState.currentStudent.id);
-  
-  const fullMeta = `${systemState.currentExam.title} | ${systemState.currentExam.university} | ${systemState.currentExam.faculty} | ${systemState.currentExam.level} | ${systemState.currentExam.examType} [كود: ${systemState.currentStudent.accessCode}]`;
-  
-  formData.append(config.entryCode, fullMeta);
-  formData.append(config.entryScore, scoreString);
-  formData.append(config.entryDetails, details);
-
   if (statusEl) {
     statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري ترحيل نتيجتك ومزامنتها مع Google Sheets...`;
   }
 
-  fetch(config.googleFormUrl, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: formData.toString()
-  })
-  .then(() => {
-    if (statusEl) {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال ومزامنة النتيجة مع Google Sheets بنجاح!`;
-    }
-  })
-  .catch(err => {
-    console.error("خطأ ربط جوجل شيتس:", err);
-    if (statusEl) {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل الإرسال السحابي. تم الاكتفاء بالحفظ المحلي للنتائج.`;
-    }
-  });
+  // التحقق إن كان الرابط هو Google Web App (ينتهي بـ /exec أو يحتوي على macros/s)
+  const isWebApp = config.googleFormUrl.includes("/macros/s/") || config.googleFormUrl.endsWith("/exec");
+
+  if (isWebApp) {
+    // ترحيل مباشر عبر Google Apps Script Web App (JSON POST)
+    const payload = {
+      timestamp: new Date().toLocaleString("ar-EG"),
+      name: systemState.currentStudent.name,
+      id: systemState.currentStudent.id,
+      subscriptionCode: systemState.currentStudent.accessCode,
+      examTitle: systemState.currentExam.title,
+      score: scoreString,
+      details: details
+    };
+
+    fetch(config.googleFormUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(() => {
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال ومزامنة النتيجة مع Google Sheets بنجاح!`;
+      }
+    })
+    .catch(err => {
+      console.error("خطأ مزامنة Apps Script:", err);
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل المزامنة السحابية. تم الاكتفاء بالحفظ المحلي للنتائج.`;
+      }
+    });
+  } else {
+    // ترحيل تقليدي عبر نموذج جوجل فورم
+    const formData = new URLSearchParams();
+    formData.append(config.entryName, systemState.currentStudent.name);
+    formData.append(config.entryId, systemState.currentStudent.id);
+    
+    const fullMeta = `${systemState.currentExam.title} | ${systemState.currentExam.university} | ${systemState.currentExam.faculty} | ${systemState.currentExam.level} | ${systemState.currentExam.examType} [كود: ${systemState.currentStudent.accessCode}]`;
+    
+    formData.append(config.entryCode, fullMeta);
+    formData.append(config.entryScore, scoreString);
+    formData.append(config.entryDetails, details);
+
+    fetch(config.googleFormUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    })
+    .then(() => {
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال ومزامنة النتيجة مع Google Sheets بنجاح!`;
+      }
+    })
+    .catch(err => {
+      console.error("خطأ ربط جوجل شيتس:", err);
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل الإرسال السحابي. تم الاكتفاء بالحفظ المحلي للنتائج.`;
+      }
+    });
+  }
 }
 
-// ==========================================
-// 8. الاستعلام واستعراض لوحة المعلم
-// ==========================================
-
+// الاستعلام عن نتائج الطلاب بالاسم، المعرف، أو كود الاشتراك الموزع
 function searchStudentResults() {
-  const name = document.getElementById("search-student-name").value.trim();
-  const id = document.getElementById("search-student-id").value.trim();
+  const query = document.getElementById("search-student-query").value.trim().toLowerCase();
 
-  if (!name || !id) {
-    alert("يرجى إدخال اسمك بالكامل والـ ID للبحث عن نتائجك!");
+  if (!query) {
+    alert("يرجى إدخال اسمك بالكامل، رقم هويتك ID، أو كود اشتراكك للبحث!");
     return;
   }
 
   const matched = systemState.results.filter(res => {
-    return res.id === id && res.name.toLowerCase().includes(name.toLowerCase());
+    const nameMatch = res.name && res.name.toLowerCase().includes(query);
+    const idMatch = res.id && res.id.toLowerCase() === query;
+    const codeMatch = res.accessCode && res.accessCode.toLowerCase() === query;
+    return nameMatch || idMatch || codeMatch;
   });
 
   const listContainer = document.getElementById("student-search-results-list");
   listContainer.innerHTML = "";
 
   if (matched.length === 0) {
-    listContainer.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-muted);">لم يتم العثور على أي نتائج مسجلة بهذا الاسم والـ ID.</div>`;
+    listContainer.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-muted);">لم يتم العثور على أي نتائج مسجلة تطابق بيانات البحث المدخلة.</div>`;
     return;
   }
 
@@ -1460,7 +1775,7 @@ function searchStudentResults() {
       <div>
         <div class="result-query-title">${res.examTitle} (${res.examType})</div>
         <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">
-          الكلية/الجامعة: ${res.faculty} | ${res.university} \\ تاريخ التقديم: ${res.timestamp}
+          الكلية/الجامعة: ${res.faculty} | ${res.university} \\ تاريخ التقديم: ${res.timestamp} \\ كود الاشتراك: ${res.accessCode || 'لا يوجد'}
         </div>
       </div>
       <div style="display:flex; align-items:center; gap: 1rem;">
@@ -1633,3 +1948,213 @@ function shuffle(array) {
   }
   return array;
 }
+
+// تسجيل حساب طالب جديد من قبل الطالب
+function handleStudentRegister() {
+  const fullname = document.getElementById("student-reg-fullname").value.trim();
+  const id = document.getElementById("student-reg-id").value.trim();
+  const code = document.getElementById("student-reg-code").value.trim();
+
+  if (!fullname || !id || !code) {
+    alert("يرجى ملء جميع الحقول الإلزامية للتسجيل!");
+    return;
+  }
+
+  // فحص عدم تكرار الـ ID في قاعدة البيانات
+  const isDuplicate = systemState.students.some(s => s.id === id);
+  if (isDuplicate) {
+    alert("رقم المعرف (ID) هذا مسجل بالفعل لطالب آخر! يرجى التواصل مع المعلم إذا واجهتك مشكلة.");
+    return;
+  }
+
+  const newStudent = {
+    name: fullname,
+    id: id,
+    code: code,
+    timestamp: new Date().toLocaleDateString("ar-EG")
+  };
+
+  systemState.students.push(newStudent);
+  saveStudentsToLocalStorage();
+
+  alert(`تم تسجيل حسابك بنجاح يا ${fullname}! يمكنك الآن تسجيل الدخول مباشرة للبدء.`);
+  navigateToView("student-login-view");
+
+  // تعبئة البيانات تلقائياً
+  document.getElementById("student-fullname-input").value = fullname;
+  document.getElementById("student-id-input").value = id;
+  document.getElementById("student-access-code").value = code;
+}
+
+// إعداد الإكمال والتعبئة التلقائية لبيانات الطالب
+function setupStudentAutofill() {
+  const codeInput = document.getElementById("student-access-code");
+  const idInput = document.getElementById("student-id-input");
+  const nameInput = document.getElementById("student-fullname-input");
+
+  if (!idInput || !codeInput || !nameInput) return;
+
+  function autofillIfMatched() {
+    const idVal = idInput.value.trim();
+    const codeVal = codeInput.value.trim();
+
+    if (idVal || codeVal) {
+      const matched = systemState.students.find(s => 
+        (idVal && s.id === idVal) || 
+        (codeVal && s.code === codeVal)
+      );
+
+      if (matched) {
+        if (!idInput.value) idInput.value = matched.id;
+        if (!codeInput.value) codeInput.value = matched.code;
+        if (!nameInput.value) nameInput.value = matched.name;
+      }
+    }
+  }
+
+  idInput.addEventListener("blur", autofillIfMatched);
+  codeInput.addEventListener("blur", autofillIfMatched);
+}
+
+// عرض قائمة الطلاب وأكوادهم في لوحة المعلم
+function renderTeacherStudentsTable() {
+  const tbody = document.getElementById("teacher-students-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (systemState.students.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:2rem;">لا يوجد طلاب مسجلين حالياً.</td></tr>`;
+    return;
+  }
+
+  // عرض أحدث الطلاب المسجلين في الأعلى
+  const reversed = [...systemState.students].reverse();
+
+  reversed.forEach(s => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${s.name}</td>
+      <td><code>${s.id}</code></td>
+      <td><span style="color:var(--accent); font-weight:700;">${s.code}</span></td>
+      <td>${s.timestamp || 'غير معروف'}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.25rem 0.5rem;" onclick="deleteStudentByTeacher('${s.id}')">حذف</button>
+      </td>
+    `;
+    tbody.appendChild(row);
+  });
+}
+
+// إظهار بطاقة إضافة طالب جديد
+window.showAddStudentModal = function() {
+  const card = document.getElementById("add-student-form-card");
+  if (card) card.classList.remove("hidden");
+};
+
+// إخفاء بطاقة إضافة طالب جديد
+window.hideAddStudentModal = function() {
+  const card = document.getElementById("add-student-form-card");
+  if (card) {
+    card.classList.add("hidden");
+    document.getElementById("new-student-name").value = "";
+    document.getElementById("new-student-id").value = "";
+    document.getElementById("new-student-code").value = "";
+  }
+};
+
+// حفظ طالب جديد من قبل المعلم
+window.saveNewStudentByTeacher = function() {
+  const name = document.getElementById("new-student-name").value.trim();
+  const id = document.getElementById("new-student-id").value.trim();
+  const code = document.getElementById("new-student-code").value.trim();
+
+  if (!name || !id || !code) {
+    alert("يرجى ملء جميع البيانات لإضافة الطالب!");
+    return;
+  }
+
+  // التحقق من عدم التكرار
+  const isDuplicate = systemState.students.some(s => s.id === id);
+  if (isDuplicate) {
+    alert("رقم المعرف ID هذا مسجل بالفعل لطالب آخر!");
+    return;
+  }
+
+  const studentObj = {
+    name,
+    id,
+    code,
+    timestamp: new Date().toLocaleDateString("ar-EG")
+  };
+
+  systemState.students.push(studentObj);
+  saveStudentsToLocalStorage();
+  renderTeacherStudentsTable();
+  hideAddStudentModal();
+  alert(`تم تسجيل الطالب "${name}" وكود اشتراكه بنجاح!`);
+};
+
+// حذف طالب بواسطة المعلم
+window.deleteStudentByTeacher = function(id) {
+  if (confirm("هل أنت متأكد من حذف هذا الطالب وإلغاء كود اشتراكه؟")) {
+    systemState.students = systemState.students.filter(s => s.id !== id);
+    saveStudentsToLocalStorage();
+    renderTeacherStudentsTable();
+  }
+};
+
+// تصدير الطلاب كملف JSON
+window.exportStudentsToJSON = function() {
+  if (systemState.students.length === 0) {
+    alert("لا يوجد طلاب لتصديرهم!");
+    return;
+  }
+  const blob = new Blob([JSON.stringify(systemState.students, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `طلاب_منصة_arabya_${new Date().toLocaleDateString()}.json`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+// استيراد الطلاب من ملف JSON
+window.importStudentsFromJSON = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (Array.isArray(parsed)) {
+        let addedCount = 0;
+        parsed.forEach(stu => {
+          if (stu.id && stu.name && stu.code) {
+            const isDuplicate = systemState.students.some(s => s.id === stu.id);
+            if (!isDuplicate) {
+              systemState.students.push({
+                name: stu.name,
+                id: stu.id,
+                code: stu.code,
+                timestamp: stu.timestamp || new Date().toLocaleDateString("ar-EG")
+              });
+              addedCount++;
+            }
+          }
+        });
+
+        saveStudentsToLocalStorage();
+        renderTeacherStudentsTable();
+        alert(`تم استيراد عدد ${addedCount} حسابات طلاب بنجاح!`);
+      } else {
+        alert("تنسيق ملف الطلاب غير صحيح!");
+      }
+    } catch(err) {
+      alert("خطأ في قراءة ملف الطلاب المرفوع!");
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+};
