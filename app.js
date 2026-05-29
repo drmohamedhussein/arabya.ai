@@ -350,6 +350,11 @@ function setupUIEventListeners() {
     teacherLoginBtn.addEventListener("click", handleTeacherLogin);
   }
 
+  const teacherQuickLoginBtn = document.getElementById("teacher-submit-quick-login");
+  if (teacherQuickLoginBtn) {
+    teacherQuickLoginBtn.addEventListener("click", handleTeacherQuickLogin);
+  }
+
   const menuItems = document.querySelectorAll(".teacher-menu-item");
   menuItems.forEach(item => {
     item.addEventListener("click", () => {
@@ -449,6 +454,31 @@ function handleTeacherLogin() {
     document.getElementById("teacher-password").value = "";
   } else {
     alert("بيانات المعلم غير صحيحة أو الحساب غير موجود!");
+  }
+}
+
+function handleTeacherQuickLogin() {
+  const codeInput = document.getElementById("teacher-quick-code");
+  const codeVal = codeInput ? codeInput.value.trim() : "";
+
+  if (!codeVal) {
+    alert("يرجى إدخال رمز الدخول السريع!");
+    return;
+  }
+
+  // البحث عن المعلم المطابق للرمز السريع أو الرقم السري
+  const matched = systemState.teachers.find(t => 
+    t.autoEntryCode === codeVal || 
+    t.password === codeVal
+  );
+
+  if (matched) {
+    loginTeacherObject(matched);
+    navigateToView("teacher-dashboard-view");
+    if (codeInput) codeInput.value = "";
+    alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول بنجاح عبر رمز الدخول السريع.`);
+  } else {
+    alert("رمز الدخول السريع غير صحيح أو الحساب غير موجود!");
   }
 }
 

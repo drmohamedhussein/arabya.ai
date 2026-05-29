@@ -390,6 +390,22 @@
           تسجيل الدخول للوحة الإدارة <span class="material-icons" aria-hidden="true">login</span>
         </button>
 
+        <div style="text-align: center; margin: 1.5rem 0; border-top: 1px solid rgba(255,255,255,0.08); position: relative;">
+          <span style="background: var(--bg-dark); padding: 0 1rem; color: var(--text-muted); font-size: 0.85rem; position: absolute; top: -10px; left: 50%; transform: translateX(-50%);">أو</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-quick-code">الدخول السريع عبر الرمز الخاص بك:</label>
+          <div class="input-wrapper">
+            <input type="text" id="teacher-quick-code" class="form-control" placeholder="مثال: TEACHER2026..." autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
+          </div>
+        </div>
+
+        <button id="teacher-submit-quick-login" class="btn btn-outline" style="width: 100%; border-color: var(--secondary); color: var(--secondary);">
+          دخول سريع عبر الرمز <span class="material-icons" aria-hidden="true">bolt</span>
+        </button>
+
         <div style="text-align: center; margin-top: 1.5rem;">
           <a href="#" onclick="navigateToView('teacher-register-view');" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً</a>
         </div>
