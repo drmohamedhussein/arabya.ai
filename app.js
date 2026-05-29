@@ -86,6 +86,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
+  setupArabyaLiveDataRefresh();
+  hydrateGoogleSheetsScriptBox();
 
   // ===== تشخيص ما تم تحميله =====
   console.log(`[ARABYA] تم تحميل قاعدة البيانات:`,
@@ -459,6 +461,32 @@ async function syncDatabaseFromCloud(options = {}) {
     }
   }
   return false;
+}
+
+function setupArabyaLiveDataRefresh() {
+  const refreshTeacherViews = () => {
+    if (systemState.activeView !== "teacher-dashboard-view") return;
+    reloadSystemStateFromLocalStorage();
+    const resultsTab = document.getElementById("teacher-tab-results");
+    const studentsTab = document.getElementById("teacher-tab-students");
+    if (resultsTab && !resultsTab.classList.contains("hidden")) renderStudentResultsTable();
+    if (studentsTab && !studentsTab.classList.contains("hidden")) renderTeacherStudentsTable();
+  };
+  window.addEventListener("storage", (e) => {
+    if (e.key && e.key.startsWith("arabya_")) refreshTeacherViews();
+  });
+  window.addEventListener("arabya-data-changed", refreshTeacherViews);
+}
+
+function hydrateGoogleSheetsScriptBox() {
+  fetch("integrations/google-apps-script-backend.gs", { cache: "no-store" })
+    .then(res => (res.ok ? res.text() : null))
+    .then(text => {
+      if (!text) return;
+      const box = document.getElementById("google-sheets-sync-script-code");
+      if (box) box.value = text;
+    })
+    .catch(() => {});
 }
 
 // ===== أداة التشخيص السريع - اكتب arabya_diagnose() في الكونسول =====
