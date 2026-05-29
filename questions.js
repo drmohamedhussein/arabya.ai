@@ -263,9 +263,7 @@ function arabyaFindStudentsByCode(code) {
 
 function validateArabyaStudentIdentity(id, code, currentId) {
   var cleanCode = String(code || "").trim();
-  if (!cleanCode) {
-    return { ok: false, message: "كود الاشتراك في الموقع إلزامي، وهو معرف هوية الطالب داخل المنصة." };
-  }
+  if (!cleanCode) return { ok: true };
 
   var codeOwners = arabyaFindStudentsByCode(cleanCode);
   if (codeOwners.length > 1) {
