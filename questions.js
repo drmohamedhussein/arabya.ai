@@ -235,6 +235,8 @@ if (typeof window !== 'undefined') {
 
       ensureArabyaStudentProfileView();
       enhanceArabyaTeacherDashboard();
+      ensureArabyaDefaultExamsSeeded();
+      patchArabyaDirectLinks();
     }, 0);
   });
 }
@@ -249,6 +251,42 @@ function arabyaGetResults() {
 
 function arabyaGetExams() {
   try { return JSON.parse(localStorage.getItem("arabya_exams_db") || "[]"); } catch(e) { return window.defaultExams || []; }
+}
+
+function ensureArabyaDefaultExamsSeeded() {
+  var exams = arabyaGetExams();
+  if (!exams.length && Array.isArray(window.defaultExams) && !sessionStorage.getItem("arabya_seed_reload_done")) {
+    localStorage.setItem("arabya_exams_db", JSON.stringify(window.defaultExams.map(function(exam) {
+      var copy = JSON.parse(JSON.stringify(exam));
+      copy.teacher = copy.teacher || "معلم اللغة العربية";
+      copy.timeLimit = copy.timeLimit || 60;
+      return copy;
+    })));
+    localStorage.setItem("arabya_default_exams_seeded", "yes");
+    sessionStorage.setItem("arabya_seed_reload_done", "yes");
+    window.location.reload();
+  }
+}
+
+function getArabyaBaseUrl() {
+  if (window.location.protocol === "file:") {
+    return window.location.href.split("?")[0].split("#")[0];
+  }
+  return window.location.origin + "/";
+}
+
+function patchArabyaDirectLinks() {
+  window.getExamDirectLink = function(exam) {
+    var params = new URLSearchParams();
+    params.set("exam", exam.id);
+    try {
+      var teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+      var activeUsername = localStorage.getItem("arabya_active_teacher_username");
+      var teacher = teachers.find(function(t) { return t.username === activeUsername; });
+      if (teacher && teacher.username) params.set("teacher", teacher.username);
+    } catch(e) {}
+    return getArabyaBaseUrl() + "?" + params.toString();
+  };
 }
 
 function arabyaEscape(value) {
