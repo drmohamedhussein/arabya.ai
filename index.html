@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>arabya.ai | منصة تعليم اللغة العربية والامتحانات الأكاديمية</title>
+  
+  <!-- تحسينات SEO ومحركات البحث -->
+  <meta name="description" content="المنصة العربية الأولى المدعومة بالذكاء الاصطناعي لتعليم فروع اللغة العربية (نحو، بلاغة، أدب)، التدقيق اللغوي والنحوي، والامتحانات الأكاديمية المؤمنة بالكامل ضد الغش.">
+  <meta name="keywords" content="اللغة العربية, ذكاء اصطناعي, امتحانات اونلاين, معلم اللغة العربية, تدقيق لغوي, كتب عربية">
+  <meta name="author" content="arabya.ai">
+
+  <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- تنبيه صوتي خفي للمكفوفين وقارئات الشاشة (Screen Reader Aria-Live Assertive Container) -->
+  <div id="runner-voice-announcement" class="sr-only" aria-live="assertive"></div>
+
+  <!-- شاشة التحذير ضد الغش وتصوير الشاشة المدمجة للطلاب -->
+  <div id="runner-cheat-overlay" class="cheat-overlay hidden" role="alert" aria-hidden="true">
+    <span class="material-icons cheat-icon-container">warning</span>
+    <h2 style="font-size: 2rem; font-weight:800; color:var(--error); margin-bottom:1rem;">كشف نشاط غير مصرح به!</h2>
+    <p id="runner-cheat-msg" style="max-width: 600px; line-height:1.7; color:var(--text-muted); font-size:1.1rem;">
+      لقد حاولت الخروج من صفحة الامتحان أو أخذ لقطة شاشة. تم إلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي تلقائياً.
+    </p>
+  </div>
+
+  <!-- شريط التنقل العلوي (Navbar) -->
+  <header class="navbar" role="banner">
+    <nav class="nav-container" role="navigation" aria-label="القائمة الرئيسية">
+      <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي arabya.ai">
+        <img src="logo.jpg" alt="شعار منصة arabya.ai" class="logo-img-tag">
+        <span>arabya<span class="ai-text">.ai</span></span>
+      </a>
+      
+      <ul class="nav-links" role="menubar">
+        <li role="none"><a href="#" data-target="welcome-view" class="active-link" role="menuitem">الرئيسية</a></li>
+        <li role="none"><a href="#" data-target="student-login-view" role="menuitem">بوابة الطالب</a></li>
+        <li role="none"><a href="#" data-target="result-search-view" role="menuitem">استعلام النتائج</a></li>
+        <li role="none"><a href="#" data-target="teacher-login-view" role="menuitem">بوابة المعلم</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <!-- غلاف المحتوى الرئيسي المتغير (SPA Views Wrapper) -->
+  <main class="main-content" id="app-main-wrapper" role="main">
+
+    <!-- ==========================================
+     * 1. صفحة الهبوط الرئيسية (Landing Page)
+     * ========================================== -->
+    <section id="welcome-view" class="view-section" aria-label="الصفحة الرئيسية الترحيبية">
+      <div class="hero-section">
+        <div class="hero-tagline">مستقبل اللغة العربية بالذكاء الاصطناعي</div>
+        <h1 class="hero-title">المنصة الأكاديمية الشاملة لعلوم لغة الضاد والتقييم الذكي</h1>
+        <p class="hero-desc">
+          بوابة متكاملة تدعم المعلمين في بناء امتحانات جامعية ومدرسية مقالية وموضوعية مؤمنة كلياً ضد الغش، وتقدم للطلاب تجارب تعليمية ذكية وتدقيقاً لغوياً فورياً ومكتبة لبيع وشراء الكتب.
+        </p>
+        <div class="hero-cta">
+          <button class="btn btn-primary" onclick="navigateToView('student-login-view')" aria-label="الانتقال لبوابة الطلاب">
+            <span class="material-icons">school</span> دخول بوابة الطلاب
+          </button>
+          <button class="btn btn-outline" onclick="navigateToView('teacher-login-view')" aria-label="الانتقال لبوابة المعلمين">
+            <span class="material-icons">badge</span> لوحة تحكم المعلمين
+          </button>
+        </div>
+      </div>
+
+      <!-- شبكة الخدمات والمجالات -->
+      <div class="section-title-wrapper">
+        <h2 class="section-title">خدمات ومجالات arabya.ai</h2>
+        <p class="section-subtitle">حلول أكاديمية ذكية لتمكين اللغة العربية وحوكمة اختباراتها</p>
+      </div>
+
+      <div class="services-grid" role="region" aria-label="الخدمات والمجالات المتاحة">
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">psychology</span></div>
+          <div class="service-card-title">تعليم اللغة بالذكاء الاصطناعي</div>
+          <div class="service-card-desc">تغطية شاملة وشروح تفاعلية لجميع فروع اللغة العربية من النحو والصرف، البلاغة، الأدب، والإملاء بالتقنيات الذكية.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">verified</span></div>
+          <div class="service-card-title">امتحانات أونلاين في فروع اللغة</div>
+          <div class="service-card-desc">مشغل اختبارات يعتمد على السلايدر لعرض سؤال واحد في كل شريحة مع حماية قصوى وعداد تنازلي بـ 60 ثانية.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">spellcheck</span></div>
+          <div class="service-card-title">تدقيق لغوي ونحوي بالذكاء الاصطناعي</div>
+          <div class="service-card-desc">مصحح نحوي وإملائي فوري لتصحيح الأخطاء الشائعة في النصوص العربية وضبط أواخر الكلمات بالتشكيل الصحيح.</div>
+        </div>
+        <div class="service-card">
+          <div class="service-icon" aria-hidden="true"><span class="material-icons">menu_book</span></div>
+          <div class="service-card-title">بيع وشراء الكتب العربية</div>
+          <div class="service-card-desc">سوق إلكتروني متكامل يتيح للمعلمين والطلاب نشر وتبادل الكتب الأكاديمية، الروايات، والمخطوطات العربية النادرة.</div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 2. بوابة دخول الطالب (Student Login)
+     * ========================================== -->
+    <section id="student-login-view" class="view-section hidden" aria-label="بوابة دخول الطالب">
+      <div class="card">
+        <div class="card-header">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <h2 class="card-title">بوابة اختبارات الطلاب</h2>
+          <p class="subtitle">يرجى تسجيل بياناتك واختيار المادة لبدء الامتحان</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-fullname-input">الاسم بالكامل <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="student-fullname-input" class="form-control" placeholder="أدخل اسمك الثلاثي أو الرباعي..." required autocomplete="off" aria-required="true">
+            <span class="material-icons input-icon" aria-hidden="true">person</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-id-input">رقم المعرف (ID) <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <input type="text" id="student-id-input" class="form-control" placeholder="أدخل رقمك الأكاديمي أو الجامعي..." required autocomplete="off" aria-required="true">
+            <span class="material-icons input-icon" aria-hidden="true">badge</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-access-code">كود الاشتراك بموقع الامتحان (اختياري)</label>
+          <div class="input-wrapper">
+            <input type="text" id="student-access-code" class="form-control" placeholder="أدخل كود الاشتراك إن وجد..." autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">key</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-exam-select">اختر الامتحان المستهدف <span class="required-badge" aria-hidden="true">*</span></label>
+          <div class="input-wrapper">
+            <select id="student-exam-select" class="form-control" style="appearance: none; padding-right: 1.25rem;" required aria-required="true">
+              <!-- تُعبأ ديناميكياً عبر JS -->
+            </select>
+          </div>
+        </div>
+
+        <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+          انتقل لبدء الامتحان <span class="material-icons" aria-hidden="true">arrow_back</span>
+        </button>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 3. مشغل الامتحان (Exam Slider Runner)
+     * ========================================== -->
+    <section id="exam-runner-view" class="view-section hidden" aria-label="شاشة مشغل الامتحان">
+      <div class="card" style="max-width: 820px;" role="form" aria-label="نموذج أسئلة الامتحان">
+        <!-- الهيدر والعداد الزمني -->
+        <div class="exam-runner-header">
+          <div>
+            <h2 id="runner-exam-title" style="color: white; font-size:1.15rem; margin-bottom:0.25rem; line-height:1.4;">اسم الامتحان</h2>
+            <div style="font-size: 0.85rem; color:var(--text-muted);" aria-live="polite">
+              سؤال رقم <span id="runner-current-num" style="font-weight: 700; color:white;">1</span> من <span id="runner-total-num" style="font-weight: 700; color:white;">20</span>
+            </div>
+          </div>
+          
+          <!-- مؤقت الدائرة الفاخر -->
+          <div class="timer-container" id="runner-timer-container" aria-label="الوقت المتبقي للسؤال">
+            <svg class="timer-svg" aria-hidden="true">
+              <circle class="timer-circle-bg" cx="30" cy="30" r="28"></circle>
+              <circle class="timer-circle-fill" id="runner-timer-circle" cx="30" cy="30" r="28"></circle>
+            </svg>
+            <div class="timer-text" aria-hidden="true"><span id="runner-timer-text">60</span>ث</div>
+          </div>
+        </div>
+
+        <!-- شريط تقدم الاختبار الخطي -->
+        <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.03); border-radius:10px; overflow:hidden; margin-bottom:2rem;" aria-hidden="true">
+          <div id="runner-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--secondary), var(--primary)); transition: width 0.35s ease;"></div>
+        </div>
+
+        <!-- السؤال الحالي -->
+        <div style="min-height: 240px;">
+          <!-- رأس السؤال مهيأ كـ heading للتركيز التلقائي -->
+          <h3 id="runner-question-text" style="font-size: 1.35rem; font-weight:700; line-height:1.75; margin-bottom:2rem; color:white; outline:none;">
+            نص السؤال
+          </h3>
+          
+          <div id="runner-options-list" class="options-list" role="radiogroup" aria-label="خيارات الإجابة">
+            <!-- خيارات الإجابة ديناميكياً -->
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 2rem;">
+          <button id="runner-next-btn" class="btn btn-primary" style="min-width: 180px;">
+            السؤال التالي <span class="material-icons" aria-hidden="true">arrow_back</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 4. صفحة النتيجة للطالب (Student Result)
+     * ========================================== -->
+    <section id="student-result-view" class="view-section hidden" aria-label="صفحة نتيجة الطالب">
+      <div class="card text-center" style="text-align: center;">
+        <div style="display:inline-flex; align-items:center; justify-content:center; width:130px; height:130px; border-radius:50%; border: 4px solid var(--secondary); background: rgba(20, 184, 166, 0.05); margin-bottom: 1.5rem; box-shadow: 0 0 25px rgba(20, 184, 166, 0.25);">
+          <div style="display:flex; flex-direction:column;" aria-live="polite" aria-label="الدرجة الكلية والنسبية المحققة">
+            <span id="runner-res-score" style="font-size:2.8rem; font-weight:900; line-height:1; color:white;">0</span>
+            <span style="font-size:0.9rem; color:var(--text-muted); margin-top:0.25rem;">من <span id="runner-res-total">100</span></span>
+          </div>
+        </div>
+
+        <h2 id="runner-res-status" style="font-size: 1.4rem; font-weight:800; margin-bottom:1rem; line-height:1.5;">حالة النتيجة</h2>
+        <p class="subtitle" style="margin-bottom: 2rem;">ملخص وتأكيد تقديم درجات الاختبار الأكاديمي</p>
+
+        <div style="background: rgba(0,0,0,0.25); border:1px solid var(--border-color); border-radius:12px; padding:1.25rem; text-align:right; margin-bottom: 2rem;">
+          <div style="display:flex; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+            <span style="color:var(--text-muted);">اسم الطالب:</span>
+            <span id="runner-res-name" style="font-weight:700; color:white;">---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:0.5rem 0; border-bottom:1px solid rgba(255,255,255,0.03);">
+            <span style="color:var(--text-muted);">رقم الـ ID:</span>
+            <span id="runner-res-id" style="font-weight:700; color:white;">---</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:0.5rem 0;">
+            <span style="color:var(--text-muted);">المؤسسة والامتحان:</span>
+            <span id="runner-res-title" style="font-weight:700; color:white;">---</span>
+          </div>
+        </div>
+
+        <!-- حالة المزامنة -->
+        <div id="runner-res-sync-status" style="background: rgba(255,255,255,0.01); border:1px solid var(--border-color); border-radius:8px; padding:0.8rem; font-size:0.85rem; margin-bottom: 2rem; color:var(--text-muted);">
+          جاري التحقق من ربط جوجل شيتس...
+        </div>
+
+        <button id="runner-restart-btn" class="btn btn-outline" style="width: 100%;">
+          العودة للصفحة الرئيسية <span class="material-icons" aria-hidden="true">home</span>
+        </button>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 5. استعلام نتائج الطلاب (Result Search)
+     * ========================================== -->
+    <section id="result-search-view" class="view-section hidden" aria-label="بوابة الاستعلام عن النتائج">
+      <div class="card">
+        <div class="card-header">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <h2 class="card-title">بوابة الاستعلام عن النتائج</h2>
+          <p class="subtitle">أدخل اسمك ورقم الـ ID لعرض درجات الاختبارات السابقة وتفاصيل الحلول</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="search-student-name">الاسم بالكامل:</label>
+          <div class="input-wrapper">
+            <input type="text" id="search-student-name" class="form-control" placeholder="أدخل اسمك كما سجلته في الاختبار...">
+            <span class="material-icons input-icon" aria-hidden="true">person</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="search-student-id">رقم المعرف (ID):</label>
+          <div class="input-wrapper">
+            <input type="text" id="search-student-id" class="form-control" placeholder="أدخل رقم الـ ID الخاص بك...">
+            <span class="material-icons input-icon" aria-hidden="true">badge</span>
+          </div>
+        </div>
+
+        <button id="student-search-submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
+          ابحث عن نتائج الاختبارات الأكاديمية <span class="material-icons" aria-hidden="true">find_in_page</span>
+        </button>
+
+        <div id="student-search-results-list" class="result-query-list" role="region" aria-label="النتائج التي عثر عليها">
+          <!-- تعبأ ديناميكياً عند الاستعلام -->
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 6. بوابة تسجيل دخول المعلم (Teacher Login)
+     * ========================================== -->
+    <section id="teacher-login-view" class="view-section hidden" aria-label="بوابة تسجيل دخول المعلم">
+      <div class="card" style="max-width: 500px;">
+        <div class="card-header">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <h2 class="card-title">بوابة الدخول للمعلمين</h2>
+          <p class="subtitle">أدخل الرقم السري للوصول للوحة التحكم الكاملة</p>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-password">الرقم السري للمعلم:</label>
+          <div class="input-wrapper">
+            <input type="password" id="teacher-password" class="form-control" placeholder="أدخل الرقم السري (الافتراضي: TEACHER2026)...">
+            <span class="material-icons input-icon" aria-hidden="true">lock</span>
+          </div>
+        </div>
+
+        <button id="teacher-submit-login" class="btn btn-primary" style="width: 100%; margin-top:1rem; background:linear-gradient(135deg, var(--accent), #d97706); color:var(--bg-dark);">
+          تسجيل الدخول للوحة الإدارة <span class="material-icons" aria-hidden="true">login</span>
+        </button>
+      </div>
+    </section>
+
+
+    <!-- ==========================================
+     * 7. لوحة تحكم وإدارة المعلم (Teacher Dashboard)
+     * ========================================== -->
+    <section id="teacher-dashboard-view" class="view-section hidden" aria-label="لوحة تحكم وإدارة المعلم">
+      <div class="teacher-grid">
+        
+        <!-- القائمة الجانبية للمعلم -->
+        <aside class="teacher-sidebar">
+          <div style="text-align: center; margin-bottom: 2rem;">
+            <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
+            <h4 style="color:white; font-size:1.1rem; font-weight:700;">لوحة إدارة arabya.ai</h4>
+            <span style="font-size: 0.8rem; color:var(--text-muted);">حساب المعلم الأكاديمي</span>
+          </div>
+          
+          <ul class="teacher-menu" role="tablist" aria-label="خيارات المعلم الجانبية">
+            <li class="teacher-menu-item active" data-tab="exams" role="tab" aria-selected="true">
+              <span class="material-icons" aria-hidden="true">assignment</span> الامتحانات والأسئلة
+            </li>
+            <li class="teacher-menu-item" data-tab="results" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">poll</span> سجل نتائج الطلاب
+            </li>
+            <li class="teacher-menu-item" data-tab="integration" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">sync</span> الربط بـ Google Sheets
+            </li>
+            <li class="teacher-menu-item" data-tab="profile" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">manage_accounts</span> الملف الشخصي للمعلم
+            </li>
+            <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" onclick="location.reload();" role="none">
+              <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
+            </li>
+          </ul>
+        </aside>
+
+        <!-- اللوحة الرئيسية المتغيرة -->
+        <div class="teacher-main-panel">
+          
+          <!-- تبويب الامتحانات (Exams Tab) -->
+          <div id="teacher-tab-exams" class="teacher-tab-panel" role="tabpanel">
+            
+            <!-- الجزء الأول: قائمة الامتحانات -->
+            <div id="teacher-exams-list-view">
+              <div class="panel-header">
+                <div class="panel-title">قائمة الامتحانات الحالية</div>
+                <div style="font-size: 0.85rem; color: var(--text-muted);">تعديل الأسئلة والبدائل، روابط الاختبارات والأكواد</div>
+              </div>
+              
+              <div id="teacher-exams-list" class="exams-list-container" style="margin-bottom: 3rem;">
+                <!-- تُعبأ عبر JS -->
+              </div>
+
+              <!-- نموذج إنشاء امتحان جديد بالبيانات الأكاديمية المطلوبة -->
+              <div class="panel-header" style="margin-top: 2rem;">
+                <div class="panel-title">إنشاء امتحان أكاديمي جديد</div>
+              </div>
+              
+              <div class="exam-builder-card">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom:1rem;">
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-title">عنوان الامتحان الجديد:</label>
+                    <input type="text" id="new-exam-title" class="form-control" placeholder="مثال: اختبار الفاعل وأحكامه">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-subject">المادة / الفرع الدراسي:</label>
+                    <input type="text" id="new-exam-subject" class="form-control" placeholder="مثال: النحو والصرف">
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom:1rem;">
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-level">الفرقة / المستوى الدراسي:</label>
+                    <input type="text" id="new-exam-level" class="form-control" placeholder="مثال: الفرقة الأولى">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-faculty">الكلية / المدرسة:</label>
+                    <input type="text" id="new-exam-faculty" class="form-control" placeholder="مثال: كلية دار العلوم">
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-university">الجامعة / المؤسسة التعليمية:</label>
+                    <input type="text" id="new-exam-university" class="form-control" placeholder="مثال: جامعة القاهرة">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="new-exam-type">نوع الامتحان:</label>
+                    <select id="new-exam-type" class="form-control" style="appearance: none; padding-right: 1.25rem;">
+                      <option value="أعمال فصلية">أعمال فصلية (Midterm / Classwork)</option>
+                      <option value="نهائي">نهائي (Final Exam)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- صندوق لعرض الرابط المباشر بعد الحفظ -->
+                <div id="new-exam-direct-link-box" class="exam-direct-link-box hidden">
+                  <div>
+                    <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">الرابط المباشر للطلاب لمشاركة الاختبار:</span>
+                    <input type="text" id="new-exam-direct-link-input" class="exam-link-input" readonly>
+                  </div>
+                  <button class="btn btn-primary btn-sm" onclick="copyExamLink(document.getElementById('new-exam-direct-link-input').value)">نسخ الرابط</button>
+                </div>
+
+                <button id="create-new-exam-btn" class="btn btn-primary" style="margin-top: 1.5rem;">
+                  <span class="material-icons" aria-hidden="true">add_circle</span> إنشاء وحفظ الامتحان
+                </button>
+              </div>
+            </div>
+
+            <!-- الجزء الثاني: محرر الأسئلة للامتحان الفردي وتعديل بياناته الأكاديمية لاحقاً -->
+            <div id="teacher-questions-editor-panel" class="hidden">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">تعديل الامتحان والأسئلة: <span id="editor-exam-title" style="color: var(--secondary);">---</span></div>
+                  <div style="font-size: 0.85rem; color: var(--text-muted); margin-top:0.25rem;">قم بتحديث بيانات الاختبار الأكاديمية، والتحكم في المجموع النهائي وفي أوزان الأسئلة بالأسفل</div>
+                </div>
+                <button class="btn btn-outline" style="padding:0.5rem 1rem; font-size:0.85rem;" onclick="closeQuestionsEditor()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">arrow_forward</span> العودة للامتحانات
+                </button>
+              </div>
+
+              <!-- نموذج تعديل بيانات الامتحان لاحقاً (البيانات الأكاديمية + المجموع النهائي) -->
+              <div class="exam-builder-card" style="margin-bottom: 2rem;">
+                <h4 style="color:var(--secondary); margin-bottom: 1rem; font-weight:700;">تعديل البيانات الأكاديمية للاختبار:</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-title">اسم الامتحان:</label>
+                    <input type="text" id="edit-meta-title" class="form-control">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-subject">المادة / الفرع:</label>
+                    <input type="text" id="edit-meta-subject" class="form-control">
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-level">الفرقة / المستوى:</label>
+                    <input type="text" id="edit-meta-level" class="form-control">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-faculty">الكلية:</label>
+                    <input type="text" id="edit-meta-faculty" class="form-control">
+                  </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-university">الجامعة:</label>
+                    <input type="text" id="edit-meta-university" class="form-control">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-type">نوع الامتحان:</label>
+                    <select id="edit-meta-type" class="form-control" style="appearance: none; padding-right:1.25rem;">
+                      <option value="أعمال فصلية">أعمال فصلية</option>
+                      <option value="نهائي">نهائي</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-totalscore">المجموع النهائي الكلي (درجة):</label>
+                    <input type="number" id="edit-meta-totalscore" class="form-control" min="1">
+                  </div>
+                </div>
+              </div>
+
+              <!-- حاوية عرض الأسئلة لتعديل الأوزان والبدائل والمقالي -->
+              <div id="editor-questions-list" style="margin-bottom: 2rem;">
+                <!-- الأسئلة ديناميكياً -->
+              </div>
+
+              <!-- كروت لإضافة سؤال جديد -->
+              <div style="background: rgba(255,255,255,0.01); border: 1px dashed var(--border-color); border-radius:12px; padding:1.5rem; text-align:center;">
+                <h4 style="color:white; margin-bottom:1rem; font-weight:700;">أضف سؤالاً جديداً للامتحان</h4>
+                <div style="display:flex; justify-content:center; gap: 1rem; flex-wrap:wrap;">
+                  <button class="btn btn-outline" style="border-color:var(--secondary); color:var(--secondary);" onclick="addNewQuestionToExam('multiple')">
+                    <span class="material-icons" aria-hidden="true">add</span> سؤال اختيار من متعدد ببدائل مرنة
+                  </button>
+                  <button class="btn btn-outline" style="border-color:var(--accent); color:var(--accent);" onclick="addNewQuestionToExam('boolean')">
+                    <span class="material-icons" aria-hidden="true">add</span> سؤال صواب وخطأ
+                  </button>
+                  <button class="btn btn-outline" style="border-color:var(--text-primary); color:var(--text-primary);" onclick="addNewQuestionToExam('essay')">
+                    <span class="material-icons" aria-hidden="true">add</span> سؤال مقالي كتابي
+                  </button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- تبويب سجل نتائج الطلاب (تصدير واستيراد النتائج) -->
+          <div id="teacher-tab-results" class="teacher-tab-panel hidden" role="tabpanel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">سجلات نتائج الطلاب</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">إدارة النتائج محلياً وسحابياً وتنزيلها ورفعها بالـ JSON/CSV</div>
+              </div>
+              
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button id="teacher-export-results-btn" class="btn btn-outline btn-sm">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download</span> تصدير Excel (CSV)
+                </button>
+                <button id="teacher-export-results-json" class="btn btn-outline btn-sm">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download_for_offline</span> تصدير النتائج (JSON)
+                </button>
+                <button id="teacher-import-results-btn" class="btn btn-outline btn-sm" style="border-color: var(--secondary); color:var(--secondary);">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">upload_file</span> استيراد نتائج (JSON)
+                </button>
+                <input type="file" id="teacher-results-file-input" style="display: none;" accept=".json">
+                
+                <button id="teacher-clear-results-btn" class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">delete</span> مسح السجلات
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>اسم الطالب</th>
+                    <th>رقم ID</th>
+                    <th>الامتحان</th>
+                    <th>النتيجة</th>
+                    <th>التاريخ والوقت</th>
+                    <th>الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody id="teacher-results-table-body">
+                  <!-- تعبأ ديناميكياً -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- تبويب ربط جوجل شيتس واستيراد جوجل فورم -->
+          <div id="teacher-tab-integration" class="teacher-tab-panel hidden" role="tabpanel">
+            
+            <!-- قسم الاستيراد والتصدير مع جوجل فورم -->
+            <div class="panel-header">
+              <div class="panel-title">استيراد امتحانات من Google Forms</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">استورد اختبارات جاهزة من جوجل فورم عبر لصق الكود المصدري للنموذج بالأسفل</div>
+            </div>
+
+            <div class="config-card-box">
+              <div class="form-group">
+                <label class="form-label" for="teacher-import-exam-source">كود الـ HTML للنموذج أو كود الـ JSON المصدّر:</label>
+                <textarea id="teacher-import-exam-source" class="essay-textarea" placeholder="قم بنسخ كود المصدر (Source Code) لصفحة معاينة النموذج ولصقها هنا بالكامل، ليقوم التطبيق بتفكيك واستيراد جميع الأسئلة والخيارات والأنواع تلقائياً..."></textarea>
+              </div>
+              <button id="teacher-import-exam-btn" class="btn btn-primary">
+                <span class="material-icons" aria-hidden="true">download</span> تحليل واستيراد الامتحان للمنصة
+              </button>
+              
+              <div style="margin-top: 1rem; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6;">
+                <strong>طريقة الاستيراد:</strong> افتح نموذج Google Form كمعاينة للطلاب، اضغط بزر الماوس الأيمن واختر "عرض كود مصدر الصفحة" (View Page Source) أو اختصار <code style="color:white">Ctrl + U</code>، انسخ كل الكود البرمجي بالصفحة والصقه في الصندوق بالأعلى واضغط استيراد.
+              </div>
+            </div>
+
+            <!-- إعدادات مزامنة جوجل شيتس -->
+            <div class="panel-header" style="margin-top: 3rem;">
+              <div class="panel-title">إعدادات مزامنة Google Sheets السحابية</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">ربط تلقائي لترحيل الدرجات، الأسئلة المقالية والبيانات الأكاديمية</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-config-code">رمز حماية لوحة المعلم (الرقم السري الحالي):</label>
+              <input type="password" id="teacher-config-code" class="form-control" placeholder="تعيين رقم سري جديد للدخول للوحة الإدارة">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-config-url">رابط المزامنة (Google Form Submit URL):</label>
+              <input type="text" id="teacher-config-url" class="form-control" placeholder="https://docs.google.com/forms/d/e/XXXX/formResponse">
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
+              <div class="form-group">
+                <label class="form-label" for="teacher-config-name">معرف حقل الاسم (Name Entry ID):</label>
+                <input type="text" id="teacher-config-name" class="form-control" placeholder="entry.11111">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="teacher-config-id">معرف حقل الـ ID (Student ID Entry):</label>
+                <input type="text" id="teacher-config-id" class="form-control" placeholder="entry.22222">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
+              <div class="form-group">
+                <label class="form-label" for="teacher-config-code-id">معرف كود الاشتراك / الامتحان الأكاديمي:</label>
+                <input type="text" id="teacher-config-code-id" class="form-control" placeholder="entry.33333">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="teacher-config-score">معرف حقل النتيجة (Score Entry ID):</label>
+                <input type="text" id="teacher-config-score" class="form-control" placeholder="entry.44444">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-config-details">معرف تقرير الإجابات التفصيلي والإجابات المقالية:</label>
+              <input type="text" id="teacher-config-details" class="form-control" placeholder="entry.55555">
+            </div>
+
+            <button id="save-teacher-integration-btn" class="btn btn-primary" style="margin-top: 1rem; margin-bottom: 2rem;">
+              <span class="material-icons" aria-hidden="true">save</span> حفظ إعدادات التكامل
+            </button>
+          </div>
+
+          <!-- تبويب الملف الشخصي للمعلم -->
+          <div id="teacher-tab-profile" class="teacher-tab-panel hidden" role="tabpanel">
+            <div class="panel-header">
+              <div class="panel-title">تعديل البيانات الشخصية</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب</div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-profile-name">اسم المعلم:</label>
+              <div class="input-wrapper">
+                <input type="text" id="teacher-profile-name" class="form-control" placeholder="أدخل اسم المعلم ثلاثياً...">
+                <span class="material-icons input-icon" aria-hidden="true">person</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-profile-subject">اسم الفرع / المادة التعليمية الافتراضية:</label>
+              <div class="input-wrapper">
+                <input type="text" id="teacher-profile-subject" class="form-control" placeholder="مثال: لغة عربية - النحو والبلاغة">
+                <span class="material-icons input-icon" aria-hidden="true">subject</span>
+              </div>
+            </div>
+
+            <button id="save-teacher-profile-btn" class="btn btn-primary" style="margin-top: 1rem;">
+              <span class="material-icons" aria-hidden="true">save</span> حفظ الملف الشخصي
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
+  <script src="questions.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
