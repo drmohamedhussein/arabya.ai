@@ -636,6 +636,40 @@
                   </div>
                 </div>
 
+                <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
+                <h4 style="color:var(--accent); margin-top: 1.5rem; margin-bottom: 1rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">الربط والمزامنة السحابية الخاصة بهذا الامتحان (اختياري):</h4>
+                <div class="form-group">
+                  <label class="form-label" for="edit-meta-google-url">رابط المزامنة السحابية المخصص لهذا الامتحان (Google Form Submit URL / Web App):</label>
+                  <input type="text" id="edit-meta-google-url" class="form-control" placeholder="اتركه فارغاً لاستخدام رابط المعلم العام المعتمد..." style="border-color: rgba(245, 158, 11, 0.3);">
+                  <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">إذا وضعت رابطاً هنا، سيقوم النظام بإرسال درجات هذا الامتحان تحديداً إليه. إذا تركته فارغاً، فسيتم المزامنة عبر رابط المعلم العام الموضح بتبويب (الربط).</small>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-top:0.5rem; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-entry-name">معرف حقل الاسم:</label>
+                    <input type="text" id="edit-meta-entry-name" class="form-control" placeholder="مثال: entry.11111">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-entry-id">معرف حقل الـ ID:</label>
+                    <input type="text" id="edit-meta-entry-id" class="form-control" placeholder="مثال: entry.22222">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-entry-code">معرف حقل كود الاشتراك/الميتا:</label>
+                    <input type="text" id="edit-meta-entry-code" class="form-control" placeholder="مثال: entry.33333">
+                  </div>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-entry-score">معرف حقل الدرجة:</label>
+                    <input type="text" id="edit-meta-entry-score" class="form-control" placeholder="مثال: entry.44444">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-entry-details">معرف حقل تفاصيل الإجابات:</label>
+                    <input type="text" id="edit-meta-entry-details" class="form-control" placeholder="مثال: entry.55555">
+                  </div>
+                </div>
+
                 <!-- صندوق عرض ونسخ الرابط المباشر للامتحان للطلاب -->
                 <div class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(20, 184, 166, 0.05); border-color: rgba(20, 184, 166, 0.2);">
                   <div>

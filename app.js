@@ -904,6 +904,12 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-university").value = exam.university || "";
   document.getElementById("edit-meta-type").value = exam.examType || "أعمال فصلية";
   document.getElementById("edit-meta-totalscore").value = exam.totalScore || 100;
+  document.getElementById("edit-meta-google-url").value = exam.googleFormUrl || "";
+  document.getElementById("edit-meta-entry-name").value = exam.entryName || "";
+  document.getElementById("edit-meta-entry-id").value = exam.entryId || "";
+  document.getElementById("edit-meta-entry-code").value = exam.entryCode || "";
+  document.getElementById("edit-meta-entry-score").value = exam.entryScore || "";
+  document.getElementById("edit-meta-entry-details").value = exam.entryDetails || "";
 
   // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
   const examUrl = getExamDirectLink(exam);
@@ -1039,6 +1045,12 @@ function saveAllEditedQuestions() {
   const editUniversity = document.getElementById("edit-meta-university").value.trim();
   const editType = document.getElementById("edit-meta-type").value;
   const editTotalScore = parseFloat(document.getElementById("edit-meta-totalscore").value) || 100;
+  const editGoogleUrl = document.getElementById("edit-meta-google-url").value.trim();
+  const editEntryName = document.getElementById("edit-meta-entry-name").value.trim();
+  const editEntryId = document.getElementById("edit-meta-entry-id").value.trim();
+  const editEntryCode = document.getElementById("edit-meta-entry-code").value.trim();
+  const editEntryScore = document.getElementById("edit-meta-entry-score").value.trim();
+  const editEntryDetails = document.getElementById("edit-meta-entry-details").value.trim();
 
   if (!editTitle || !editSubject || !editLevel || !editFaculty || !editUniversity) {
     alert("يرجى ملء جميع حقول بيانات الامتحان الأكاديمية المطلوبة!");
@@ -1052,6 +1064,12 @@ function saveAllEditedQuestions() {
   exam.university = editUniversity;
   exam.examType = editType;
   exam.totalScore = editTotalScore;
+  exam.googleFormUrl = editGoogleUrl;
+  exam.entryName = editEntryName;
+  exam.entryId = editEntryId;
+  exam.entryCode = editEntryCode;
+  exam.entryScore = editEntryScore;
+  exam.entryDetails = editEntryDetails;
 
   // 2. تحديث وحفظ الأسئلة وأوزان درجاتها
   const cards = document.querySelectorAll("#editor-questions-list .exam-builder-card");
@@ -1872,10 +1890,28 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
 
 // المزامنة مع جوجل شيتس (تدعم Web Apps ونماذج جوجل)
 function sendResultToGoogleSheets(scoreString, details) {
-  const config = systemState.config;
+  const exam = systemState.currentExam;
+  
+  // التحقق إن كان الامتحان له ربط مخصص وإلا نستخدم الإعدادات العامة للمعلم
+  let googleFormUrl = systemState.config.googleFormUrl;
+  let entryName = systemState.config.entryName;
+  let entryId = systemState.config.entryId;
+  let entryCode = systemState.config.entryCode;
+  let entryScore = systemState.config.entryScore;
+  let entryDetails = systemState.config.entryDetails;
+
+  if (exam && exam.googleFormUrl) {
+    googleFormUrl = exam.googleFormUrl;
+    entryName = exam.entryName || "";
+    entryId = exam.entryId || "";
+    entryCode = exam.entryCode || "";
+    entryScore = exam.entryScore || "";
+    entryDetails = exam.entryDetails || "";
+  }
+
   const statusEl = document.getElementById("runner-res-sync-status");
   
-  if (!config.googleFormUrl) {
+  if (!googleFormUrl) {
     if (statusEl) {
       statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> تم حفظ النتيجة على المنصة محلياً (المزامنة مع جوجل غير مفعلة)`;
     }
@@ -1887,7 +1923,7 @@ function sendResultToGoogleSheets(scoreString, details) {
   }
 
   // التحقق إن كان الرابط هو Google Web App (ينتهي بـ /exec أو يحتوي على macros/s)
-  const isWebApp = config.googleFormUrl.includes("/macros/s/") || config.googleFormUrl.endsWith("/exec");
+  const isWebApp = googleFormUrl.includes("/macros/s/") || googleFormUrl.endsWith("/exec");
 
   if (isWebApp) {
     // ترحيل مباشر عبر Google Apps Script Web App (JSON POST)
@@ -1896,12 +1932,12 @@ function sendResultToGoogleSheets(scoreString, details) {
       name: systemState.currentStudent.name,
       id: systemState.currentStudent.id,
       subscriptionCode: systemState.currentStudent.accessCode,
-      examTitle: systemState.currentExam.title,
+      examTitle: exam ? exam.title : "امتحان",
       score: scoreString,
       details: details
     };
 
-    fetch(config.googleFormUrl, {
+    fetch(googleFormUrl, {
       method: "POST",
       mode: "no-cors",
       headers: { "Content-Type": "application/json" },
@@ -1921,16 +1957,16 @@ function sendResultToGoogleSheets(scoreString, details) {
   } else {
     // ترحيل تقليدي عبر نموذج جوجل فورم
     const formData = new URLSearchParams();
-    formData.append(config.entryName, systemState.currentStudent.name);
-    formData.append(config.entryId, systemState.currentStudent.id);
+    formData.append(entryName, systemState.currentStudent.name);
+    formData.append(entryId, systemState.currentStudent.id);
     
-    const fullMeta = `${systemState.currentExam.title} | ${systemState.currentExam.university} | ${systemState.currentExam.faculty} | ${systemState.currentExam.level} | ${systemState.currentExam.examType} [كود: ${systemState.currentStudent.accessCode}]`;
+    const fullMeta = exam ? `${exam.title} | ${exam.university} | ${exam.faculty} | ${exam.level} | ${exam.examType} [كود: ${systemState.currentStudent.accessCode}]` : `كود: ${systemState.currentStudent.accessCode}`;
     
-    formData.append(config.entryCode, fullMeta);
-    formData.append(config.entryScore, scoreString);
-    formData.append(config.entryDetails, details);
+    formData.append(entryCode, fullMeta);
+    formData.append(entryScore, scoreString);
+    formData.append(entryDetails, details);
 
-    fetch(config.googleFormUrl, {
+    fetch(googleFormUrl, {
       method: "POST",
       mode: "no-cors",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
