@@ -41,6 +41,12 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+/* تمكين نسخ ولصق واختيار النصوص داخل الحقول والمدخلات */
+input, textarea, select, [contenteditable="true"] {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 body {
   background-color: var(--bg-dark);
   background-image: 
