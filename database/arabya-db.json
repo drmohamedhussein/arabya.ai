@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-05-29T22:31:30.066Z",
+  "updatedAt": "2026-05-29T22:32:31.464Z",
   "source": "arabya.net",
   "teachers": [
     {
-      "name": "معلم اللغة العربية",
+      "name": "د. محمد حسين محمد",
       "username": "معلم اللغة العربية",
-      "subject": "اللغة العربية وآدابها",
+      "subject": "النحو والصرف",
       "password": "TEACHER2026",
       "autoEntryCode": "TEACHER2026",
       "integrationConfig": {
-        "googleFormUrl": "",
+        "googleFormUrl": "https://script.google.com/macros/s/AKfycbys8gg5jrscGI4C7AJjg7Zl4p7U06dR2lxQIs1-CJjTLo_ZTQqzxeyPKykS_ZdhSqn1/exec",
         "entryName": "",
         "entryId": "",
         "entryCode": "",
@@ -301,6 +301,16 @@
     },
     {
       "at": "2026-05-29T22:31:30.066Z",
+      "reason": "save_backup",
+      "counts": {
+        "teachers": 1,
+        "students": 1,
+        "exams": 2,
+        "results": 0
+      }
+    },
+    {
+      "at": "2026-05-29T22:32:31.464Z",
       "reason": "save_backup",
       "counts": {
         "teachers": 1,
