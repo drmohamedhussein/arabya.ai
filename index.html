@@ -635,6 +635,15 @@
                     <input type="number" id="edit-meta-totalscore" class="form-control" min="1">
                   </div>
                 </div>
+
+                <!-- صندوق عرض ونسخ الرابط المباشر للامتحان للطلاب -->
+                <div class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(20, 184, 166, 0.05); border-color: rgba(20, 184, 166, 0.2);">
+                  <div>
+                    <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">الرابط المباشر للطلاب لأداء هذا الامتحان:</span>
+                    <input type="text" id="edit-exam-direct-link" class="exam-link-input" style="color: var(--secondary);" readonly>
+                  </div>
+                  <button class="btn btn-primary btn-sm" onclick="copyExamLink(document.getElementById('edit-exam-direct-link').value)">نسخ الرابط</button>
+                </div>
               </div>
 
               <!-- حاوية عرض الأسئلة لتعديل الأوزان والبدائل والمقالي -->

@@ -47,6 +47,7 @@ let systemState = {
   
   isExamActive: false,
   isCheatingSuspended: false,
+  cheatViolations: 0,
   
   // إعدادات التكامل مع جوجل شيت
   config: {
@@ -242,12 +243,28 @@ function navigateToView(viewId) {
   }
 }
 
+// دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
+function getUrlParameter(name) {
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has(name)) {
+    return urlParams.get(name);
+  }
+  
+  // فحص معاملات الرابط بعد علامة # إذا تم كتابة الرابط بصيغة hash
+  const hash = window.location.hash;
+  if (hash.includes('?')) {
+    const hashParams = new URLSearchParams(hash.split('?')[1]);
+    if (hashParams.has(name)) {
+      return hashParams.get(name);
+    }
+  }
+  return null;
+}
+
 // فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 function checkUrlParameters() {
-  const urlParams = new URLSearchParams(window.location.search);
-  
   // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
-  const autoCode = urlParams.get("teacher_autocode");
+  const autoCode = getUrlParameter("teacher_autocode");
   if (autoCode) {
     const matched = systemState.teachers.find(t => t.autoEntryCode === autoCode);
     if (matched) {
@@ -259,8 +276,8 @@ function checkUrlParameters() {
   }
   
   // 2. الدخول التلقائي للمعلم عبر اسم المستخدم وكلمة المرور
-  const user = urlParams.get("teacher_username");
-  const pass = urlParams.get("teacher_pass");
+  const user = getUrlParameter("teacher_username");
+  const pass = getUrlParameter("teacher_pass");
   if (user && pass) {
     const matched = systemState.teachers.find(t => t.username.toLowerCase() === user.toLowerCase() && t.password === pass);
     if (matched) {
@@ -272,7 +289,7 @@ function checkUrlParameters() {
   }
 
   // 3. التحقق من وجود المعلم وتجهيز الإعدادات لتصفية الامتحانات ومزامنة الدرجات
-  const teacherUser = urlParams.get("teacher");
+  const teacherUser = getUrlParameter("teacher");
   if (teacherUser) {
     const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
     const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
@@ -292,7 +309,7 @@ function checkUrlParameters() {
   }
 
   // 4. فتح امتحان مخصص للطالب
-  const examId = urlParams.get("exam");
+  const examId = getUrlParameter("exam");
   if (examId) {
     const targetExam = systemState.exams.find(e => e.id === examId);
     if (targetExam) {
@@ -547,7 +564,7 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-config-details").value = systemState.activeTeacher.integrationConfig?.entryDetails || "";
 
   // توليد وعرض رابط الدخول التلقائي للمعلم
-  const baseUrl = window.location.href.split('?')[0];
+  const baseUrl = window.location.href.split('?')[0].split('#')[0];
   const autoUrl = `${baseUrl}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
   document.getElementById("teacher-auto-login-url").value = autoUrl;
 
@@ -662,7 +679,7 @@ function renderExamsList() {
     card.className = "exam-info-card";
     
     // ربط المعلم النشط بالرابط تلقائياً
-    const baseUrl = window.location.href.split('?')[0];
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
     const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
     const examUrl = `${baseUrl}?exam=${exam.id}${teacherParam}`;
     const totalExamScore = exam.totalScore || 100;
@@ -732,7 +749,7 @@ function createNewExam() {
   
   renderExamsList();
 
-  const baseUrl = window.location.href.split('?')[0];
+  const baseUrl = window.location.href.split('?')[0].split('#')[0];
   const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
   const examUrl = `${baseUrl}?exam=${examId}${teacherParam}`;
   
@@ -778,6 +795,15 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-university").value = exam.university || "";
   document.getElementById("edit-meta-type").value = exam.examType || "أعمال فصلية";
   document.getElementById("edit-meta-totalscore").value = exam.totalScore || 100;
+
+  // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
+  const baseUrl = window.location.href.split('?')[0].split('#')[0];
+  const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
+  const examUrl = `${baseUrl}?exam=${exam.id}${teacherParam}`;
+  const linkInput = document.getElementById("edit-exam-direct-link");
+  if (linkInput) {
+    linkInput.value = examUrl;
+  }
 
   renderQuestionsForEdit(exam);
 };
@@ -1400,6 +1426,7 @@ function validateStudentAndStart() {
   systemState.studentAnswers = {};
   systemState.isExamActive = true;
   systemState.isCheatingSuspended = false;
+  systemState.cheatViolations = 0;
 
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
@@ -1952,11 +1979,11 @@ function setupAntiCheatHandlers() {
   document.addEventListener("keydown", e => {
     if (
       e.key === "F12" || 
-      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c")) ||
-      (e.ctrlKey && (e.key === "U" || e.key === "u"))
+      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c" || e.key === "K" || e.key === "k" || e.key === "E" || e.key === "e")) ||
+      (e.ctrlKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s"))
     ) {
       e.preventDefault();
-      alert("حظر: غير مصرح بفتح أدوات المطور أثناء الامتحان!");
+      alert("حظر: غير مصرح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
       return false;
     }
 
@@ -1982,6 +2009,9 @@ function triggerRunnerCheatPenalty(reason) {
     clearInterval(systemState.timer.intervalId);
   }
 
+  // زيادة عدد الانتهاكات
+  systemState.cheatViolations++;
+
   const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
   if (currentQ.type === "essay") {
     systemState.studentAnswers[currentQ.id] = "(ملغي - تم كشف محاولة غش/تصوير)";
@@ -1996,18 +2026,95 @@ function triggerRunnerCheatPenalty(reason) {
   overlay.classList.remove("hidden");
 
   const msg = document.getElementById("runner-cheat-msg");
-  if (reason === "screenshot") {
-    msg.innerText = "لقد حاولت التقاط لقطة شاشة للامتحان! تم تعتيم الصفحة بالكامل وإلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي.";
-  } else {
-    msg.innerText = "لقد حاولت الخروج من صفحة أو تبويب الامتحان! تم إلغاء السؤال الحالي وتصفير درجته تلقائياً والانتقال للسؤال التالي.";
-  }
+  
+  if (systemState.cheatViolations >= 2) {
+    // الانتهاك الثاني -> إلغاء الامتحان بالكامل فوراً وتصفير الدرجة
+    msg.innerHTML = `
+      <span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان وتصفير النتيجة!</span>
+      لقد قمت بمحاولة الغش أو الخروج من صفحة الامتحان للمرة الثانية متجاوزاً الحد المسموح به. تم إنهاء اختبارك نهائياً وحرمانك من التقديم.
+    `;
+    
+    // تصفير جميع درجات الأسئلة وتعيينها كغش
+    systemState.shuffledQuestions.forEach(q => {
+      if (systemState.studentAnswers[q.id] === undefined) {
+        if (q.type === "essay") {
+          systemState.studentAnswers[q.id] = "(ملغي - غش متكرر)";
+        } else {
+          systemState.studentAnswers[q.id] = -2;
+        }
+      }
+    });
 
-  setTimeout(() => {
-    overlay.classList.add("hidden");
-    mainWrapper.classList.remove("blurred-content");
-    systemState.isCheatingSuspended = false;
-    runnerNextQuestion(true);
-  }, 3500);
+    setTimeout(() => {
+      overlay.classList.add("hidden");
+      mainWrapper.classList.remove("blurred-content");
+      systemState.isCheatingSuspended = false;
+      systemState.isExamActive = false;
+      
+      // توثيق وحفظ النتيجة كـ "راسب/ملغي بسبب الغش"
+      submitCheatedExam();
+    }, 4500);
+    
+  } else {
+    // الانتهاك الأول -> تحذير وإلغاء السؤال الحالي فقط
+    if (reason === "screenshot") {
+      msg.innerHTML = `
+        <span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير أول (تصوير شاشة)</span>
+        لقد حاولت التقاط لقطة شاشة للامتحان! تم إلغاء السؤال الحالي وتصفير درجته. انتبه: أي محاولة أخرى ستؤدي لإلغاء الامتحان بالكامل تلقائياً!
+      `;
+    } else {
+      msg.innerHTML = `
+        <span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير أول (خروج من الصفحة)</span>
+        لقد حاولت الخروج من صفحة أو تبويب الامتحان! تم إلغاء السؤال الحالي وتصفير درجته. انتبه: أي محاولة أخرى ستؤدي لإلغاء الامتحان بالكامل تلقائياً!
+      `;
+    }
+
+    setTimeout(() => {
+      overlay.classList.add("hidden");
+      mainWrapper.classList.remove("blurred-content");
+      systemState.isCheatingSuspended = false;
+      runnerNextQuestion(true);
+    }, 4000);
+  }
+}
+
+function submitCheatedExam() {
+  const exam = systemState.currentExam;
+  const examTotalScore = exam.totalScore || 100;
+  const scoreString = `0 / ${examTotalScore} (ملغي - غش متكرر)`;
+  const detailsFormatted = "تم إلغاء الامتحان وتصفير النتيجة نهائياً لمخالفة تعليمات الاختبار وتكرار محاولة الغش أو الخروج من الصفحة.";
+
+  const resultObj = {
+    name: systemState.currentStudent.name,
+    id: systemState.currentStudent.id,
+    accessCode: systemState.currentStudent.accessCode,
+    examTitle: systemState.currentExam.title,
+    examId: systemState.currentExam.id,
+    university: systemState.currentExam.university,
+    faculty: systemState.currentExam.faculty,
+    level: systemState.currentExam.level,
+    examType: systemState.currentExam.examType,
+    score: scoreString,
+    details: detailsFormatted,
+    timestamp: new Date().toLocaleString("ar-EG")
+  };
+
+  systemState.results.push(resultObj);
+  localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+
+  sendResultToGoogleSheets(scoreString, detailsFormatted);
+  
+  // الانتقال لصفحة النتيجة مع تخصيص المظهر للغش
+  navigateToView("student-result-view");
+  document.getElementById("runner-res-score").innerText = "0";
+  document.getElementById("runner-res-total").innerText = examTotalScore;
+  document.getElementById("runner-res-name").innerText = systemState.currentStudent.name;
+  document.getElementById("runner-res-id").innerText = systemState.currentStudent.id;
+  document.getElementById("runner-res-title").innerText = `${systemState.currentExam.title} [${systemState.currentExam.examType}]`;
+  
+  const statusEl = document.getElementById("runner-res-status");
+  statusEl.innerText = "للأسف، تم إلغاء اختبارك وتصفير النتيجة نهائياً بسبب رصد محاولات غش متكررة أو الخروج من صفحة الاختبار.";
+  statusEl.style.color = "var(--error)";
 }
 
 function shuffle(array) {
