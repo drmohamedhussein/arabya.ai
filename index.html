@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>arabya.ai | منصة تعليم اللغة العربية والامتحانات الأكاديمية</title>
+  <title>ARABYA.NET | منصة تعليم اللغة العربية والامتحانات الأكاديمية</title>
   
   <!-- تحسينات SEO ومحركات البحث -->
   <meta name="description" content="المنصة العربية الأولى المدعومة بالذكاء الاصطناعي لتعليم فروع اللغة العربية (نحو، بلاغة، أدب)، التدقيق اللغوي والنحوي، والامتحانات الأكاديمية المؤمنة بالكامل ضد الغش.">
   <meta name="keywords" content="اللغة العربية, ذكاء اصطناعي, امتحانات اونلاين, معلم اللغة العربية, تدقيق لغوي, كتب عربية">
-  <meta name="author" content="arabya.ai">
+  <meta name="author" content="ARABYA.NET">
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -31,9 +31,9 @@
   <!-- شريط التنقل العلوي (Navbar) -->
   <header class="navbar" role="banner">
     <nav class="nav-container" role="navigation" aria-label="القائمة الرئيسية">
-      <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي arabya.ai">
-        <img src="logo.png" alt="شعار منصة arabya.ai" class="logo-img-tag">
-        <span>arabya<span class="ai-text">.ai</span></span>
+      <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي ARABYA.NET">
+        <img src="logo.jpg" alt="شعار منصة ARABYA.NET" class="logo-img-tag">
+        <span>ARABYA<span class="net-text">.NET</span></span>
       </a>
       
       <ul class="nav-links" role="menubar">
@@ -52,26 +52,45 @@
      * 1. صفحة الهبوط الرئيسية (Landing Page)
      * ========================================== -->
     <section id="welcome-view" class="view-section" aria-label="الصفحة الرئيسية الترحيبية">
-      <div class="hero-section">
-        <div class="hero-tagline">مستقبل اللغة العربية بالذكاء الاصطناعي</div>
-        <h1 class="hero-title">المنصة الأكاديمية الشاملة لعلوم لغة الضاد والتقييم الذكي</h1>
-        <p class="hero-desc">
-          بوابة متكاملة تدعم المعلمين في بناء امتحانات جامعية ومدرسية مقالية وموضوعية مؤمنة كلياً ضد الغش، وتقدم للطلاب تجارب تعليمية ذكية وتدقيقاً لغوياً فورياً ومكتبة لبيع وشراء الكتب.
-        </p>
-        <div class="hero-cta">
-          <button class="btn btn-primary" onclick="navigateToView('student-login-view')" aria-label="الانتقال لبوابة الطلاب">
-            <span class="material-icons">school</span> دخول بوابة الطلاب
-          </button>
-          <button class="btn btn-outline" onclick="navigateToView('teacher-login-view')" aria-label="الانتقال لبوابة المعلمين">
-            <span class="material-icons">badge</span> لوحة تحكم المعلمين
-          </button>
+      <div class="hero-container">
+        <div class="hero-content">
+          <div class="hero-tagline">منصة ARABYA.NET التعليمية الذكية</div>
+          <h1 class="hero-title">المنصة الأكاديمية الأولى لعلوم لغة الضاد والدراسات الإسلامية والتقييم الذكي</h1>
+          <p class="hero-desc">
+            بوابة تفاعلية شاملة تمكّن المعلمين من تصميم اختبارات جامعية ومدرسية مقالية وموضوعية مؤمنة كلياً ضد محاولات الغش، وتقدم للطلاب تجربة دراسية مرنة تدعم ضعاف البصر والمكفوفين، مع ربط مباشر لترحيل النتائج تلقائياً لجداول جوجل.
+          </p>
+          <div class="hero-cta">
+            <button class="btn btn-primary" onclick="navigateToView('student-login-view')" aria-label="الانتقال لبوابة الطلاب">
+              <span class="material-icons">school</span> دخول بوابة الطلاب
+            </button>
+            <button class="btn btn-outline" onclick="navigateToView('teacher-login-view')" aria-label="الانتقال لبوابة المعلمين">
+              <span class="material-icons">badge</span> لوحة تحكم المعلمين
+            </button>
+          </div>
+          <div class="hero-stats">
+            <div class="stat-item">
+              <span class="stat-number">+10,000</span>
+              <span class="stat-label">طالب نشط</span>
+            </div>
+            <div class="stat-item" style="border-right: 1px solid var(--border-color); padding-right: 1.5rem;">
+              <span class="stat-number">+500</span>
+              <span class="stat-label">معلم مسجل</span>
+            </div>
+            <div class="stat-item" style="border-right: 1px solid var(--border-color); padding-right: 1.5rem;">
+              <span class="stat-number">100%</span>
+              <span class="stat-label">امتحانات آمنة</span>
+            </div>
+          </div>
+        </div>
+        <div class="hero-image-wrapper">
+          <img src="hero_illustration.png" alt="توضيح تفاعلي لمنصة ARABYA.NET" class="hero-image-tag">
         </div>
       </div>
 
       <!-- شبكة الخدمات والمجالات -->
       <div class="section-title-wrapper">
-        <h2 class="section-title">خدمات ومجالات arabya.ai</h2>
-        <p class="section-subtitle">حلول أكاديمية ذكية لتمكين اللغة العربية وحوكمة اختباراتها</p>
+        <h2 class="section-title">خدمات ومجالات ARABYA.NET الأكاديمية</h2>
+        <p class="section-subtitle">حلول ذكية متكاملة لتمكين اللغة العربية والعلوم الشريعية وحوكمة الاختبارات</p>
       </div>
 
       <div class="services-grid" role="region" aria-label="الخدمات والمجالات المتاحة">
@@ -126,7 +145,7 @@
     <section id="student-login-view" class="view-section hidden" aria-label="بوابة دخول الطالب">
       <div class="card">
         <div class="card-header">
-          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
           <h2 class="card-title">بوابة اختبارات الطلاب</h2>
           <p class="subtitle">يرجى تسجيل بياناتك واختيار المادة لبدء الامتحان</p>
         </div>
@@ -178,7 +197,7 @@
     <section id="student-register-view" class="view-section hidden" aria-label="بوابة تسجيل طالب جديد">
       <div class="card">
         <div class="card-header">
-          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
           <h2 class="card-title">تسجيل حساب طالب جديد</h2>
           <p class="subtitle">قم بإنشاء حسابك الأكاديمي باستخدام كود الاشتراك المرسل إليك</p>
         </div>
@@ -316,7 +335,7 @@
     <section id="result-search-view" class="view-section hidden" aria-label="بوابة الاستعلام عن النتائج">
       <div class="card">
         <div class="card-header">
-          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
           <h2 class="card-title">بوابة الاستعلام عن النتائج</h2>
           <p class="subtitle">ابحث عن نتائجك باستخدام الاسم بالكامل، أو رقم المعرف (ID)، أو كود الاشتراك</p>
         </div>
@@ -346,7 +365,7 @@
     <section id="teacher-login-view" class="view-section hidden" aria-label="بوابة تسجيل دخول المعلم">
       <div class="card" style="max-width: 500px;">
         <div class="card-header">
-          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
           <h2 class="card-title">بوابة الدخول للمعلمين</h2>
           <p class="subtitle">أدخل بيانات المعلم المسجل للوصول للوحة التحكم</p>
         </div>
@@ -381,7 +400,7 @@
     <section id="teacher-register-view" class="view-section hidden" aria-label="بوابة تسجيل حساب معلم جديد">
       <div class="card" style="max-width: 550px;">
         <div class="card-header">
-          <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
+          <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin: 0 auto 1rem; width: 60px; height: 60px;">
           <h2 class="card-title" style="color: var(--accent);">تسجيل حساب معلم جديد</h2>
           <p class="subtitle">أنشئ حسابك كمعلم على المنصة وقم بتهيئة رمز الدخول التلقائي</p>
         </div>
@@ -447,8 +466,8 @@
         <!-- القائمة الجانبية للمعلم -->
         <aside class="teacher-sidebar">
           <div style="text-align: center; margin-bottom: 2rem;">
-            <img src="logo.png" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
-            <h4 style="color:white; font-size:1.1rem; font-weight:700;">لوحة إدارة arabya.ai</h4>
+            <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
+            <h4 style="color:white; font-size:1.1rem; font-weight:700;">لوحة إدارة ARABYA.NET</h4>
             <span style="font-size: 0.8rem; color:var(--text-muted);" id="teacher-sidebar-subtitle">حساب المعلم الأكاديمي</span>
           </div>
           
@@ -859,9 +878,9 @@
   <footer class="footer" role="contentinfo">
     <div class="footer-container">
       <div class="footer-brand">
-        <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي arabya.ai">
-          <img src="logo.png" alt="شعار منصة arabya.ai" class="logo-img-tag">
-          <span>arabya<span class="ai-text">.ai</span></span>
+        <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي ARABYA.NET">
+          <img src="logo.jpg" alt="شعار منصة ARABYA.NET" class="logo-img-tag">
+          <span>ARABYA<span class="net-text">.NET</span></span>
         </a>
         <p class="footer-desc">
           المنصة التعليمية الأكاديمية الشاملة لعلوم لغة الضاد والدراسات الإسلامية والتقييم والامتحانات الذكية المؤمنة كلياً ضد الغش.
@@ -884,13 +903,13 @@
         <h4>تطوير ودعم المنصة</h4>
         <p class="dev-signature">تم التطوير من خلال <strong>EGYWEBDEV</strong></p>
         <a href="https://wa.me/201037890525" target="_blank" class="btn btn-primary btn-sm dev-contact-btn" style="margin-top:0.5rem; text-decoration:none;" aria-label="تواصل مع المطور عبر واتساب">
-          <span class="material-icons">phone</span> +20 10 37890525 (واتساب)
+          <span class="material-icons">phone</span> +201037890525
         </a>
       </div>
     </div>
     
     <div class="footer-bottom">
-      <p>&copy; 2026 arabya.ai. جميع الحقوق محفوظة لعلوم اللغة العربية والدراسات الأكاديمية.</p>
+      <p>&copy; 2026 ARABYA.NET. جميع الحقوق محفوظة لعلوم اللغة العربية والدراسات الأكاديمية.</p>
     </div>
   </footer>
 

@@ -271,7 +271,27 @@ function checkUrlParameters() {
     }
   }
 
-  // 3. فتح امتحان مخصص للطالب
+  // 3. التحقق من وجود المعلم وتجهيز الإعدادات لتصفية الامتحانات ومزامنة الدرجات
+  const teacherUser = urlParams.get("teacher");
+  if (teacherUser) {
+    const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+    const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
+    if (matchedTeacher) {
+      systemState.config = {
+        teacherCode: matchedTeacher.password,
+        googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+        entryName: matchedTeacher.integrationConfig?.entryName || "",
+        entryId: matchedTeacher.integrationConfig?.entryId || "",
+        entryCode: matchedTeacher.integrationConfig?.entryCode || "",
+        entryScore: matchedTeacher.integrationConfig?.entryScore || "",
+        entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
+        autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
+      };
+      systemState.targetTeacherUsername = matchedTeacher.username;
+    }
+  }
+
+  // 4. فتح امتحان مخصص للطالب
   const examId = urlParams.get("exam");
   if (examId) {
     const targetExam = systemState.exams.find(e => e.id === examId);
@@ -497,7 +517,8 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-config-details").value = systemState.activeTeacher.integrationConfig?.entryDetails || "";
 
   // توليد وعرض رابط الدخول التلقائي للمعلم
-  const autoUrl = `${window.location.origin}${window.location.pathname}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
+  const baseUrl = window.location.href.split('?')[0];
+  const autoUrl = `${baseUrl}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
   document.getElementById("teacher-auto-login-url").value = autoUrl;
 
   renderExamsList();
@@ -598,16 +619,22 @@ function renderExamsList() {
   const container = document.getElementById("teacher-exams-list");
   container.innerHTML = "";
 
-  if (systemState.exams.length === 0) {
+  const activeUsername = systemState.activeTeacher ? systemState.activeTeacher.username : "معلم اللغة العربية";
+  const teacherExams = systemState.exams.filter(exam => !exam.teacher || exam.teacher === activeUsername);
+
+  if (teacherExams.length === 0) {
     container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; color: var(--text-muted); padding: 2rem;">لا توجد امتحانات مضافة بعد. أنشئ امتحاناً بالأسفل!</div>`;
     return;
   }
 
-  systemState.exams.forEach(exam => {
+  teacherExams.forEach(exam => {
     const card = document.createElement("div");
     card.className = "exam-info-card";
     
-    const examUrl = `${window.location.origin}${window.location.pathname}?exam=${exam.id}`;
+    // ربط المعلم النشط بالرابط تلقائياً
+    const baseUrl = window.location.href.split('?')[0];
+    const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
+    const examUrl = `${baseUrl}?exam=${exam.id}${teacherParam}`;
     const totalExamScore = exam.totalScore || 100;
 
     card.innerHTML = `
@@ -653,6 +680,7 @@ function createNewExam() {
 
   const newExam = {
     id: examId,
+    teacher: systemState.activeTeacher ? systemState.activeTeacher.username : "معلم اللغة العربية",
     title,
     subject,
     level,
@@ -674,7 +702,10 @@ function createNewExam() {
   
   renderExamsList();
 
-  const examUrl = `${window.location.origin}${window.location.pathname}?exam=${examId}`;
+  const baseUrl = window.location.href.split('?')[0];
+  const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
+  const examUrl = `${baseUrl}?exam=${examId}${teacherParam}`;
+  
   const directLinkBox = document.getElementById("new-exam-direct-link-box");
   const directLinkInput = document.getElementById("new-exam-direct-link-input");
   
@@ -1103,10 +1134,11 @@ function importExamFromGoogleForm() {
 
   if (importedExam) {
     importedExam.id = "EXAM_" + Math.random().toString(36).substr(2, 6).toUpperCase();
+    importedExam.teacher = systemState.activeTeacher ? systemState.activeTeacher.username : "معلم اللغة العربية";
     if (!importedExam.subject) importedExam.subject = "لغة عربية (مستورد)";
     if (!importedExam.level) importedExam.level = "الفرقة الأولى";
     if (!importedExam.faculty) importedExam.faculty = "كلية اللغة العربية";
-    if (!importedExam.university) importedExam.university = "جامعة arabya.ai";
+    if (!importedExam.university) importedExam.university = "جامعة ARABYA.NET";
     if (!importedExam.examType) importedExam.examType = "أعمال فصلية";
     if (!importedExam.totalScore) importedExam.totalScore = 100;
 
@@ -1283,7 +1315,14 @@ function populateExamSelectionList() {
 
   select.disabled = false;
   select.innerHTML = `<option value="" disabled selected>-- اختر الامتحان الذي ترغب في أدائه --</option>`;
-  systemState.exams.forEach(exam => {
+  
+  // تصفية الامتحانات لتظهر فقط امتحانات المعلم المرتبط بالرابط إن وجد
+  let filteredExams = systemState.exams;
+  if (systemState.targetTeacherUsername) {
+    filteredExams = systemState.exams.filter(exam => exam.teacher === systemState.targetTeacherUsername || !exam.teacher);
+  }
+
+  filteredExams.forEach(exam => {
     const opt = document.createElement("option");
     opt.value = exam.id;
     opt.innerText = `${exam.title} (${exam.subject})`;
@@ -2158,3 +2197,53 @@ window.importStudentsFromJSON = function(event) {
   reader.readAsText(file);
   event.target.value = "";
 };
+
+// ==========================================
+// 10. وظيفة نسخ رابط الامتحان بنجاح وتوافقية
+// ==========================================
+window.copyExamLink = function(url) {
+  if (!url) {
+    alert("رابط الامتحان غير صالح!");
+    return;
+  }
+  
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url)
+      .then(() => {
+        alert("تم نسخ رابط الامتحان بنجاح!");
+      })
+      .catch(err => {
+        fallbackCopyTextToClipboard(url);
+      });
+  } else {
+    fallbackCopyTextToClipboard(url);
+  }
+};
+
+function fallbackCopyTextToClipboard(text) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  
+  // Avoid scrolling to bottom
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    const successful = document.execCommand('copy');
+    if (successful) {
+      alert("تم نسخ رابط الامتحان بنجاح!");
+    } else {
+      alert("فشل نسخ الرابط تلقائياً، يرجى نسخه يدوياً.");
+    }
+  } catch (err) {
+    alert("حدث خطأ أثناء نسخ الرابط، يرجى نسخه يدوياً.");
+  }
+
+  document.body.removeChild(textArea);
+}
