@@ -66,31 +66,12 @@ let systemState = {
 // 1. تهيئة النظام عند التحميل
 // ==========================================
 document.addEventListener("DOMContentLoaded", () => {
-  // ===== فحص localStorage قبل أي شيء =====
-  try {
-    localStorage.setItem("arabya_test", "ok");
-    const t = localStorage.getItem("arabya_test");
-    localStorage.removeItem("arabya_test");
-    if (t !== "ok") throw new Error("localStorage read/write mismatch");
-  } catch(lsErr) {
-    alert("⚠️ تحذير: لا يمكن الوصول إلى ذاكرة التخزين المحلي (localStorage). قد يكون المتصفح في وضع التصفح الخاص أو تم تعطيل التخزين. لن يتم حفظ أي بيانات!");
-    console.error("localStorage unavailable:", lsErr);
-  }
-
   initDatabase();
   setupNavigation();
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
-
-  // ===== تشخيص ما تم تحميله =====
-  console.log(`[ARABYA] تم تحميل قاعدة البيانات:`,
-    `معلمون=${systemState.teachers.length}`,
-    `امتحانات=${systemState.exams.length}`,
-    `طلاب=${systemState.students.length}`,
-    `نتائج=${systemState.results.length}`
-  );
-
+  
   // استعادة جلسة الطالب النشطة إن وجدت ومنع ضياع الإجابات
   const savedSession = localStorage.getItem("arabya_active_student_session");
   if (savedSession) {
@@ -108,6 +89,7 @@ document.addEventListener("DOMContentLoaded", () => {
             systemState.studentAnswers = session.studentAnswers;
             systemState.cheatViolations = session.cheatViolations || 0;
             systemState.isExamActive = true;
+            
             navigateToView("exam-runner-view");
             renderRunnerQuestion();
             startRunnerTimerWithTime(session.timeRemaining || 60);
@@ -303,36 +285,6 @@ function saveSystemState(syncToCloud = true) {
     autoSyncToCloud();
   }
 }
-
-// ===== أداة التشخيص السريع - اكتب arabya_diagnose() في الكونسول =====
-window.arabya_diagnose = function() {
-  const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-  const exams    = JSON.parse(localStorage.getItem("arabya_exams_db") || "[]");
-  const students = JSON.parse(localStorage.getItem("arabya_students_db") || "[]");
-  const results  = JSON.parse(localStorage.getItem("arabya_results_db") || "[]");
-  const report = {
-    "💾 localStorage": {
-      "معلمون (arabya_teachers_db)": teachers.length,
-      "امتحانات (arabya_exams_db)": exams.length,
-      "طلاب (arabya_students_db)": students.length,
-      "نتائج (arabya_results_db)": results.length,
-    },
-    "🧠 systemState (RAM)": {
-      "معلمون": systemState.teachers.length,
-      "امتحانات": systemState.exams.length,
-      "طلاب": systemState.students.length,
-      "نتائج": systemState.results.length,
-    },
-    "🔗 رابط المزامنة": systemState.config?.googleFormUrl || "(غير مُعيَّن)",
-    "📦 بيانات المعلم النشط": systemState.activeTeacher?.username || "(لا يوجد)"
-  };
-  console.table(report["💾 localStorage"]);
-  console.table(report["🧠 systemState (RAM)"]);
-  console.log("🔗 رابط المزامنة:", report["🔗 رابط المزامنة"]);
-  console.log("👤 المعلم النشط:", report["📦 بيانات المعلم النشط"]);
-  alert(`✅ التشخيص:\n\nمحلي: معلمون=${teachers.length} | امتحانات=${exams.length} | طلاب=${students.length} | نتائج=${results.length}\n\nذاكرة: معلمون=${systemState.teachers.length} | امتحانات=${systemState.exams.length} | طلاب=${systemState.students.length} | نتائج=${systemState.results.length}\n\nالمزامنة: ${systemState.config?.googleFormUrl || "(غير مُعيَّنة)"}`);
-  return report;
-};
 
 // المزامنة التلقائية مع جوجل شيت
 function autoSyncToCloud() {
@@ -2051,20 +2003,13 @@ function validateStudentAndStart() {
       timestamp: new Date().toLocaleDateString("ar-EG")
     };
     systemState.students.push(newStudent);
-    // حفظ محلي فوري لضمان عدم ضياع بيانات الطالب
-    try {
-      localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
-    } catch(e) { console.error("فشل حفظ الطالب:", e); }
+    saveSystemState(false); // حفظ محلي فقط دون مزامنة سحابية لتسريع البدء
   } else {
     // تحديث الاسم أو الكود إن تغيّر
     let changed = false;
     if (code && matchedStudent.code !== code) { matchedStudent.code = code; changed = true; }
     if (matchedStudent.name !== name) { matchedStudent.name = name; changed = true; }
-    if (changed) {
-      try {
-        localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
-      } catch(e) { console.error("فشل تحديث الطالب:", e); }
-    }
+    if (changed) saveSystemState(false);
   }
 
   systemState.currentStudent = { name, id, accessCode: code || "لا يوجد" };
@@ -2409,15 +2354,7 @@ function submitFinishedExam() {
   };
 
   systemState.results.push(resultObj);
-  // حفظ فوري ومباشر في localStorage لضمان عدم ضياع البيانات
-  try {
-    localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
-    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
-    console.log("[ARABYA] ✅ تم حفظ نتيجة الطالب محلياً:", resultObj.name, resultObj.score);
-  } catch(e) {
-    console.error("[ARABYA] ❌ فشل حفظ النتيجة:", e);
-  }
-  saveSystemState(true); // حفظ كامل + مزامنة سحابية
+  saveSystemState(true);
 
   sendResultToGoogleSheets(scoreString, detailsFormatted);
   showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
@@ -2630,34 +2567,18 @@ function renderStudentResultsTable() {
   });
 }
 
-window.viewTeacherResultDetail = function(studentId, examId) {
-  // البحث بمعيار id + examId (أو id فقط كحالة بديلة)
-  const res = systemState.results.find(r =>
-    (r.id === studentId && r.examId === examId) ||
-    (r.id === studentId && !r.examId && examId === "")
-  );
-  if (!res) {
-    alert("لم يتم العثور على سجل هذا الطالب!");
+window.viewTeacherResultDetail = function(id, examId) {
+  const res = systemState.results.find(r => r.id === id && r.examId === examId);
+  if (!res) return;
+
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) {
+    alert("عذراً، لم يتم العثور على الامتحان المرتبط بهذه النتيجة في قاعدة البيانات حالياً (قد يكون تم حذفه).");
     return;
   }
 
-  const exam = systemState.exams.find(e => e.id === (res.examId || examId));
-  // إذا حُذف الامتحان، نبني بيانات سؤال وهمية من التفاصيل المحفوظة
-  const examForDisplay = exam || {
-    title: res.examTitle || "امتحان محذوف",
-    totalScore: 100,
-    questions: Object.keys(res.questionScores || {}).map((qId, idx) => ({
-      id: parseInt(qId),
-      type: "multiple",
-      question: `سؤال ${idx + 1}`,
-      options: ["لا يوجد"],
-      correctAnswer: 0,
-      points: res.questionScores[qId] || 10
-    }))
-  };
-
   systemState.currentGradingResult = res;
-  systemState.currentGradingExam = examForDisplay; // نستخدم examForDisplay دائماً
+  systemState.currentGradingExam = exam;
 
   const panel = document.getElementById("teacher-result-detail-panel");
   if (panel) {
@@ -2669,7 +2590,7 @@ window.viewTeacherResultDetail = function(studentId, examId) {
   document.getElementById("detail-stu-name").innerText = res.name;
   document.getElementById("detail-stu-id").innerText = res.id;
   document.getElementById("detail-stu-code").innerText = res.accessCode || "لا يوجد";
-  document.getElementById("detail-exam-title").innerText = res.examTitle || examForDisplay.title;
+  document.getElementById("detail-exam-title").innerText = res.examTitle;
   document.getElementById("detail-exam-date").innerText = res.timestamp;
   document.getElementById("detail-total-score-input").value = res.score;
 
@@ -2680,7 +2601,7 @@ window.viewTeacherResultDetail = function(studentId, examId) {
   if (!container) return;
   container.innerHTML = "";
 
-  (examForDisplay.questions || []).forEach((q, index) => {
+  exam.questions.forEach((q, index) => {
     const studentAns = res.studentAnswers[q.id];
     
     // تهيئة الدرجة إذا كانت فارغة للموضوعي
@@ -2915,7 +2836,7 @@ function exportTeacherResultsToCSV() {
 function clearTeacherResults() {
   if (confirm("هل أنت متأكد من رغبتك في حذف جميع نتائج وسجلات الطلاب نهائياً؟ (لا يمكن التراجع عن ذلك)")) {
     systemState.results = [];
-    localStorage.setItem("arabya_results_db", "[]"); // حفظ مصفوفة فارغة بدلاً من حذف المفتاح
+    localStorage.removeItem("arabya_results_db");
     renderStudentResultsTable();
     alert("تم مسح كافة سجلات الطلاب بنجاح!");
   }
@@ -3253,7 +3174,14 @@ window.saveNewStudentByTeacher = function() {
   const code = document.getElementById("new-student-code").value.trim();
 
   if (!name || !id || !code) {
-    alert("يرجى ملء جميع الحقول المطلوبة (الاسم، ID، كود الاشتراك)!");
+    alert("يرجى ملء جميع الحقول المطلوبة!");
+    return;
+  }
+
+  // التحقق من أن الكود يتكون من 5 أرقام بالضبط
+  const isFiveDigits = /^\d{5}$/.test(code);
+  if (!isFiveDigits) {
+    alert("عذراً، يجب أن يتكون كود الاشتراك من 5 أرقام فقط (أرقام فقط وبطول 5 خانات)!");
     return;
   }
 
