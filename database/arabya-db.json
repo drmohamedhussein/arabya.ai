@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-05-29T22:45:33.087Z",
+  "updatedAt": "2026-05-29T23:35:59.262Z",
   "source": "arabya.net",
   "teachers": [
     {
@@ -293,7 +293,23 @@
       "timeLimit": 60
     }
   ],
-  "results": [],
+  "results": [
+    {
+      "recordId": "test-agent-001",
+      "timestamp": "2026-05-29T12:00:00Z",
+      "name": "اختبار وكيل",
+      "id": "999",
+      "accessCode": "TEST",
+      "examTitle": "امتحان تجريبي",
+      "examId": "exam-test",
+      "university": "جامعة",
+      "faculty": "كلية",
+      "level": "1",
+      "examType": "mcq",
+      "score": "5/10",
+      "details": "تفاصيل"
+    }
+  ],
   "auditLog": [
     {
       "at": "2026-05-29T22:30:31.196Z",
@@ -343,6 +359,16 @@
         "students": 2,
         "exams": 2,
         "results": 0
+      }
+    },
+    {
+      "at": "2026-05-29T23:35:59.262Z",
+      "reason": "add_result",
+      "counts": {
+        "teachers": 1,
+        "students": 2,
+        "exams": 2,
+        "results": 1
       }
     }
   ]
