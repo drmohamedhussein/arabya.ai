@@ -275,11 +275,42 @@ function saveSystemState(syncToCloud = true) {
 
 // المزامنة التلقائية مع جوجل شيت
 function autoSyncToCloud() {
-  let googleFormUrl = systemState.config.googleFormUrl;
-  if (!googleFormUrl) return;
+  const urls = new Set();
+  
+  if (systemState.config && systemState.config.googleFormUrl) {
+    const url = systemState.config.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (exam.googleFormUrl) {
+        const url = exam.googleFormUrl.trim();
+        if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+          urls.add(url);
+        }
+      }
+    });
+  }
 
-  const isWebApp = googleFormUrl.includes("/macros/s/") || googleFormUrl.endsWith("/exec");
-  if (!isWebApp) return;
+  const urlList = Array.from(urls);
+  const indicator = document.getElementById("cloud-sync-status-indicator");
+
+  if (urlList.length === 0) {
+    if (indicator) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (أدخل رابط الويب اب لتمكين المزامنة)`;
+    }
+    return;
+  }
 
   const dbBackup = {
     teachers: systemState.teachers,
@@ -293,27 +324,281 @@ function autoSyncToCloud() {
     data: dbBackup
   };
 
-  fetch(googleFormUrl, {
-    method: "POST",
-    mode: "no-cors",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  })
-  .then(() => {
-    console.log("Auto-synced database to Google Sheets successfully.");
-    const indicator = document.getElementById("cloud-sync-status-indicator");
-    if (indicator) {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--success); font-size:1.1rem; vertical-align:middle;">cloud_done</span> المزامنة التلقائية مع جوجل شيت نشطة ومحدثة`;
-    }
-  })
-  .catch(err => {
-    console.error("Auto-sync to cloud failed:", err);
-    const indicator = document.getElementById("cloud-sync-status-indicator");
-    if (indicator) {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--error); font-size:1.1rem; vertical-align:middle;">cloud_off</span> فشل المزامنة التلقائية (تحقق من اتصال الإنترنت أو رابط الويب اب)`;
-    }
+  let successCount = 0;
+  let failCount = 0;
+  const total = urlList.length;
+
+  if (indicator) {
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري المزامنة التلقائية مع (${total}) من شيتات جوجل...`;
+  }
+
+  urlList.forEach(url => {
+    fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(() => {
+      successCount++;
+      updateIndicator();
+    })
+    .catch(err => {
+      console.error("Auto-sync to cloud failed for url:", url, err);
+      failCount++;
+      updateIndicator();
+    });
   });
+
+  function updateIndicator() {
+    if (successCount + failCount === total) {
+      if (indicator) {
+        if (failCount === 0) {
+          indicator.innerHTML = `<span class="material-icons" style="color:var(--success); font-size:1.1rem; vertical-align:middle;">cloud_done</span> المزامنة التلقائية نشطة ومحدثة بنجاح (${successCount}/${total})`;
+        } else if (successCount > 0) {
+          indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> تم مزامنة بعض الشيتات (${successCount}/${total}) وفشل البعض الآخر`;
+        } else {
+          indicator.innerHTML = `<span class="material-icons" style="color:var(--error); font-size:1.1rem; vertical-align:middle;">cloud_off</span> فشل المزامنة التلقائية لجميع الشيتات (تحقق من اتصال الإنترنت أو النشر)`;
+        }
+      }
+    }
+  }
 }
+
+// حفظ نسخة احتياطية سحابية يدوياً
+window.backupDatabaseToCloud = function() {
+  const urls = new Set();
+  
+  if (systemState.config && systemState.config.googleFormUrl) {
+    const url = systemState.config.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (exam.googleFormUrl) {
+        const url = exam.googleFormUrl.trim();
+        if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+          urls.add(url);
+        }
+      }
+    });
+  }
+
+  const urlList = Array.from(urls);
+  if (urlList.length === 0) {
+    alert("يرجى إدخال رابط ويب اب (Web App URL) في إعدادات التكامل أو في إعدادات الامتحان أولاً لتمكين النسخ الاحتياطي السحابي!");
+    return;
+  }
+
+  const dbBackup = {
+    teachers: systemState.teachers,
+    students: systemState.students,
+    exams: systemState.exams,
+    results: systemState.results
+  };
+
+  const payload = {
+    action: "save_backup",
+    data: dbBackup
+  };
+
+  let successCount = 0;
+  let failCount = 0;
+  const total = urlList.length;
+
+  const btnBackup = document.getElementById("btn-cloud-backup");
+  const originalText = btnBackup ? btnBackup.innerHTML : "";
+  if (btnBackup) {
+    btnBackup.disabled = true;
+    btnBackup.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري الرفع السحابي...`;
+  }
+
+  let completed = 0;
+  urlList.forEach(url => {
+    fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(() => {
+      successCount++;
+      checkCompletion();
+    })
+    .catch(err => {
+      console.error("Manual backup failed for URL:", url, err);
+      failCount++;
+      checkCompletion();
+    });
+  });
+
+  function checkCompletion() {
+    completed++;
+    if (completed === total) {
+      if (btnBackup) {
+        btnBackup.disabled = false;
+        btnBackup.innerHTML = originalText;
+      }
+      
+      autoSyncToCloud();
+
+      if (failCount === 0) {
+        alert(`تم حفظ النسخة الاحتياطية سحابياً بنجاح على جميع جداول جوجل شيتس (${successCount}/${total})!`);
+      } else if (successCount > 0) {
+        alert(`تم حفظ النسخة الاحتياطية على (${successCount}/${total}) من الجداول وفشل الرفع على البعض الآخر.`);
+      } else {
+        alert("فشل حفظ النسخة الاحتياطية سحابياً. يرجى التحقق من اتصالك بالإنترنت وصلاحيات تطبيق الويب (نشر لـ Anyone).");
+      }
+    }
+  }
+};
+
+// استعادة النسخة الاحتياطية سحابياً يدوياً
+window.restoreDatabaseFromCloud = function() {
+  const urls = new Set();
+  
+  if (systemState.config && systemState.config.googleFormUrl) {
+    const url = systemState.config.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
+    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+      urls.add(url);
+    }
+  }
+  
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (exam.googleFormUrl) {
+        const url = exam.googleFormUrl.trim();
+        if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+          urls.add(url);
+        }
+      }
+    });
+  }
+
+  const urlList = Array.from(urls);
+  if (urlList.length === 0) {
+    alert("يرجى إدخال رابط ويب اب (Web App URL) أولاً لتمكين استعادة النسخة الاحتياطية!");
+    return;
+  }
+
+  if (!confirm("تحذير: سيقوم هذا باستبدال قاعدة البيانات الحالية بالكامل بالبيانات المستعادة من جوجل شيت. هل ترغب في الاستمرار؟")) {
+    return;
+  }
+
+  const btnRestore = document.getElementById("btn-cloud-restore");
+  const originalText = btnRestore ? btnRestore.innerHTML : "";
+  if (btnRestore) {
+    btnRestore.disabled = true;
+    btnRestore.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري جلب البيانات...`;
+  }
+
+  let index = 0;
+  
+  function tryFetchNext() {
+    if (index >= urlList.length) {
+      if (btnRestore) {
+        btnRestore.disabled = false;
+        btnRestore.innerHTML = originalText;
+      }
+      alert("فشل استعادة قاعدة البيانات من جميع الروابط المتاحة. تأكد من قيامك برفع نسخة احتياطية أولاً، وصحة إعدادات النشر (Anyone).");
+      return;
+    }
+
+    const rawUrl = urlList[index];
+    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+
+    console.log("Restoring from URL:", fetchUrl);
+
+    fetch(fetchUrl, {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    })
+    .then(res => {
+      if (!res.ok) {
+        throw new Error("HTTP error " + res.status);
+      }
+      return res.json();
+    })
+    .then(response => {
+      if (response && response.status === "success" && response.data) {
+        const data = response.data;
+        
+        if (data.teachers && Array.isArray(data.teachers)) {
+          systemState.teachers = data.teachers;
+          localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+        }
+        if (data.students && Array.isArray(data.students)) {
+          systemState.students = data.students;
+          localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+        }
+        if (data.exams && Array.isArray(data.exams)) {
+          systemState.exams = data.exams;
+          localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+        }
+        if (data.results && Array.isArray(data.results)) {
+          systemState.results = data.results;
+          localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+        }
+
+        if (btnRestore) {
+          btnRestore.disabled = false;
+          btnRestore.innerHTML = originalText;
+        }
+
+        alert("تم استعادة قاعدة البيانات بنجاح من جوجل شيت! سيتم إعادة تحميل الصفحة لتطبيق التغييرات.");
+        location.reload();
+      } else {
+        throw new Error(response ? response.message : "Invalid response format");
+      }
+    })
+    .catch(err => {
+      console.error(`Failed to restore from URL: ${rawUrl}`, err);
+      index++;
+      tryFetchNext();
+    });
+  }
+
+  tryFetchNext();
+};
+
+// نسخ كود الربط السحابي (Apps Script)
+window.copyGoogleSheetsSyncScript = function() {
+  const code = document.getElementById("google-sheets-sync-script-code");
+  if (code) {
+    navigator.clipboard.writeText(code.value).then(() => {
+      alert("تم نسخ كود الربط السحابي بنجاح! اتبع الخطوات الموضحة بالصفحة للصقه في Apps Script ونشره.");
+    }).catch(err => {
+      code.select();
+      try {
+        const successful = document.execCommand('copy');
+        if (successful) {
+          alert("تم نسخ كود الربط السحابي بنجاح!");
+        } else {
+          alert("فشل نسخ الكود تلقائياً، يرجى نسخه يدوياً.");
+        }
+      } catch (e) {
+        alert("فشل نسخ الكود تلقائياً، يرجى نسخه يدوياً.");
+      }
+    });
+  }
+};
 
 // إعداد نظام التوجيه والتنقل بين الصفحات
 function setupNavigation() {
@@ -769,9 +1054,26 @@ function loadTeacherDashboardData() {
 
   const indicator = document.getElementById("cloud-sync-status-indicator");
   if (indicator) {
-    const url = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
-    if (url && (url.includes("/macros/s/") || url.endsWith("/exec"))) {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال`;
+    const urls = new Set();
+    if (systemState.config && systemState.config.googleFormUrl) {
+      const url = systemState.config.googleFormUrl.trim();
+      if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
+    }
+    if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+      const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
+      if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
+    }
+    if (Array.isArray(systemState.exams)) {
+      systemState.exams.forEach(exam => {
+        if (exam.googleFormUrl) {
+          const url = exam.googleFormUrl.trim();
+          if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
+        }
+      });
+    }
+    
+    if (urls.size > 0) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال (${urls.size} من الجداول)`;
     } else {
       indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (أدخل رابط الويب اب لتمكين المزامنة)`;
     }
@@ -867,6 +1169,18 @@ function saveTeacherIntegrationConfig() {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   
+  // تحديث مؤشر المزامنة فوراً بعد الحفظ
+  const indicator = document.getElementById("cloud-sync-status-indicator");
+  if (indicator) {
+    if (url && (url.includes("/macros/s/") || url.endsWith("/exec"))) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال`;
+      // محاولة مزامنة أولى فورية
+      autoSyncToCloud();
+    } else {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (أدخل رابط الويب اب لتمكين المزامنة)`;
+    }
+  }
+
   alert("تم حفظ إعدادات التكامل ومزامنة شيتات جوجل بنجاح!");
 }
 
@@ -1208,6 +1522,28 @@ function saveAllEditedQuestions() {
 
   exam.questions = updatedQuestions;
   saveSystemState(true);
+  
+  // تحديث مؤشر حالة المزامنة بعد حفظ رابط الامتحان المخصص
+  const indicator = document.getElementById("cloud-sync-status-indicator");
+  if (indicator) {
+    const urls = new Set();
+    if (systemState.config && systemState.config.googleFormUrl) {
+      const u = systemState.config.googleFormUrl.trim();
+      if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
+    }
+    if (Array.isArray(systemState.exams)) {
+      systemState.exams.forEach(ex => {
+        if (ex.googleFormUrl) {
+          const u = ex.googleFormUrl.trim();
+          if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
+        }
+      });
+    }
+    if (urls.size > 0) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال (${urls.size} من الجداول)`;
+    }
+  }
+  
   alert("تم تعديل وحفظ بيانات الامتحان وكافة الأسئلة بنجاح!");
   
   // إعادة عرض

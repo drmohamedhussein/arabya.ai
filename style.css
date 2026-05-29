@@ -1218,3 +1218,14 @@ tr:hover td {
   font-size: 0.8rem;
   color: var(--text-muted);
 }
+
+/* أنيميشن الدوران المستخدم في أزرار المزامنة السحابية */
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* حالة المزامنة السحابية */
+.cloud-sync-active {
+  animation: spin 1s infinite linear;
+}
