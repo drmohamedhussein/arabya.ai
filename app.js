@@ -71,7 +71,31 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
-  checkUrlParameters();
+  
+  const wasRedirected = checkUrlParameters();
+  if (!wasRedirected) {
+    const savedView = localStorage.getItem("arabya_active_view");
+    if (savedView && savedView !== "exam-runner-view") {
+      if (savedView === "teacher-dashboard-view") {
+        const activeTeacherUsername = localStorage.getItem("arabya_active_teacher_username");
+        if (activeTeacherUsername) {
+          const matched = systemState.teachers.find(t => t.username === activeTeacherUsername);
+          if (matched) {
+            loginTeacherObject(matched);
+            navigateToView("teacher-dashboard-view");
+          } else {
+            navigateToView("teacher-login-view");
+          }
+        } else {
+          navigateToView("teacher-login-view");
+        }
+      } else {
+        navigateToView(savedView);
+      }
+    } else {
+      navigateToView("welcome-view");
+    }
+  }
 });
 
 // تهيئة قواعد البيانات المحلية
@@ -226,6 +250,7 @@ function navigateToView(viewId) {
   if (target) {
     target.classList.remove("hidden");
     systemState.activeView = viewId;
+    localStorage.setItem("arabya_active_view", viewId);
   }
   
   document.querySelectorAll(".nav-links a").forEach(link => {
@@ -244,6 +269,7 @@ function navigateToView(viewId) {
 }
 
 // دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
+// دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
 function getUrlParameter(name) {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.has(name)) {
@@ -261,8 +287,36 @@ function getUrlParameter(name) {
   return null;
 }
 
+// دالة موحدة لتوليد الرابط المباشر للامتحان (تدعم المسارات الحقيقية بدون هاش على خوادم الويب)
+function getExamDirectLink(exam) {
+  const teacherParam = systemState.activeTeacher ? `?teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
+  
+  if (window.location.protocol === "file:") {
+    // تشغيل محلي من الملفات
+    const baseUrl = window.location.href.split('?')[0].split('#')[0];
+    return `${baseUrl}?exam=${exam.id}${teacherParam}`;
+  }
+  
+  // تشغيل من خادم ويب (مثل arabya.net)
+  let origin = window.location.origin;
+  let pathname = window.location.pathname;
+  
+  // تنظيف اسم الملف index.html إن وجد في نهاية المسار
+  if (pathname.endsWith("index.html")) {
+    pathname = pathname.replace("index.html", "");
+  }
+  if (!pathname.endsWith("/")) {
+    pathname += "/";
+  }
+  
+  return `${origin}${pathname}${exam.id}${teacherParam}`;
+}
+
+// فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 // فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 function checkUrlParameters() {
+  let redirected = false;
+
   // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
   const autoCode = getUrlParameter("teacher_autocode");
   if (autoCode) {
@@ -271,7 +325,7 @@ function checkUrlParameters() {
       loginTeacherObject(matched);
       navigateToView("teacher-dashboard-view");
       alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً عبر رمز الدخول السريع.`);
-      return;
+      return true;
     }
   }
   
@@ -284,7 +338,7 @@ function checkUrlParameters() {
       loginTeacherObject(matched);
       navigateToView("teacher-dashboard-view");
       alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً.`);
-      return;
+      return true;
     }
   }
 
@@ -308,8 +362,64 @@ function checkUrlParameters() {
     }
   }
 
-  // 4. فتح امتحان مخصص للطالب
-  const examId = getUrlParameter("exam");
+  // 4. فتح امتحان مخصص للطالب (عبر البارامتر ?exam=... أو عبر المسار الفرعي الحقيقي في pathname)
+  let examId = getUrlParameter("exam");
+  
+  // التحقق من المسار الحقيقي في pathname (مثال: /876KHK أو /online_exam_portal/876KHK)
+  if (!examId) {
+    const pathName = window.location.pathname;
+    const pathSegments = pathName.split('/').filter(s => s.length > 0 && s !== "index.html" && s !== "online_exam_portal");
+    if (pathSegments.length > 0) {
+      const lastSegment = pathSegments[pathSegments.length - 1];
+      const matchedExam = systemState.exams.find(e => e.id.toLowerCase() === lastSegment.toLowerCase());
+      if (matchedExam) {
+        examId = matchedExam.id;
+      }
+    }
+  }
+  
+  // 5. التحقق من وجود مسار هاش مخصص للامتحان (مثال: #/876KHK)
+  const hash = window.location.hash;
+  if (!examId && hash && hash.startsWith("#/")) {
+    const route = hash.substring(2); // ما بعد "#/"
+    let cleanRoute = route;
+    let queryInHash = "";
+    if (route.includes("?")) {
+      const parts = route.split("?");
+      cleanRoute = parts[0];
+      queryInHash = parts[1];
+    }
+    
+    // البحث عن الامتحان المطابق للرمز العشوائي المولد
+    const targetExam = systemState.exams.find(e => e.id.toLowerCase() === cleanRoute.toLowerCase());
+    if (targetExam) {
+      examId = targetExam.id;
+      
+      // تحليل معامل المعلم من داخل الهاش إن وجد
+      if (queryInHash) {
+        const hashParams = new URLSearchParams(queryInHash);
+        const teacherVal = hashParams.get("teacher");
+        if (teacherVal) {
+          const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+          const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
+          if (matchedTeacher) {
+            systemState.config = {
+              teacherCode: matchedTeacher.password,
+              googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+              entryName: matchedTeacher.integrationConfig?.entryName || "",
+              entryId: matchedTeacher.integrationConfig?.entryId || "",
+              entryCode: matchedTeacher.integrationConfig?.entryCode || "",
+              entryScore: matchedTeacher.integrationConfig?.entryScore || "",
+              entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
+              autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
+            };
+            systemState.targetTeacherUsername = matchedTeacher.username;
+          }
+        }
+      }
+    }
+  }
+
   if (examId) {
     const targetExam = systemState.exams.find(e => e.id === examId);
     if (targetExam) {
@@ -321,8 +431,11 @@ function checkUrlParameters() {
           select.disabled = true;
         }
       }, 100);
+      redirected = true;
     }
   }
+
+  return redirected;
 }
 
 // تسجيل دخول كائن معلم محدد وتطبيق إعداداته
@@ -679,9 +792,7 @@ function renderExamsList() {
     card.className = "exam-info-card";
     
     // ربط المعلم النشط بالرابط تلقائياً
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
-    const examUrl = `${baseUrl}?exam=${exam.id}${teacherParam}`;
+    const examUrl = getExamDirectLink(exam);
     const totalExamScore = exam.totalScore || 100;
 
     card.innerHTML = `
@@ -723,7 +834,7 @@ function createNewExam() {
     return;
   }
 
-  const examId = "EXAM_" + Math.random().toString(36).substr(2, 6).toUpperCase();
+  const examId = Math.random().toString(36).substr(2, 6).toUpperCase();
 
   const newExam = {
     id: examId,
@@ -749,9 +860,7 @@ function createNewExam() {
   
   renderExamsList();
 
-  const baseUrl = window.location.href.split('?')[0].split('#')[0];
-  const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
-  const examUrl = `${baseUrl}?exam=${examId}${teacherParam}`;
+  const examUrl = getExamDirectLink(newExam);
   
   const directLinkBox = document.getElementById("new-exam-direct-link-box");
   const directLinkInput = document.getElementById("new-exam-direct-link-input");
@@ -797,9 +906,7 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-totalscore").value = exam.totalScore || 100;
 
   // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
-  const baseUrl = window.location.href.split('?')[0].split('#')[0];
-  const teacherParam = systemState.activeTeacher ? `&teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
-  const examUrl = `${baseUrl}?exam=${exam.id}${teacherParam}`;
+  const examUrl = getExamDirectLink(exam);
   const linkInput = document.getElementById("edit-exam-direct-link");
   if (linkInput) {
     linkInput.value = examUrl;
@@ -1656,9 +1763,12 @@ function submitFinishedExam() {
 
   let hasEssay = false;
   let detailsLog = [];
+  
+  const studentAnswersMap = { ...systemState.studentAnswers };
+  const questionScoresMap = {};
 
   systemState.shuffledQuestions.forEach(q => {
-    const studentAns = systemState.studentAnswers[q.id];
+    const studentAns = studentAnswersMap[q.id];
     const qPoints = q.points !== undefined ? q.points : 10; // الوزن الفردي
     
     if (q.type === "essay") {
@@ -1666,6 +1776,7 @@ function submitFinishedExam() {
       totalEssayPoints += qPoints;
       const ansText = studentAns || "(لم يكتب الطالب إجابة)";
       detailsLog.push(`س مقالي (وزنها ${qPoints} نقاط): ${q.question} \n إجابة الطالب: ${ansText}\n-----------------`);
+      questionScoresMap[q.id] = 0; // يبدأ بـ 0 حتى يصححه المعلم يدوياً
     } else {
       objectiveQuestionsCount++;
       totalObjectivePoints += qPoints;
@@ -1674,6 +1785,9 @@ function submitFinishedExam() {
       if (isCorrect) {
         correctObjectiveCount++;
         totalEarnedPoints += qPoints; // إضافة الوزن
+        questionScoresMap[q.id] = qPoints;
+      } else {
+        questionScoresMap[q.id] = 0;
       }
       let studentAnsText = "لم تتم الإجابة";
       if (studentAns === -1) studentAnsText = "انتهى الوقت";
@@ -1716,7 +1830,9 @@ function submitFinishedExam() {
     examType: systemState.currentExam.examType,
     score: scoreString,
     details: detailsFormatted,
-    timestamp: new Date().toLocaleString("ar-EG")
+    timestamp: new Date().toLocaleString("ar-EG"),
+    studentAnswers: studentAnswersMap,
+    questionScores: questionScoresMap
   };
 
   systemState.results.push(resultObj);
@@ -1892,10 +2008,11 @@ window.viewResultDetailQuery = function(studentId, examId) {
 
 function renderStudentResultsTable() {
   const tbody = document.getElementById("teacher-results-table-body");
+  if (!tbody) return;
   tbody.innerHTML = "";
 
   if (systemState.results.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:2rem;">لا توجد سجلات مسجلة للطلاب حتى الآن.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem;">لا توجد سجلات مسجلة للطلاب حتى الآن.</td></tr>`;
     return;
   }
 
@@ -1905,7 +2022,8 @@ function renderStudentResultsTable() {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${res.name}</td>
-      <td>${res.id}</td>
+      <td><code>${res.id}</code></td>
+      <td><span style="color:var(--accent); font-weight:700;">${res.accessCode || "لا يوجد"}</span></td>
       <td>${res.examTitle} (${res.level || 'عام'})</td>
       <td style="font-weight:700; color:var(--secondary);">${res.score}</td>
       <td>${res.timestamp}</td>
@@ -1917,9 +2035,245 @@ function renderStudentResultsTable() {
 
 window.viewTeacherResultDetail = function(id, examId) {
   const res = systemState.results.find(r => r.id === id && r.examId === examId);
-  if (res) {
-    alert(`سجل إجابات الطالب الأكاديمية: ${res.name}\nالامتحان: ${res.examTitle}\nالمؤسسة: ${res.university} - ${res.faculty}\n\n${res.details}`);
+  if (!res) return;
+
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) {
+    alert("عذراً، لم يتم العثور على الامتحان المرتبط بهذه النتيجة في قاعدة البيانات حالياً (قد يكون تم حذفه).");
+    return;
   }
+
+  systemState.currentGradingResult = res;
+  systemState.currentGradingExam = exam;
+
+  const panel = document.getElementById("teacher-result-detail-panel");
+  if (panel) {
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  document.getElementById("detail-student-name").innerText = res.name;
+  document.getElementById("detail-stu-name").innerText = res.name;
+  document.getElementById("detail-stu-id").innerText = res.id;
+  document.getElementById("detail-stu-code").innerText = res.accessCode || "لا يوجد";
+  document.getElementById("detail-exam-title").innerText = res.examTitle;
+  document.getElementById("detail-exam-date").innerText = res.timestamp;
+  document.getElementById("detail-total-score-input").value = res.score;
+
+  if (!res.studentAnswers) res.studentAnswers = {};
+  if (!res.questionScores) res.questionScores = {};
+
+  const container = document.getElementById("detail-questions-container");
+  if (!container) return;
+  container.innerHTML = "";
+
+  exam.questions.forEach((q, index) => {
+    const studentAns = res.studentAnswers[q.id];
+    
+    // تهيئة الدرجة إذا كانت فارغة للموضوعي
+    if (q.type !== "essay" && res.questionScores[q.id] === undefined) {
+      res.questionScores[q.id] = (studentAns === q.correctAnswer) ? (q.points || 10) : 0;
+    }
+
+    const qPoints = q.points !== undefined ? q.points : 10;
+    const currentScore = res.questionScores[q.id] !== undefined ? res.questionScores[q.id] : 0;
+
+    const qCard = document.createElement("div");
+    qCard.className = "exam-builder-card";
+    qCard.style.background = "rgba(255,255,255,0.01)";
+    qCard.style.border = "1px solid var(--border-color)";
+    qCard.style.padding = "1.25rem";
+    qCard.style.borderRadius = "8px";
+
+    let questionTypeName = "اختيار من متعدد";
+    if (q.type === "boolean") questionTypeName = "صواب وخطأ";
+    if (q.type === "essay") questionTypeName = "سؤال مقالي";
+
+    qCard.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:0.5rem;">
+        <span style="font-weight:700; color:var(--secondary);">سؤال ${index + 1} (${questionTypeName})</span>
+        <span style="font-size:0.85rem; color:var(--text-muted);">وزن السؤال: ${qPoints} درجة</span>
+      </div>
+      <div style="font-size:1.1rem; color:white; margin-bottom:1rem; font-weight:600; line-height:1.6;">${q.question}</div>
+    `;
+
+    const body = document.createElement("div");
+
+    if (q.type === "essay") {
+      const textarea = document.createElement("textarea");
+      textarea.className = "essay-textarea edit-student-ans";
+      textarea.style.minHeight = "80px";
+      textarea.style.marginBottom = "0.75rem";
+      textarea.value = studentAns || "";
+      textarea.dataset.qId = q.id;
+
+      const scoreRow = document.createElement("div");
+      scoreRow.style.display = "flex";
+      scoreRow.style.alignItems = "center";
+      scoreRow.style.gap = "0.5rem";
+      scoreRow.innerHTML = `
+        <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات كحد أقصى</span>
+      `;
+
+      body.appendChild(textarea);
+      body.appendChild(scoreRow);
+    } else {
+      const select = document.createElement("select");
+      select.className = "form-control edit-student-ans";
+      select.style.marginBottom = "0.75rem";
+      select.style.appearance = "none";
+      select.dataset.qId = q.id;
+
+      const optUnanswered = document.createElement("option");
+      optUnanswered.value = "-1";
+      optUnanswered.innerText = "لم يتم الإجابة (انتهى الوقت)";
+      if (studentAns === -1 || studentAns === undefined) optUnanswered.selected = true;
+      select.appendChild(optUnanswered);
+
+      const optCheated = document.createElement("option");
+      optCheated.value = "-2";
+      optCheated.innerText = "ملغي (محاولة غش)";
+      if (studentAns === -2) optCheated.selected = true;
+      select.appendChild(optCheated);
+
+      q.options.forEach((optText, oIdx) => {
+        const option = document.createElement("option");
+        option.value = oIdx;
+        option.innerText = optText;
+        if (studentAns === oIdx) option.selected = true;
+        select.appendChild(option);
+      });
+
+      const indicator = document.createElement("div");
+      indicator.style.fontSize = "0.9rem";
+      indicator.style.marginBottom = "0.75rem";
+      
+      const isCorrect = (studentAns === q.correctAnswer);
+      if (isCorrect) {
+        indicator.innerHTML = `<span style="color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1.1rem; vertical-align:middle;">check_circle</span> إجابة الطالب صحيحة</span>`;
+      } else {
+        const correctText = q.options[q.correctAnswer] || "";
+        indicator.innerHTML = `<span style="color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1.1rem; vertical-align:middle;">cancel</span> إجابة الطالب خاطئة</span> (الإجابة النموذجية: ${correctText})`;
+      }
+
+      const scoreRow = document.createElement("div");
+      scoreRow.style.display = "flex";
+      scoreRow.style.alignItems = "center";
+      scoreRow.style.gap = "0.5rem";
+      scoreRow.innerHTML = `
+        <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات</span>
+      `;
+
+      select.addEventListener("change", (e) => {
+        const val = parseInt(e.target.value);
+        const scoreInput = scoreRow.querySelector(".edit-student-q-score");
+        if (scoreInput) {
+          if (val === q.correctAnswer) {
+            scoreInput.value = qPoints;
+          } else {
+            scoreInput.value = 0;
+          }
+        }
+      });
+
+      body.appendChild(select);
+      body.appendChild(indicator);
+      body.appendChild(scoreRow);
+    }
+
+    qCard.appendChild(body);
+    container.appendChild(qCard);
+  });
+};
+
+window.closeResultDetailPanel = function() {
+  const panel = document.getElementById("teacher-result-detail-panel");
+  if (panel) panel.classList.add("hidden");
+  systemState.currentGradingResult = null;
+  systemState.currentGradingExam = null;
+};
+
+window.saveTotalScoreManual = function() {
+  const res = systemState.currentGradingResult;
+  if (!res) return;
+
+  const inputVal = document.getElementById("detail-total-score-input").value.trim();
+  if (!inputVal) {
+    alert("يرجى إدخال قيمة النتيجة أولاً!");
+    return;
+  }
+
+  res.score = inputVal;
+  localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+  renderStudentResultsTable();
+  alert("تم تعديل النتيجة الإجمالية بنجاح!");
+};
+
+window.saveResultDetailsManual = function() {
+  const res = systemState.currentGradingResult;
+  const exam = systemState.currentGradingExam;
+  if (!res || !exam) return;
+
+  const ansInputs = document.querySelectorAll("#detail-questions-container .edit-student-ans");
+  const scoreInputs = document.querySelectorAll("#detail-questions-container .edit-student-q-score");
+
+  const newAnswers = {};
+  const newScores = {};
+  let totalEarnedPoints = 0;
+  let detailsLog = [];
+
+  ansInputs.forEach(input => {
+    const qId = parseInt(input.dataset.qId);
+    const q = exam.questions.find(quest => quest.id === qId);
+    if (q.type === "essay") {
+      newAnswers[qId] = input.value;
+    } else {
+      newAnswers[qId] = parseInt(input.value);
+    }
+  });
+
+  scoreInputs.forEach(input => {
+    const qId = parseInt(input.dataset.qId);
+    const val = parseFloat(input.value) || 0;
+    newScores[qId] = val;
+    totalEarnedPoints += val;
+  });
+
+  res.studentAnswers = newAnswers;
+  res.questionScores = newScores;
+
+  exam.questions.forEach(q => {
+    const ans = newAnswers[q.id];
+    const score = newScores[q.id];
+    const qPoints = q.points !== undefined ? q.points : 10;
+
+    if (q.type === "essay") {
+      detailsLog.push(`س مقالي (وزنها ${qPoints} نقاط): ${q.question} \n إجابة الطالب: ${ans || "(لم يكتب الطالب إجابة)"}\n [درجة السؤال المعدلة: ${score} من ${qPoints}]\n-----------------`);
+    } else {
+      let studentAnsText = "لم تتم الإجابة";
+      if (ans === -1) studentAnsText = "انتهى الوقت";
+      else if (ans === -2) studentAnsText = "ملغي (غش)";
+      else if (ans !== undefined && q.options[ans]) studentAnsText = q.options[ans];
+
+      const isCorrect = (ans === q.correctAnswer);
+      detailsLog.push(`س (وزنها ${qPoints} نقاط): ${q.question} | إجابة الطالب: ${studentAnsText} | الصحيحة: ${q.options[q.correctAnswer]} [درجة السؤال المعدلة: ${score} من ${qPoints}]`);
+    }
+  });
+
+  res.details = detailsLog.join("\n");
+
+  const manualTotalInput = document.getElementById("detail-total-score-input").value.trim();
+  res.score = manualTotalInput || `${totalEarnedPoints}/${exam.totalScore || 100} (درجة كلية)`;
+
+  localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+  
+  renderStudentResultsTable();
+  closeResultDetailPanel();
+  alert("تم حفظ كافة التعديلات، إجابات الطالب، والدرجات يدوياً بنجاح!");
 };
 
 function exportTeacherResultsToCSV() {
@@ -2084,6 +2438,12 @@ function submitCheatedExam() {
   const scoreString = `0 / ${examTotalScore} (ملغي - غش متكرر)`;
   const detailsFormatted = "تم إلغاء الامتحان وتصفير النتيجة نهائياً لمخالفة تعليمات الاختبار وتكرار محاولة الغش أو الخروج من الصفحة.";
 
+  const studentAnswersMap = { ...systemState.studentAnswers };
+  const questionScoresMap = {};
+  exam.questions.forEach(q => {
+    questionScoresMap[q.id] = 0;
+  });
+
   const resultObj = {
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
@@ -2096,7 +2456,9 @@ function submitCheatedExam() {
     examType: systemState.currentExam.examType,
     score: scoreString,
     details: detailsFormatted,
-    timestamp: new Date().toLocaleString("ar-EG")
+    timestamp: new Date().toLocaleString("ar-EG"),
+    studentAnswers: studentAnswersMap,
+    questionScores: questionScoresMap
   };
 
   systemState.results.push(resultObj);
@@ -2214,6 +2576,7 @@ function renderTeacherStudentsTable() {
       <td><span style="color:var(--accent); font-weight:700;">${s.code}</span></td>
       <td>${s.timestamp || 'غير معروف'}</td>
       <td>
+        <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary); padding: 0.25rem 0.5rem; margin-left:0.25rem;" onclick="editStudentByTeacher('${s.id}')">تعديل</button>
         <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.25rem 0.5rem;" onclick="deleteStudentByTeacher('${s.id}')">حذف</button>
       </td>
     `;
@@ -2224,7 +2587,14 @@ function renderTeacherStudentsTable() {
 // إظهار بطاقة إضافة طالب جديد
 window.showAddStudentModal = function() {
   const card = document.getElementById("add-student-form-card");
-  if (card) card.classList.remove("hidden");
+  if (card) {
+    card.classList.remove("hidden");
+    const heading = card.querySelector("h4");
+    if (heading) heading.innerText = "تسجيل حساب طالب جديد في النظام";
+    const saveBtn = card.querySelector("button[onclick='saveNewStudentByTeacher()']");
+    if (saveBtn) saveBtn.innerText = "حفظ الطالب والرمز";
+  }
+  systemState.editingStudentId = null;
 };
 
 // إخفاء بطاقة إضافة طالب جديد
@@ -2235,39 +2605,93 @@ window.hideAddStudentModal = function() {
     document.getElementById("new-student-name").value = "";
     document.getElementById("new-student-id").value = "";
     document.getElementById("new-student-code").value = "";
+    
+    const heading = card.querySelector("h4");
+    if (heading) heading.innerText = "تسجيل حساب طالب جديد في النظام";
+    const saveBtn = card.querySelector("button[onclick='saveNewStudentByTeacher()']");
+    if (saveBtn) saveBtn.innerText = "حفظ الطالب والرمز";
   }
+  systemState.editingStudentId = null;
 };
 
-// حفظ طالب جديد من قبل المعلم
+// حفظ طالب جديد أو تعديل بياناته من قبل المعلم
 window.saveNewStudentByTeacher = function() {
   const name = document.getElementById("new-student-name").value.trim();
   const id = document.getElementById("new-student-id").value.trim();
   const code = document.getElementById("new-student-code").value.trim();
 
   if (!name || !id || !code) {
-    alert("يرجى ملء جميع البيانات لإضافة الطالب!");
+    alert("يرجى ملء جميع الحقول المطلوبة!");
     return;
   }
 
-  // التحقق من عدم التكرار
-  const isDuplicate = systemState.students.some(s => s.id === id);
-  if (isDuplicate) {
-    alert("رقم المعرف ID هذا مسجل بالفعل لطالب آخر!");
+  // التحقق من أن الكود يتكون من 5 أرقام بالضبط
+  const isFiveDigits = /^\d{5}$/.test(code);
+  if (!isFiveDigits) {
+    alert("عذراً، يجب أن يتكون كود الاشتراك من 5 أرقام فقط (أرقام فقط وبطول 5 خانات)!");
     return;
   }
 
-  const studentObj = {
-    name,
-    id,
-    code,
-    timestamp: new Date().toLocaleDateString("ar-EG")
-  };
+  if (systemState.editingStudentId) {
+    // تعديل بيانات طالب موجود
+    const student = systemState.students.find(s => s.id === systemState.editingStudentId);
+    if (student) {
+      // التأكد من عدم تكرار الـ ID الجديد مع طالب آخر
+      const isDuplicate = systemState.students.some(s => s.id === id && s.id !== systemState.editingStudentId);
+      if (isDuplicate) {
+        alert("رقم المعرف ID الجديد مسجل بالفعل لطالب آخر!");
+        return;
+      }
+      student.name = name;
+      student.id = id;
+      student.code = code;
+      saveStudentsToLocalStorage();
+      renderTeacherStudentsTable();
+      hideAddStudentModal();
+      alert(`تم تعديل بيانات الطالب "${name}" بنجاح!`);
+    }
+  } else {
+    // إضافة طالب جديد
+    const isDuplicate = systemState.students.some(s => s.id === id);
+    if (isDuplicate) {
+      alert("رقم المعرف ID هذا مسجل بالفعل لطالب آخر!");
+      return;
+    }
 
-  systemState.students.push(studentObj);
-  saveStudentsToLocalStorage();
-  renderTeacherStudentsTable();
-  hideAddStudentModal();
-  alert(`تم تسجيل الطالب "${name}" وكود اشتراكه بنجاح!`);
+    const studentObj = {
+      name,
+      id,
+      code,
+      timestamp: new Date().toLocaleDateString("ar-EG")
+    };
+
+    systemState.students.push(studentObj);
+    saveStudentsToLocalStorage();
+    renderTeacherStudentsTable();
+    hideAddStudentModal();
+    alert(`تم تسجيل الطالب "${name}" وكود اشتراكه بنجاح!`);
+  }
+};
+
+// تعديل طالب من قبل المعلم
+window.editStudentByTeacher = function(studentId) {
+  const student = systemState.students.find(s => s.id === studentId);
+  if (!student) return;
+
+  systemState.editingStudentId = studentId;
+
+  const card = document.getElementById("add-student-form-card");
+  if (card) {
+    card.classList.remove("hidden");
+    const heading = card.querySelector("h4");
+    if (heading) heading.innerText = "تعديل بيانات حساب الطالب في النظام";
+    const saveBtn = card.querySelector("button[onclick='saveNewStudentByTeacher()']");
+    if (saveBtn) saveBtn.innerText = "حفظ التعديلات";
+  }
+
+  document.getElementById("new-student-name").value = student.name;
+  document.getElementById("new-student-id").value = student.id;
+  document.getElementById("new-student-code").value = student.code;
 };
 
 // حذف طالب بواسطة المعلم
@@ -2384,3 +2808,73 @@ function fallbackCopyTextToClipboard(text) {
 
   document.body.removeChild(textArea);
 }
+
+// تصدير قاعدة البيانات كاملة كملف JSON
+window.exportCompleteDatabase = function() {
+  const dbBackup = {
+    teachers: systemState.teachers,
+    students: systemState.students,
+    exams: systemState.exams,
+    results: systemState.results
+  };
+
+  const blob = new Blob([JSON.stringify(dbBackup, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `نسخة_احتياطية_كاملة_arabya_${new Date().toLocaleDateString("ar-EG")}.json`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  alert("تم تصدير نسخة احتياطية كاملة من قاعدة البيانات بنجاح!");
+};
+
+// استعادة قاعدة البيانات بالكامل من ملف JSON
+window.importCompleteDatabase = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data && (data.teachers || data.students || data.exams || data.results)) {
+        if (confirm("تحذير: سيقوم هذا باستبدال قاعدة البيانات الحالية بالكامل بالبيانات المستوردة. هل ترغب في الاستمرار؟")) {
+          if (data.teachers && Array.isArray(data.teachers)) {
+            systemState.teachers = data.teachers;
+            localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+          }
+          if (data.students && Array.isArray(data.students)) {
+            systemState.students = data.students;
+            localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+          }
+          if (data.exams && Array.isArray(data.exams)) {
+            systemState.exams = data.exams;
+            localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+          }
+          if (data.results && Array.isArray(data.results)) {
+            systemState.results = data.results;
+            localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+          }
+          
+          alert("تم استعادة قاعدة البيانات بنجاح! سيتم إعادة تحميل الصفحة لتطبيق التغييرات.");
+          location.reload();
+        }
+      } else {
+        alert("تنسيق الملف الاحتياطي غير صحيح!");
+      }
+    } catch (err) {
+      alert("خطأ في قراءة ملف النسخة الاحتياطية!");
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = "";
+};
+
+// تسجيل خروج المعلم نهائياً وتنظيف الجلسة
+window.logoutTeacher = function() {
+  localStorage.removeItem("arabya_active_teacher_username");
+  localStorage.removeItem("arabya_active_view");
+  systemState.activeTeacher = null;
+  location.reload();
+};

@@ -503,7 +503,7 @@
             <li class="teacher-menu-item" data-tab="profile" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">manage_accounts</span> الملف الشخصي للمعلم
             </li>
-            <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" onclick="location.reload();" role="none">
+            <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" onclick="logoutTeacher();" role="none">
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
             </li>
           </ul>
@@ -702,6 +702,7 @@
                   <tr>
                     <th>اسم الطالب</th>
                     <th>رقم ID</th>
+                    <th>كود الاشتراك</th>
                     <th>الامتحان</th>
                     <th>النتيجة</th>
                     <th>التاريخ والوقت</th>
@@ -712,6 +713,48 @@
                   <!-- تعبأ ديناميكياً -->
                 </tbody>
               </table>
+            </div>
+
+            <!-- لوحة تفاصيل وتعديل إجابات ونتيجة الطالب الفردية -->
+            <div id="teacher-result-detail-panel" class="exam-builder-card hidden" style="margin-top: 2rem; border-color: var(--secondary);">
+              <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
+                <div>
+                  <div class="panel-title" style="color: var(--secondary); font-size:1.25rem;">تفاصيل وتعديل إجابات الطالب: <span id="detail-student-name" style="color: white;">---</span></div>
+                  <div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">يمكنك مراجعة وتصحيح إجابات الطالب وتعديل الدرجة النهائية يدوياً بالأسفل</div>
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="closeResultDetailPanel()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">close</span> إغلاق النافذة
+                </button>
+              </div>
+
+              <!-- بيانات الطالب الأكاديمية للاختبار الحالي -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); padding: 1.25rem; border-radius: 12px; margin-bottom: 2rem; text-align:right;">
+                <div><strong>اسم الطالب:</strong> <span id="detail-stu-name">---</span></div>
+                <div><strong>معرف الطالب ID:</strong> <code id="detail-stu-id">---</code></div>
+                <div><strong>كود الاشتراك:</strong> <span id="detail-stu-code" style="color:var(--accent); font-weight:700;">---</span></div>
+                <div><strong>اسم الامتحان:</strong> <span id="detail-exam-title">---</span></div>
+                <div><strong>تاريخ التقدم:</strong> <span id="detail-exam-date">---</span></div>
+              </div>
+
+              <!-- حقل تعديل النتيجة النهائية الإجمالية يدوياً -->
+              <div class="form-group" style="max-width: 450px; margin-bottom: 2rem; border: 1px solid rgba(245, 158, 11, 0.2); padding: 1rem; border-radius: 12px; background: rgba(245, 158, 11, 0.02); text-align:right;">
+                <label class="form-label" for="detail-total-score-input" style="color:var(--accent);">النتيجة النهائية الإجمالية (نص أو درجة):</label>
+                <div class="input-wrapper" style="display:flex; gap:0.5rem;">
+                  <input type="text" id="detail-total-score-input" class="form-control" placeholder="مثال: 90/100" style="padding: 0.5rem 1rem;">
+                  <button class="btn btn-accent btn-sm" onclick="saveTotalScoreManual()" style="flex-shrink: 0; padding:0 1rem;">حفظ الدرجة</button>
+                </div>
+                <small style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.5rem; display: block;">ملاحظة: يمكنك تعديل النتيجة الإجمالية مباشرة هنا أو تصحيح الأسئلة الفردية بالأسفل.</small>
+              </div>
+
+              <!-- قائمة الأسئلة وإجابات الطالب المقابلة للتعديل والتقييم -->
+              <h4 style="color: white; margin-bottom: 1.25rem; font-weight: 700; text-align:right;">سجل الأسئلة وتفاصيل إجابات الطالب:</h4>
+              <div id="detail-questions-container" style="display: flex; flex-direction: column; gap: 1.5rem; margin-bottom: 2rem; text-align:right;">
+                <!-- تُعبأ عبر JS -->
+              </div>
+              
+              <button class="btn btn-primary" onclick="saveResultDetailsManual()">
+                <span class="material-icons">save</span> حفظ كافة التعديلات والإجابات يدوياً
+              </button>
             </div>
           </div>
 
@@ -784,6 +827,29 @@
             <button id="save-teacher-integration-btn" class="btn btn-primary" style="margin-top: 1rem; margin-bottom: 2rem;">
               <span class="material-icons" aria-hidden="true">save</span> حفظ إعدادات التكامل
             </button>
+
+            <!-- قسم النسخ الاحتياطي واستعادة قاعدة البيانات بالكامل -->
+            <div class="panel-header" style="margin-top: 3rem; border-top: 1px solid var(--border-color); padding-top: 2rem;">
+              <div class="panel-title">قاعدة البيانات الشاملة للمنصة (النسخ الاحتياطي والاستعادة)</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">تحميل نسخة كاملة من بيانات المعلمين والطلاب والامتحانات والنتائج واستعادتها في أي وقت</div>
+            </div>
+
+            <div class="config-card-box" style="background: rgba(20, 184, 166, 0.02); border-color: rgba(20, 184, 166, 0.1);">
+              <p style="font-size: 0.9rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 1.5rem; text-align: right;">
+                تنبيه: نظراً لأن التطبيق يعمل بالكامل على المتصفح (فرونت اند)، فإن حذف ذاكرة التخزين المؤقت للمتصفح قد يؤدي لمسح البيانات. يرجى تنزيل نسخة احتياطية من قاعدة البيانات بانتظام والاحتفاظ بها لاستيرادها واستعادتها عند الحاجة.
+              </p>
+              
+              <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                <button class="btn btn-primary" onclick="exportCompleteDatabase()">
+                  <span class="material-icons" aria-hidden="true">download_for_offline</span> تحميل النسخة الاحتياطية الكاملة (JSON)
+                </button>
+                
+                <button class="btn btn-outline" style="border-color: var(--accent); color: var(--accent);" onclick="document.getElementById('db-restore-file-input').click()">
+                  <span class="material-icons" aria-hidden="true">restore</span> استعادة قاعدة البيانات من ملف (JSON)
+                </button>
+                <input type="file" id="db-restore-file-input" style="display: none;" accept=".json" onchange="importCompleteDatabase(event)">
+              </div>
+            </div>
           </div>
 
           <!-- تبويب إدارة الطلاب وأكواد الاشتراك -->

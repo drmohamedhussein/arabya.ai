@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>ARABYA.NET | التوجيه الذكي</title>
+  <script type="text/javascript">
+    // استخراج المسار الحالي والمعاملات والهاش
+    var path = window.location.pathname;
+    var search = window.location.search;
+    var hash = window.location.hash;
+    
+    // التحقق مما إذا كان الموقع يعمل في مجلد فرعي (مثل مستودع جيت هب الافتراضي)
+    var subfolder = "";
+    if (path.indexOf("/online_exam_portal") === 0) {
+      subfolder = "/online_exam_portal";
+      path = path.substring("/online_exam_portal".length);
+    }
+    
+    // إعادة التوجيه الفوري للصفحة الرئيسية باستخدام مسار الهاش
+    // مثال: /876khk -> /#/876khk?teacher=username
+    window.location.replace(window.location.origin + subfolder + '/#' + path + search + hash);
+  </script>
+</head>
+<body>
+  <div style="text-align: center; margin-top: 20%; font-family: sans-serif; color: #666;">
+    <h2>جاري تحويلك إلى صفحة الامتحان مباشرة...</h2>
+    <p>يرجى الانتظار ثانية واحدة.</p>
+  </div>
+</body>
+</html>
