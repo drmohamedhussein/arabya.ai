@@ -634,6 +634,11 @@
                     <label class="form-label" for="edit-meta-totalscore">المجموع النهائي الكلي (درجة):</label>
                     <input type="number" id="edit-meta-totalscore" class="form-control" min="1">
                   </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-timelimit">وقت الامتحان الكلي (بالدقائق):</label>
+                    <input type="number" id="edit-meta-timelimit" class="form-control" min="1" value="60" placeholder="60">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
+                  </div>
                 </div>
 
                 <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
@@ -888,21 +893,63 @@
 
               <h4 style="color:var(--accent); margin-bottom:0.5rem; font-weight:700; font-size:1.05rem;">الكود البرمجي الموحد للربط والمزامنة (Google Apps Script):</h4>
               <textarea id="google-sheets-sync-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem; min-height: 200px; direction: ltr; text-align: left; background: rgba(0,0,0,0.3); color:#34d399; margin-bottom:0.75rem;" readonly>/**
- * Google Apps Script لربط الامتحانات وحفظ واستعادة قاعدة البيانات بالكامل تلقائياً
- * تم تطويره لمنصة ARABYA.NET
+ * Google Apps Script - ARABYA.NET Platform Integration
+ * يربط منصة الامتحانات بجداول Google Sheets تلقائياً
+ * النسخة المحدّثة: تدعم add_result + save_backup + get_backup
  */
 
 function doPost(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet();
   var payload;
+  
+  // إضافة CORS headers
+  var output;
+  
   try {
     payload = JSON.parse(e.postData.contents);
   } catch(err) {
-    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid JSON" }))
-                         .setMimeType(ContentService.MimeType.JSON);
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: "error", message: "Invalid JSON" })
+    ).setMimeType(ContentService.MimeType.JSON);
   }
-  
-  // 1. حالة حفظ النسخة الاحتياطية الكاملة تلقائياً
+
+  // ============================================
+  // 1. حفظ نتيجة طالب محدد (add_result أو أي طلب آخر)
+  // ============================================
+  if (!payload.action || payload.action === "add_result") {
+    var resultsSheet = sheet.getSheetByName("نتائج الطلاب");
+    if (!resultsSheet) {
+      resultsSheet = sheet.insertSheet("نتائج الطلاب");
+      resultsSheet.appendRow([
+        "التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك",
+        "الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"
+      ]);
+      // تنسيق الصف الأول
+      resultsSheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#1e293b").setFontColor("#ffffff");
+    }
+
+    resultsSheet.appendRow([
+      payload.timestamp || new Date().toLocaleString("ar-EG"),
+      payload.name || "",
+      payload.id || "",
+      payload.subscriptionCode || "",
+      payload.examTitle || "",
+      payload.university || "",
+      payload.faculty || "",
+      payload.level || "",
+      payload.examType || "",
+      payload.score || "",
+      payload.details || ""
+    ]);
+
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: "success", message: "تم تسجيل النتيجة بنجاح!" })
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // ============================================
+  // 2. حفظ النسخة الاحتياطية الكاملة (save_backup)
+  // ============================================
   if (payload.action === "save_backup") {
     var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
     if (!backupSheet) {
@@ -911,54 +958,43 @@ function doPost(e) {
     backupSheet.clear();
     backupSheet.appendRow(["Timestamp", "Database Backup (JSON)"]);
     backupSheet.appendRow([new Date().toLocaleString("ar-EG"), JSON.stringify(payload.data)]);
-    
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم حفظ النسخة الاحتياطية بنجاح!" }))
-                         .setMimeType(ContentService.MimeType.JSON);
+
+    return ContentService.createTextOutput(
+      JSON.stringify({ status: "success", message: "تم حفظ النسخة الاحتياطية بنجاح!" })
+    ).setMimeType(ContentService.MimeType.JSON);
   }
-  
-  // 2. حالة مزامنة نتيجة الطالب الفردي
-  var resultsSheet = sheet.getSheetByName("نتائج الطلاب");
-  if (!resultsSheet) {
-    resultsSheet = sheet.insertSheet("نتائج الطلاب");
-    resultsSheet.appendRow(["التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك/الامتحان", "النتيجة", "التفاصيل"]);
-  }
-  
-  resultsSheet.appendRow([
-    payload.timestamp || new Date().toLocaleString("ar-EG"),
-    payload.name,
-    payload.id,
-    payload.subscriptionCode || payload.examTitle,
-    payload.score,
-    payload.details
-  ]);
-  
-  return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم تسجيل النتيجة بنجاح!" }))
-                       .setMimeType(ContentService.MimeType.JSON);
+
+  return ContentService.createTextOutput(
+    JSON.stringify({ status: "ok" })
+  ).setMimeType(ContentService.MimeType.JSON);
 }
 
 function doGet(e) {
   var sheet = SpreadsheetApp.getActiveSpreadsheet();
-  
-  // 3. التحقق من الرغبة في استعادة النسخة الاحتياطية
+
+  // استعادة النسخة الاحتياطية
   if (e.parameter.action === "get_backup") {
     var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
-    if (!backupSheet) {
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." }))
-                           .setMimeType(ContentService.MimeType.JSON);
+    if (!backupSheet || backupSheet.getLastRow() < 2) {
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." })
+      ).setMimeType(ContentService.MimeType.JSON);
     }
-    
-    var lastRow = backupSheet.getLastRow();
-    if (lastRow < 2) {
-      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "ملف النسخة الاحتياطية فارغ." }))
-                           .setMimeType(ContentService.MimeType.JSON);
-    }
-    
     var backupDataStr = backupSheet.getRange(2, 2).getValue();
-    return ContentService.createTextOutput(JSON.stringify({ status: "success", data: JSON.parse(backupDataStr) }))
-                         .setMimeType(ContentService.MimeType.JSON);
+    try {
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: "success", data: JSON.parse(backupDataStr) })
+      ).setMimeType(ContentService.MimeType.JSON);
+    } catch(err) {
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: "error", message: "بيانات النسخة الاحتياطية تالفة." })
+      ).setMimeType(ContentService.MimeType.JSON);
+    }
   }
-  
-  return ContentService.createTextOutput("منصة ARABYA.NET - خادم ربط ومزامنة جداول بيانات جوجل شيتس نشط بنجاح.");
+
+  return ContentService.createTextOutput(
+    "ARABYA.NET - خادم المزامنة نشط ويعمل بنجاح ✓"
+  );
 }</textarea>
               <button class="btn btn-outline btn-sm" style="border-color: var(--accent); color: var(--accent);" onclick="copyGoogleSheetsSyncScript()">نسخ كود الربط السحابي</button>
             </div>

@@ -640,6 +640,7 @@ function navigateToView(viewId) {
 }
 
 // دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
+// دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
 function getUrlParameter(name) {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.has(name)) {
@@ -682,6 +683,7 @@ function getExamDirectLink(exam) {
   return `${origin}${pathname}${exam.id}${teacherParam}`;
 }
 
+// فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 // فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
 function checkUrlParameters() {
   let redirected = false;
@@ -1312,8 +1314,6 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-university").value = exam.university || "";
   document.getElementById("edit-meta-type").value = exam.examType || "أعمال فصلية";
   document.getElementById("edit-meta-totalscore").value = exam.totalScore || 100;
-  const timeLimitEl = document.getElementById("edit-meta-timelimit");
-  if (timeLimitEl) timeLimitEl.value = exam.timeLimit || 60;
   document.getElementById("edit-meta-google-url").value = exam.googleFormUrl || "";
   document.getElementById("edit-meta-entry-name").value = exam.entryName || "";
   document.getElementById("edit-meta-entry-id").value = exam.entryId || "";
@@ -1474,7 +1474,6 @@ function saveAllEditedQuestions() {
   exam.university = editUniversity;
   exam.examType = editType;
   exam.totalScore = editTotalScore;
-  exam.timeLimit = parseFloat(document.getElementById("edit-meta-timelimit")?.value) || 60;
   exam.googleFormUrl = editGoogleUrl;
   exam.entryName = editEntryName;
   exam.entryId = editEntryId;
@@ -1980,23 +1979,30 @@ function validateStudentAndStart() {
     return;
   }
 
-  // تسجيل / تحديث بيانات الطالب تلقائياً (بأي كود اشتراك نصي أو رقمي)
-  const matchedStudent = systemState.students.find(s => s.id === id);
-  if (!matchedStudent) {
-    const newStudent = {
-      name: name,
-      id: id,
-      code: code || "",
-      timestamp: new Date().toLocaleDateString("ar-EG")
-    };
-    systemState.students.push(newStudent);
-    saveSystemState(false); // حفظ محلي فقط دون مزامنة سحابية لتسريع البدء
-  } else {
-    // تحديث الاسم أو الكود إن تغيّر
-    let changed = false;
-    if (code && matchedStudent.code !== code) { matchedStudent.code = code; changed = true; }
-    if (matchedStudent.name !== name) { matchedStudent.name = name; changed = true; }
-    if (changed) saveSystemState(false);
+  // التحقق من كود الاشتراك (5 أرقام) والإنشاء التلقائي لحساب الطالب
+  if (code) {
+    const isFiveDigits = /^\d{5}$/.test(code);
+    if (!isFiveDigits) {
+      alert("عذراً، يجب أن يتكون كود الاشتراك من 5 أرقام فقط للبدء!");
+      return;
+    }
+
+    const matchedStudent = systemState.students.find(s => s.id === id);
+    if (!matchedStudent) {
+      const newStudent = {
+        name: name,
+        id: id,
+        code: code,
+        timestamp: new Date().toLocaleDateString("ar-EG")
+      };
+      systemState.students.push(newStudent);
+      saveSystemState(true);
+    } else {
+      if (matchedStudent.code !== code) {
+        matchedStudent.code = code;
+        saveSystemState(true);
+      }
+    }
   }
 
   systemState.currentStudent = { name, id, accessCode: code || "لا يوجد" };
@@ -2015,12 +2021,6 @@ function validateStudentAndStart() {
   systemState.results = systemState.results.filter(r => !(r.id === id && r.examId === selectedExam.id && r.status === "incomplete"));
   saveActiveStudentSession();
   updateLiveIncompleteResult();
-
-  // تعيين وقت الامتحان: الوقت الكلي (بالدقائق) مقسَّم على عدد الأسئلة = وقت كل سؤال (بالثواني)
-  const examTimeLimitMinutes = selectedExam.timeLimit || 60; // دقائق إجمالية
-  const questionsCount = systemState.shuffledQuestions.length || 1;
-  const perQuestionSeconds = Math.max(30, Math.floor((examTimeLimitMinutes * 60) / questionsCount));
-  systemState.timer.timeLimit = perQuestionSeconds;
 
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
@@ -2375,101 +2375,103 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   }
 }
 
-// المزامنة مع جوجل شيتس - ترسل نتيجة الطالب فور الانتهاء من الامتحان
+// المزامنة مع جوجل شيتس (تدعم Web Apps ونماذج جوجل)
 function sendResultToGoogleSheets(scoreString, details) {
   const exam = systemState.currentExam;
+  
+  // التحقق إن كان الامتحان له ربط مخصص وإلا نستخدم الإعدادات العامة للمعلم
+  let googleFormUrl = systemState.config.googleFormUrl;
+  let entryName = systemState.config.entryName;
+  let entryId = systemState.config.entryId;
+  let entryCode = systemState.config.entryCode;
+  let entryScore = systemState.config.entryScore;
+  let entryDetails = systemState.config.entryDetails;
+
+  if (exam && exam.googleFormUrl) {
+    googleFormUrl = exam.googleFormUrl;
+    entryName = exam.entryName || "";
+    entryId = exam.entryId || "";
+    entryCode = exam.entryCode || "";
+    entryScore = exam.entryScore || "";
+    entryDetails = exam.entryDetails || "";
+  }
+
   const statusEl = document.getElementById("runner-res-sync-status");
-
-  // جمع كل روابط Web App المتاحة (الامتحان + المعلم)
-  const urlsToSync = new Set();
-  if (exam && exam.googleFormUrl && exam.googleFormUrl.trim()) {
-    const u = exam.googleFormUrl.trim();
-    if (u.includes("/macros/s/") || u.endsWith("/exec")) urlsToSync.add(u);
-  }
-  if (systemState.config && systemState.config.googleFormUrl && systemState.config.googleFormUrl.trim()) {
-    const u = systemState.config.googleFormUrl.trim();
-    if (u.includes("/macros/s/") || u.endsWith("/exec")) urlsToSync.add(u);
-  }
-  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
-    const u = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
-    if (u.includes("/macros/s/") || u.endsWith("/exec")) urlsToSync.add(u);
-  }
-
-  // إذا لا يوجد أي رابط Web App - تحقق من جوجل فورم التقليدي
-  if (urlsToSync.size === 0) {
-    const traditionalUrl = (exam && exam.googleFormUrl) ? exam.googleFormUrl : (systemState.config ? systemState.config.googleFormUrl || "" : "");
-    const isTraditional = traditionalUrl && traditionalUrl.includes("docs.google.com");
-    if (isTraditional) {
-      if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري الإرسال إلى Google Form...`;
-      const entryName = (exam && exam.entryName) || systemState.config.entryName || "";
-      const entryId   = (exam && exam.entryId) || systemState.config.entryId || "";
-      const entryCode = (exam && exam.entryCode) || systemState.config.entryCode || "";
-      const entryScore = (exam && exam.entryScore) || systemState.config.entryScore || "";
-      const entryDetails = (exam && exam.entryDetails) || systemState.config.entryDetails || "";
-      const formData = new URLSearchParams();
-      if (entryName) formData.append(entryName, systemState.currentStudent.name);
-      if (entryId)   formData.append(entryId, systemState.currentStudent.id);
-      if (entryCode) formData.append(entryCode, `${exam ? exam.title : ""} | كود: ${systemState.currentStudent.accessCode}`);
-      if (entryScore) formData.append(entryScore, scoreString);
-      if (entryDetails) formData.append(entryDetails, details);
-      fetch(traditionalUrl, { method: "POST", mode: "no-cors", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: formData.toString() })
-        .then(() => { if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال النتيجة إلى Google Form بنجاح!`; })
-        .catch(() => { if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل الإرسال. تم حفظ النتيجة محلياً.`; });
-    } else {
-      if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> تم حفظ النتيجة محلياً ✓ (لم يتم ربط Google Sheets بعد)`;
+  
+  if (!googleFormUrl) {
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> تم حفظ النتيجة على المنصة محلياً (المزامنة مع جوجل غير مفعلة)`;
     }
     return;
   }
 
-  // إرسال إلى كل روابط Web App بالتوازي
-  if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري مزامنة نتيجتك مع Google Sheets...`;
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري ترحيل نتيجتك ومزامنتها مع Google Sheets...`;
+  }
 
-  const payload = {
-    action: "add_result",
-    timestamp: new Date().toLocaleString("ar-EG"),
-    name: systemState.currentStudent.name,
-    id: systemState.currentStudent.id,
-    subscriptionCode: systemState.currentStudent.accessCode,
-    examTitle: exam ? exam.title : "امتحان",
-    examId: exam ? exam.id : "",
-    university: exam ? (exam.university || "") : "",
-    faculty: exam ? (exam.faculty || "") : "",
-    level: exam ? (exam.level || "") : "",
-    examType: exam ? (exam.examType || "") : "",
-    score: scoreString,
-    details: details
-  };
+  // التحقق إن كان الرابط هو Google Web App (ينتهي بـ /exec أو يحتوي على macros/s)
+  const isWebApp = googleFormUrl.includes("/macros/s/") || googleFormUrl.endsWith("/exec");
 
-  let successCount = 0, failCount = 0;
-  const total = urlsToSync.size;
+  if (isWebApp) {
+    // ترحيل مباشر عبر Google Apps Script Web App (JSON POST)
+    const payload = {
+      timestamp: new Date().toLocaleString("ar-EG"),
+      name: systemState.currentStudent.name,
+      id: systemState.currentStudent.id,
+      subscriptionCode: systemState.currentStudent.accessCode,
+      examTitle: exam ? exam.title : "امتحان",
+      score: scoreString,
+      details: details
+    };
 
-  urlsToSync.forEach(url => {
-    fetch(url, {
+    fetch(googleFormUrl, {
       method: "POST",
       mode: "no-cors",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     })
     .then(() => {
-      successCount++;
-      if (successCount + failCount === total) {
-        if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تمت مزامنة النتيجة مع Google Sheets بنجاح ✓`;
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال ومزامنة النتيجة مع Google Sheets بنجاح!`;
       }
     })
     .catch(err => {
-      failCount++;
-      console.error("Google Sheets sync error:", url, err);
-      if (successCount + failCount === total) {
-        if (failCount === total) {
-          if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشلت المزامنة. تأكد من إعدادات النشر في Apps Script (Anyone).`;
-        } else {
-          if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> مزامنة جزئية (${successCount}/${total} شيت نجح).`;
-        }
+      console.error("خطأ مزامنة Apps Script:", err);
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل المزامنة السحابية. تم الاكتفاء بالحفظ المحلي للنتائج.`;
       }
     });
-  });
-}
+  } else {
+    // ترحيل تقليدي عبر نموذج جوجل فورم
+    const formData = new URLSearchParams();
+    formData.append(entryName, systemState.currentStudent.name);
+    formData.append(entryId, systemState.currentStudent.id);
+    
+    const fullMeta = exam ? `${exam.title} | ${exam.university} | ${exam.faculty} | ${exam.level} | ${exam.examType} [كود: ${systemState.currentStudent.accessCode}]` : `كود: ${systemState.currentStudent.accessCode}`;
+    
+    formData.append(entryCode, fullMeta);
+    formData.append(entryScore, scoreString);
+    formData.append(entryDetails, details);
 
+    fetch(googleFormUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: formData.toString()
+    })
+    .then(() => {
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال ومزامنة النتيجة مع Google Sheets بنجاح!`;
+      }
+    })
+    .catch(err => {
+      console.error("خطأ ربط جوجل شيتس:", err);
+      if (statusEl) {
+        statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل الإرسال السحابي. تم الاكتفاء بالحفظ المحلي للنتائج.`;
+      }
+    });
+  }
+}
 
 // الاستعلام عن نتائج الطلاب بالاسم، المعرف، أو كود الاشتراك الموزع
 function searchStudentResults() {
@@ -3507,6 +3509,5 @@ function updateLiveIncompleteResult() {
   res.studentAnswers = { ...systemState.studentAnswers };
   res.questionScores = questionScoresMap;
   
-  // حفظ محلي فقط أثناء الامتحان — المزامنة السحابية تتم فقط عند الإرسال النهائي
-  saveSystemState(false);
+  saveSystemState(true);
 }
