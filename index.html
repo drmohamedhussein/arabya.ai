@@ -827,40 +827,141 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="teacher-config-url">رابط المزامنة (Google Form Submit URL):</label>
-              <input type="text" id="teacher-config-url" class="form-control" placeholder="https://docs.google.com/forms/d/e/XXXX/formResponse">
+              <label class="form-label" for="teacher-config-url">رابط المزامنة (Google Form Submit URL / Web App URL):</label>
+              <input type="text" id="teacher-config-url" class="form-control" placeholder="https://script.google.com/macros/s/XXXX/exec">
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
               <div class="form-group">
-                <label class="form-label" for="teacher-config-name">معرف حقل الاسم (Name Entry ID):</label>
+                <label class="form-label" for="teacher-config-name">معرف حقل الاسم (Name Entry ID / اختياري للفورم):</label>
                 <input type="text" id="teacher-config-name" class="form-control" placeholder="entry.11111">
               </div>
               <div class="form-group">
-                <label class="form-label" for="teacher-config-id">معرف حقل الـ ID (Student ID Entry):</label>
+                <label class="form-label" for="teacher-config-id">معرف حقل الـ ID (Student ID Entry / اختياري للفورم):</label>
                 <input type="text" id="teacher-config-id" class="form-control" placeholder="entry.22222">
               </div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
               <div class="form-group">
-                <label class="form-label" for="teacher-config-code-id">معرف كود الاشتراك / الامتحان الأكاديمي:</label>
+                <label class="form-label" for="teacher-config-code-id">معرف كود الاشتراك / الامتحان الأكاديمي (اختياري للفورم):</label>
                 <input type="text" id="teacher-config-code-id" class="form-control" placeholder="entry.33333">
               </div>
               <div class="form-group">
-                <label class="form-label" for="teacher-config-score">معرف حقل النتيجة (Score Entry ID):</label>
+                <label class="form-label" for="teacher-config-score">معرف حقل النتيجة (Score Entry ID / اختياري للفورم):</label>
                 <input type="text" id="teacher-config-score" class="form-control" placeholder="entry.44444">
               </div>
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="teacher-config-details">معرف تقرير الإجابات التفصيلي والإجابات المقالية:</label>
+              <label class="form-label" for="teacher-config-details">معرف تقرير الإجابات التفصيلي والإجابات المقالية (اختياري للفورم):</label>
               <input type="text" id="teacher-config-details" class="form-control" placeholder="entry.55555">
             </div>
 
             <button id="save-teacher-integration-btn" class="btn btn-primary" style="margin-top: 1rem; margin-bottom: 2rem;">
               <span class="material-icons" aria-hidden="true">save</span> حفظ إعدادات التكامل
             </button>
+
+            <!-- دليل ربط وجدول بيانات جوجل شيتس والكود البرمجي الموحد -->
+            <div class="panel-header" style="margin-top: 3rem; border-top: 1px solid var(--border-color); padding-top: 2rem;">
+              <div class="panel-title">دليل وكود ربط الامتحان بـ Google Sheets</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">خطوات ربط الامتحان ومزامنة وحفظ واستعادة البيانات كاملة سحابياً</div>
+            </div>
+
+            <div class="config-card-box" style="text-align: right; background: rgba(255, 255, 255, 0.01); border-color: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 12px; margin-bottom: 2rem;">
+              <h4 style="color: var(--secondary); margin-bottom: 0.75rem; font-weight: 700; font-size:1.05rem;">خطوات ربط وتفعيل المزامنة للمعلم:</h4>
+              <ol style="margin-right: 1.5rem; margin-bottom: 1.5rem; line-height: 1.7; color: var(--text-primary); font-size: 0.9rem;">
+                <li>قم بإنشاء جدول بيانات جديد على حسابك في <strong>Google Sheets</strong>.</li>
+                <li>من القائمة العلوية للجدول، اضغط على <strong>ملحقات (Extensions)</strong> ثم اختر <strong>Apps Script</strong>.</li>
+                <li>امسح أي كود موجود في الصفحة، وقم بنسخ <strong>الكود البرمجي الموحد للربط</strong> الموجود بالأسفل ولصقه في المحرر.</li>
+                <li>اضغط على زر <strong>حفظ (Save)</strong> ثم اضغط على زر <strong>نشر (Deploy)</strong> في أعلى اليمين واختر <strong>نشر جديد (New deployment)</strong>.</li>
+                <li>اضغط على أيقونة الترس بجانب "تحديد النوع" واختر <strong>تطبيق ويب (Web App)</strong>. واضبط الإعدادات التالية:
+                  <ul style="margin-right: 1.5rem; margin-top: 0.25rem; color: var(--text-muted); list-style-type: disc;">
+                    <li>الوصف: <code>مزامنة امتحانات arabya.net</code></li>
+                    <li>تنفيذ التطبيق باسم: <strong>أنت (حسابك الشخصي على جوجل)</strong>.</li>
+                    <li>من يمكنه الوصول: <strong>أي شخص (Anyone)</strong> (هام جداً للربط).</li>
+                  </ul>
+                </li>
+                <li>اضغط على <strong>نشر (Deploy)</strong>، ثم وافق على منح صلاحيات الوصول لحسابك الشخصي بالضغط على <strong>منح الوصول (Authorize access)</strong> وتأكيد الصلاحية.</li>
+                <li>انسخ رابط <strong>تطبيق الويب (Web App URL)</strong> المولد (والذي ينتهي بـ <code>/exec</code>) والصقه في حقل <strong>رابط المزامنة (Google Form Submit URL)</strong> بالأعلى واضغط حفظ إعدادات التكامل.</li>
+              </ol>
+
+              <h4 style="color:var(--accent); margin-bottom:0.5rem; font-weight:700; font-size:1.05rem;">الكود البرمجي الموحد للربط والمزامنة (Google Apps Script):</h4>
+              <textarea id="google-sheets-sync-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem; min-height: 200px; direction: ltr; text-align: left; background: rgba(0,0,0,0.3); color:#34d399; margin-bottom:0.75rem;" readonly>/**
+ * Google Apps Script لربط الامتحانات وحفظ واستعادة قاعدة البيانات بالكامل تلقائياً
+ * تم تطويره لمنصة ARABYA.NET
+ */
+
+function doPost(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+  var payload;
+  try {
+    payload = JSON.parse(e.postData.contents);
+  } catch(err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "Invalid JSON" }))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  // 1. حالة حفظ النسخة الاحتياطية الكاملة تلقائياً
+  if (payload.action === "save_backup") {
+    var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
+    if (!backupSheet) {
+      backupSheet = sheet.insertSheet("ARABYA_BACKUP");
+    }
+    backupSheet.clear();
+    backupSheet.appendRow(["Timestamp", "Database Backup (JSON)"]);
+    backupSheet.appendRow([new Date().toLocaleString("ar-EG"), JSON.stringify(payload.data)]);
+    
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم حفظ النسخة الاحتياطية بنجاح!" }))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  // 2. حالة مزامنة نتيجة الطالب الفردي
+  var resultsSheet = sheet.getSheetByName("نتائج الطلاب");
+  if (!resultsSheet) {
+    resultsSheet = sheet.insertSheet("نتائج الطلاب");
+    resultsSheet.appendRow(["التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك/الامتحان", "النتيجة", "التفاصيل"]);
+  }
+  
+  resultsSheet.appendRow([
+    payload.timestamp || new Date().toLocaleString("ar-EG"),
+    payload.name,
+    payload.id,
+    payload.subscriptionCode || payload.examTitle,
+    payload.score,
+    payload.details
+  ]);
+  
+  return ContentService.createTextOutput(JSON.stringify({ status: "success", message: "تم تسجيل النتيجة بنجاح!" }))
+                       .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet(e) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet();
+  
+  // 3. التحقق من الرغبة في استعادة النسخة الاحتياطية
+  if (e.parameter.action === "get_backup") {
+    var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
+    if (!backupSheet) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." }))
+                           .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var lastRow = backupSheet.getLastRow();
+    if (lastRow < 2) {
+      return ContentService.createTextOutput(JSON.stringify({ status: "error", message: "ملف النسخة الاحتياطية فارغ." }))
+                           .setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    var backupDataStr = backupSheet.getRange(2, 2).getValue();
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", data: JSON.parse(backupDataStr) }))
+                         .setMimeType(ContentService.MimeType.JSON);
+  }
+  
+  return ContentService.createTextOutput("منصة ARABYA.NET - خادم ربط ومزامنة جداول بيانات جوجل شيتس نشط بنجاح.");
+}</textarea>
+              <button class="btn btn-outline btn-sm" style="border-color: var(--accent); color: var(--accent);" onclick="copyGoogleSheetsSyncScript()">نسخ كود الربط السحابي</button>
+            </div>
 
             <!-- قسم النسخ الاحتياطي واستعادة قاعدة البيانات بالكامل -->
             <div class="panel-header" style="margin-top: 3rem; border-top: 1px solid var(--border-color); padding-top: 2rem;">
@@ -873,7 +974,7 @@
                 تنبيه: نظراً لأن التطبيق يعمل بالكامل على المتصفح (فرونت اند)، فإن حذف ذاكرة التخزين المؤقت للمتصفح قد يؤدي لمسح البيانات. يرجى تنزيل نسخة احتياطية من قاعدة البيانات بانتظام والاحتفاظ بها لاستيرادها واستعادتها عند الحاجة.
               </p>
               
-              <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+              <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
                 <button class="btn btn-primary" onclick="exportCompleteDatabase()">
                   <span class="material-icons" aria-hidden="true">download_for_offline</span> تحميل النسخة الاحتياطية الكاملة (JSON)
                 </button>
@@ -882,9 +983,22 @@
                   <span class="material-icons" aria-hidden="true">restore</span> استعادة قاعدة البيانات من ملف (JSON)
                 </button>
                 <input type="file" id="db-restore-file-input" style="display: none;" accept=".json" onchange="importCompleteDatabase(event)">
+
+                <button id="btn-cloud-backup" class="btn btn-accent" onclick="backupDatabaseToCloud()">
+                  <span class="material-icons" aria-hidden="true">cloud_upload</span> حفظ نسخة احتياطية سحابية (جوجل شيت)
+                </button>
+
+                <button id="btn-cloud-restore" class="btn btn-outline" style="border-color: var(--secondary); color: var(--secondary);" onclick="restoreDatabaseFromCloud()">
+                  <span class="material-icons" aria-hidden="true">cloud_download</span> استعادة النسخة الاحتياطية سحابياً (جوجل شيت)
+                </button>
+              </div>
+
+              <!-- مؤشر المزامنة السحابية -->
+              <div id="cloud-sync-status-indicator" style="margin-top: 1.25rem; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem; border-top: 1px solid rgba(255,255,255,0.03); padding-top:1rem;">
+                <span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (تأكد من إدخال رابط الويب اب لحفظ واستعادة البيانات تلقائياً)
               </div>
             </div>
-          </div>
+
 
           <!-- تبويب إدارة الطلاب وأكواد الاشتراك -->
           <div id="teacher-tab-students" class="teacher-tab-panel hidden" role="tabpanel">
