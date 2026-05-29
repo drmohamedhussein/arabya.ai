@@ -1359,7 +1359,8 @@ function createNewExam() {
     faculty,
     university,
     examType,
-    totalScore: 100, // افتراضياً المجموع 100
+    totalScore: 100,
+    googleFormUrl: systemState.config?.googleFormUrl || "",
     questions: []
   };
 

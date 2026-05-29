@@ -400,6 +400,7 @@ function repairArabyaTeacherPanelPlacementOnly() {
     if (panel && panel.parentElement !== host) host.appendChild(panel);
   });
 }
+window.repairArabyaTeacherPanelPlacementOnly = repairArabyaTeacherPanelPlacementOnly;
 
 function hydrateArabyaTeacherPanels() {
   if (typeof window.loadTeacherDashboardData === "function") {
