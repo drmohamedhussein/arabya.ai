@@ -9,6 +9,7 @@
   <meta name="description" content="المنصة العربية الأولى المدعومة بالذكاء الاصطناعي لتعليم فروع اللغة العربية (نحو، بلاغة، أدب)، التدقيق اللغوي والنحوي، والامتحانات الأكاديمية المؤمنة بالكامل ضد الغش.">
   <meta name="keywords" content="اللغة العربية, ذكاء اصطناعي, امتحانات اونلاين, معلم اللغة العربية, تدقيق لغوي, كتب عربية">
   <meta name="author" content="ARABYA.NET">
+  <link rel="canonical" href="https://arabya.net/">
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -181,6 +182,7 @@
               <!-- تُعبأ ديناميكياً عبر JS -->
             </select>
           </div>
+          <div id="direct-exam-lock-note" class="sr-only">تم فتح هذه الصفحة من رابط امتحان مباشر، لذلك تم تحديد الامتحان تلقائياً.</div>
         </div>
 
         <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
@@ -921,14 +923,15 @@ function doPost(e) {
     if (!resultsSheet) {
       resultsSheet = sheet.insertSheet("نتائج الطلاب");
       resultsSheet.appendRow([
-        "التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك",
+        "معرف السجل", "التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك",
         "الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"
       ]);
       // تنسيق الصف الأول
-      resultsSheet.getRange(1, 1, 1, 11).setFontWeight("bold").setBackground("#1e293b").setFontColor("#ffffff");
+      resultsSheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#1e293b").setFontColor("#ffffff");
     }
 
     resultsSheet.appendRow([
+      payload.recordId || "",
       payload.timestamp || new Date().toLocaleString("ar-EG"),
       payload.name || "",
       payload.id || "",

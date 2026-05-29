@@ -243,15 +243,29 @@ function initDatabase() {
       systemState.exams = []; // نبدأ بقائمة فارغة عند تلف البيانات
     }
   } else {
-    systemState.exams = []; // لا توجد امتحانات بعد — سيضيفها المعلم لاحقاً
-    localStorage.setItem("arabya_exams_db", JSON.stringify([]));
+    systemState.exams = [];
   }
+
+  // تحميل بنك الأسئلة الافتراضي مرة واحدة فقط حتى لا تظهر بوابة الطالب فارغة في أول تشغيل.
+  const defaultsSeeded = localStorage.getItem("arabya_default_exams_seeded") === "yes";
+  const sourceDefaults = typeof defaultExams !== "undefined" ? defaultExams : window.defaultExams;
+  if (systemState.exams.length === 0 && !defaultsSeeded && Array.isArray(sourceDefaults)) {
+    systemState.exams = sourceDefaults.map(exam => ({
+      ...JSON.parse(JSON.stringify(exam)),
+      teacher: exam.teacher || (systemState.activeTeacher ? systemState.activeTeacher.username : "معلم اللغة العربية"),
+      timeLimit: exam.timeLimit || 60
+    }));
+    localStorage.setItem("arabya_default_exams_seeded", "yes");
+  }
+
+  localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
   
   // 3. تهيئة نتائج الطلاب
   const savedResults = localStorage.getItem("arabya_results_db");
   if (savedResults) {
     try { systemState.results = JSON.parse(savedResults); } catch(e){}
   }
+  ensureResultRecordIds();
 
   // 4. تهيئة قاعدة بيانات الطلاب وأكوادهم
   const savedStudents = localStorage.getItem("arabya_students_db");
@@ -301,6 +315,27 @@ function saveSystemState(syncToCloud = true) {
   
   if (syncToCloud) {
     autoSyncToCloud();
+  }
+}
+
+function createRecordId(prefix = "record") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureResultRecordIds() {
+  let changed = false;
+  systemState.results.forEach(res => {
+    if (!res.recordId) {
+      res.recordId = createRecordId("result");
+      changed = true;
+    }
+  });
+  if (changed) {
+    try {
+      localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+    } catch(e) {
+      console.error("تعذر تحديث معرفات النتائج:", e);
+    }
   }
 }
 
@@ -718,29 +753,37 @@ function getUrlParameter(name) {
   return null;
 }
 
-// دالة موحدة لتوليد الرابط المباشر للامتحان (تدعم المسارات الحقيقية بدون هاش على خوادم الويب)
-function getExamDirectLink(exam) {
-  const teacherParam = systemState.activeTeacher ? `?teacher=${encodeURIComponent(systemState.activeTeacher.username)}` : '';
-  
+function getAppBaseUrl() {
+  const cleanHref = window.location.href.split('?')[0].split('#')[0];
   if (window.location.protocol === "file:") {
-    // تشغيل محلي من الملفات
-    const baseUrl = window.location.href.split('?')[0].split('#')[0];
-    return `${baseUrl}?exam=${exam.id}${teacherParam}`;
+    return cleanHref;
   }
-  
-  // تشغيل من خادم ويب (مثل arabya.net)
+
   let origin = window.location.origin;
   let pathname = window.location.pathname;
-  
-  // تنظيف اسم الملف index.html إن وجد في نهاية المسار
+
   if (pathname.endsWith("index.html")) {
     pathname = pathname.replace("index.html", "");
   }
-  if (!pathname.endsWith("/")) {
-    pathname += "/";
+
+  const pathParts = pathname.split('/').filter(Boolean);
+  const knownExamIds = new Set((systemState.exams || []).map(exam => String(exam.id).toLowerCase()));
+  while (pathParts.length && knownExamIds.has(pathParts[pathParts.length - 1].toLowerCase())) {
+    pathParts.pop();
   }
-  
-  return `${origin}${pathname}${exam.id}${teacherParam}`;
+
+  const basePath = pathParts.length ? `/${pathParts.join('/')}/` : "/";
+  return `${origin}${basePath}`;
+}
+
+// دالة موحدة لتوليد الرابط المباشر للامتحان (تدعم المسارات الحقيقية بدون هاش على خوادم الويب)
+function getExamDirectLink(exam) {
+  const params = new URLSearchParams();
+  params.set("exam", exam.id);
+  if (systemState.activeTeacher) {
+    params.set("teacher", systemState.activeTeacher.username);
+  }
+  return `${getAppBaseUrl()}?${params.toString()}`;
 }
 
 // فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
@@ -851,14 +894,16 @@ function checkUrlParameters() {
   }
 
   if (examId) {
-    const targetExam = systemState.exams.find(e => e.id === examId);
+    const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
     if (targetExam) {
+      systemState.lockedExamId = targetExam.id;
       navigateToView("student-login-view");
       setTimeout(() => {
         const select = document.getElementById("student-exam-select");
         if (select) {
-          select.value = examId;
+          select.value = targetExam.id;
           select.disabled = true;
+          select.setAttribute("aria-describedby", "direct-exam-lock-note");
         }
       }, 100);
       redirected = true;
@@ -1107,7 +1152,7 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-config-details").value = systemState.activeTeacher.integrationConfig?.entryDetails || "";
 
   // توليد وعرض رابط الدخول التلقائي للمعلم
-  const baseUrl = window.location.href.split('?')[0].split('#')[0];
+  const baseUrl = getAppBaseUrl();
   const autoUrl = `${baseUrl}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
   document.getElementById("teacher-auto-login-url").value = autoUrl;
 
@@ -2002,6 +2047,21 @@ function populateExamSelectionList() {
   if (systemState.targetTeacherUsername) {
     filteredExams = systemState.exams.filter(exam => exam.teacher === systemState.targetTeacherUsername || !exam.teacher);
   }
+  if (systemState.lockedExamId) {
+    filteredExams = filteredExams.filter(exam => exam.id === systemState.lockedExamId);
+  }
+
+  if (filteredExams.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.disabled = true;
+    opt.selected = true;
+    opt.innerText = "لا توجد امتحانات متاحة حالياً. يرجى الرجوع للمعلم.";
+    select.appendChild(opt);
+    select.disabled = true;
+    select.removeAttribute("aria-describedby");
+    return;
+  }
 
   filteredExams.forEach(exam => {
     const opt = document.createElement("option");
@@ -2009,6 +2069,12 @@ function populateExamSelectionList() {
     opt.innerText = `${exam.title} (${exam.subject})`;
     select.appendChild(opt);
   });
+
+  if (systemState.lockedExamId) {
+    select.value = systemState.lockedExamId;
+    select.disabled = true;
+    select.setAttribute("aria-describedby", "direct-exam-lock-note");
+  }
 }
 
 function validateStudentAndStart() {
@@ -2083,6 +2149,7 @@ function validateStudentAndStart() {
   systemState.results = systemState.results.filter(r => !(r.id === id && r.examId === selectedExam.id && r.status === "incomplete"));
   saveActiveStudentSession();
   updateLiveIncompleteResult();
+  requestSecureExamMode();
 
   // تعيين وقت الامتحان: الوقت الكلي (بالدقائق) مقسَّم على عدد الأسئلة = وقت كل سؤال (بالثواني)
   const examTimeLimitMinutes = selectedExam.timeLimit || 60; // دقائق إجمالية
@@ -2319,6 +2386,7 @@ function runnerNextQuestion(isAuto = false) {
 // حساب وتوثيق النتيجة مع هيكل الدرجات النسبية المطور
 function submitFinishedExam() {
   systemState.isExamActive = false;
+  releaseSecureExamMode();
   if (systemState.timer.intervalId) {
     clearInterval(systemState.timer.intervalId);
   }
@@ -2392,6 +2460,7 @@ function submitFinishedExam() {
   const detailsFormatted = detailsLog.join("\n");
 
   const resultObj = {
+    recordId: createRecordId("result"),
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
     accessCode: systemState.currentStudent.accessCode,
@@ -2419,7 +2488,7 @@ function submitFinishedExam() {
   }
   saveSystemState(true); // حفظ كامل + مزامنة سحابية
 
-  sendResultToGoogleSheets(scoreString, detailsFormatted);
+  sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId);
   showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
 }
 
@@ -2452,7 +2521,7 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
 }
 
 // المزامنة مع جوجل شيتس - ترسل نتيجة الطالب فور الانتهاء من الامتحان
-function sendResultToGoogleSheets(scoreString, details) {
+function sendResultToGoogleSheets(scoreString, details, resultRecordId = "") {
   const exam = systemState.currentExam;
   const statusEl = document.getElementById("runner-res-sync-status");
 
@@ -2502,6 +2571,7 @@ function sendResultToGoogleSheets(scoreString, details) {
 
   const payload = {
     action: "add_result",
+    recordId: resultRecordId,
     timestamp: new Date().toLocaleString("ar-EG"),
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
@@ -2589,15 +2659,21 @@ function searchStudentResults() {
       </div>
       <div style="display:flex; align-items:center; gap: 1rem;">
         <span style="font-size:1.1rem; font-weight:800; color:var(--secondary);">${res.score}</span>
-        <button class="btn btn-outline" style="padding:0.4rem 0.8rem; font-size:0.8rem;" onclick="viewResultDetailQuery('${res.id}', '${res.examId}')">عرض الإجابات</button>
+        <button class="btn btn-outline" style="padding:0.4rem 0.8rem; font-size:0.8rem;" onclick="viewResultDetailQuery('${res.recordId || ""}', '${res.id}', '${res.examId}')">عرض الإجابات</button>
       </div>
     `;
     listContainer.appendChild(card);
   });
 }
 
-window.viewResultDetailQuery = function(studentId, examId) {
-  const result = systemState.results.find(r => r.id === studentId && r.examId === examId);
+window.viewResultDetailQuery = function(recordId, studentId, examId) {
+  if (examId === undefined) {
+    examId = studentId;
+    studentId = recordId;
+    recordId = "";
+  }
+  const result = systemState.results.find(r => r.recordId === recordId) ||
+    systemState.results.find(r => r.id === studentId && r.examId === examId);
   if (result) {
     alert(`تفاصيل اختبارك الأكاديمي [${result.examTitle}]:\n\n${result.details}`);
   }
@@ -2624,15 +2700,21 @@ function renderStudentResultsTable() {
       <td>${res.examTitle} (${res.level || 'عام'})</td>
       <td style="font-weight:700; color:var(--secondary);">${res.score}</td>
       <td>${res.timestamp}</td>
-      <td><button class="btn btn-outline btn-sm" onclick="viewTeacherResultDetail('${res.id}', '${res.examId}')">عرض</button></td>
+      <td><button class="btn btn-outline btn-sm" onclick="viewTeacherResultDetail('${res.recordId || ""}', '${res.id}', '${res.examId}')">عرض</button></td>
     `;
     tbody.appendChild(row);
   });
 }
 
-window.viewTeacherResultDetail = function(studentId, examId) {
+window.viewTeacherResultDetail = function(recordId, studentId, examId) {
+  if (examId === undefined) {
+    examId = studentId;
+    studentId = recordId;
+    recordId = "";
+  }
   // البحث بمعيار id + examId (أو id فقط كحالة بديلة)
-  const res = systemState.results.find(r =>
+  const res = systemState.results.find(r => r.recordId === recordId) ||
+  systemState.results.find(r =>
     (r.id === studentId && r.examId === examId) ||
     (r.id === studentId && !r.examId && examId === "")
   );
@@ -2926,6 +3008,16 @@ function clearTeacherResults() {
 // ==========================================
 
 function setupAntiCheatHandlers() {
+  window.addEventListener("beforeunload", e => {
+    if (systemState.isExamActive) {
+      saveActiveStudentSession();
+      updateLiveIncompleteResult();
+      e.preventDefault();
+      e.returnValue = "امتحانك نشط الآن. الخروج قد يؤدي إلى تسجيل محاولة غش أو فقدان التقدم.";
+      return e.returnValue;
+    }
+  });
+
   window.addEventListener("blur", () => {
     if (systemState.isExamActive && !systemState.isCheatingSuspended) {
       triggerRunnerCheatPenalty("blur");
@@ -2958,19 +3050,25 @@ function setupAntiCheatHandlers() {
       e.preventDefault();
     }
   });
+  document.addEventListener("dragstart", e => {
+    if (systemState.isExamActive) {
+      e.preventDefault();
+    }
+  });
 
   document.addEventListener("keydown", e => {
+    const commandKey = e.ctrlKey || e.metaKey;
     if (
       e.key === "F12" || 
-      (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c" || e.key === "K" || e.key === "k" || e.key === "E" || e.key === "e")) ||
-      (e.ctrlKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s"))
+      (commandKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c" || e.key === "K" || e.key === "k" || e.key === "E" || e.key === "e")) ||
+      (commandKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s" || e.key === "A" || e.key === "a" || e.key === "C" || e.key === "c" || e.key === "V" || e.key === "v" || e.key === "X" || e.key === "x"))
     ) {
       e.preventDefault();
       alert("حظر: غير مصرح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
       return false;
     }
 
-    if (e.ctrlKey && (e.key === "p" || e.key === "P")) {
+    if (commandKey && (e.key === "p" || e.key === "P")) {
       e.preventDefault();
       alert("حظر: غير مسموح بالطباعة لحماية سرية الأسئلة!");
       return false;
@@ -2984,6 +3082,21 @@ function setupAntiCheatHandlers() {
       return false;
     }
   });
+}
+
+function requestSecureExamMode() {
+  const root = document.documentElement;
+  if (root.requestFullscreen && !document.fullscreenElement) {
+    root.requestFullscreen().catch(() => {
+      console.warn("Fullscreen mode was not granted by the browser.");
+    });
+  }
+}
+
+function releaseSecureExamMode() {
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  }
 }
 
 function triggerRunnerCheatPenalty(reason) {
@@ -3064,6 +3177,7 @@ function submitCheatedExam() {
   // تنظيف الجلسة الحية وحذف السجل غير المكتمل
   systemState.results = systemState.results.filter(r => !(r.id === systemState.currentStudent.id && r.examId === systemState.currentExam.id && r.status === "incomplete"));
   localStorage.removeItem("arabya_active_student_session");
+  releaseSecureExamMode();
 
   const exam = systemState.currentExam;
   const examTotalScore = exam.totalScore || 100;
@@ -3077,6 +3191,7 @@ function submitCheatedExam() {
   });
 
   const resultObj = {
+    recordId: createRecordId("result"),
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
     accessCode: systemState.currentStudent.accessCode,
@@ -3096,7 +3211,7 @@ function submitCheatedExam() {
   systemState.results.push(resultObj);
   saveSystemState(true);
 
-  sendResultToGoogleSheets(scoreString, detailsFormatted);
+  sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId);
   
   // الانتقال لصفحة النتيجة مع تخصيص المظهر للغش
   navigateToView("student-result-view");
@@ -3528,6 +3643,7 @@ function updateLiveIncompleteResult() {
   
   if (!res) {
     res = {
+      recordId: createRecordId("incomplete"),
       name: systemState.currentStudent.name,
       id: id,
       accessCode: systemState.currentStudent.accessCode || "لا يوجد",

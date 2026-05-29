@@ -1043,6 +1043,12 @@ tr:hover td {
     grid-template-columns: 1fr;
     gap: 2rem;
   }
+
+  .teacher-main-panel div[style*="grid-template-columns"],
+  .exam-builder-card div[style*="grid-template-columns"],
+  .config-card-box div[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+  }
 }
 
 @media (max-width: 600px) {
@@ -1072,6 +1078,17 @@ tr:hover td {
 
   .exams-list-container {
     grid-template-columns: 1fr;
+  }
+
+  .exam-actions-row,
+  .hero-cta,
+  .social-links-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .teacher-menu-item {
+    min-width: 100%;
   }
 }
 

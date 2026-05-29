@@ -195,6 +195,10 @@ const defaultExams = [
 ];
 
 // تصدير أو إتاحته للمتصفح
+if (typeof window !== 'undefined') {
+  window.defaultExams = defaultExams;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = defaultExams;
 }

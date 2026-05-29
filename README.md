@@ -42,27 +42,66 @@
   يمكنك ربط نتائج الامتحانات بجوجل شيت مباشرة عبر إنشاء Web App في جوجل درايف. انسخ الكود التالي وضعه في محرر البرمجة الملحق بملف Google Sheet الخاص بك:
 
 ```javascript
-// كود Google Apps Script للمزامنة التلقائية - arabya.ai
+// كود Google Apps Script للمزامنة التلقائية والنسخ الاحتياطي - ARABYA.NET
 function doPost(e) {
   try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var data = JSON.parse(e.postData.contents);
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var data = JSON.parse(e.postData.contents || "{}");
     
-    // إضافة صف جديد: التاريخ، اسم الطالب، الرقم الأكاديمي، كود الاشتراك، اسم الامتحان، النتيجة الكلية، تفاصيل الإجابات
-    sheet.appendRow([
-      data.timestamp || new Date(),
-      data.name,
-      data.id,
-      data.subscriptionCode,
-      data.examTitle,
-      data.score,
-      data.details
-    ]);
+    if (!data.action || data.action === "add_result") {
+      var resultsSheet = spreadsheet.getSheetByName("نتائج الطلاب") || spreadsheet.insertSheet("نتائج الطلاب");
+      if (resultsSheet.getLastRow() === 0) {
+        resultsSheet.appendRow(["معرف السجل", "التاريخ", "اسم الطالب", "ID", "كود الاشتراك", "الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"]);
+      }
+      resultsSheet.appendRow([
+        data.recordId || "",
+        data.timestamp || new Date(),
+        data.name || "",
+        data.id || "",
+        data.subscriptionCode || "",
+        data.examTitle || "",
+        data.university || "",
+        data.faculty || "",
+        data.level || "",
+        data.examType || "",
+        data.score || "",
+        data.details || ""
+      ]);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (data.action === "save_backup") {
+      var backupSheet = spreadsheet.getSheetByName("ARABYA_BACKUP") || spreadsheet.insertSheet("ARABYA_BACKUP");
+      backupSheet.clear();
+      backupSheet.appendRow(["Timestamp", "Database Backup JSON"]);
+      backupSheet.appendRow([new Date(), JSON.stringify(data.data || {})]);
+      return ContentService.createTextOutput(JSON.stringify({ status: "success" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
     
-    return ContentService.createTextOutput(JSON.stringify({"status": "success"}))
+    return ContentService.createTextOutput(JSON.stringify({ status: "ignored" }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({"status": "error", "message": err.message}))
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function doGet(e) {
+  try {
+    if (e.parameter.action === "get_backup") {
+      var backupSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP");
+      if (!backupSheet || backupSheet.getLastRow() < 2) {
+        throw new Error("لا توجد نسخة احتياطية محفوظة بعد.");
+      }
+      var backupData = backupSheet.getRange(2, 2).getValue();
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", data: JSON.parse(backupData) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+    return ContentService.createTextOutput("ARABYA.NET sync endpoint is active");
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.message }))
       .setMimeType(ContentService.MimeType.JSON);
   }
 }
@@ -94,3 +133,10 @@ function doPost(e) {
   * رفع الملفات إلى مستودع GitHub وتفعيل **GitHub Pages** (مجاني تماماً لروابط ثابتة).
   * أو الرفع على منصة **Vercel** أو **Netlify** بضغطة زر واحدة.
 * يرجى التوصية بضبط مجلد المشروع `online_exam_portal` كساحة العمل النشطة (Active Workspace) عند فتحه في محرر الأكواد.
+
+### إعداد GitHub Pages مع نطاق ARABYA.NET
+* يحتوي المشروع على ملف `CNAME` بالقيمة `arabya.net` حتى يحافظ GitHub Pages على ربط النطاق المخصص بعد كل رفع.
+* روابط الامتحانات المباشرة تُنشأ بصيغة آمنة للنطاق الجذري مثل: `https://arabya.net/?exam=EXAM_ID&teacher=USERNAME`.
+* ملف `404.html` يحافظ على الروابط القديمة أو الروابط ذات المسار المباشر مثل `https://arabya.net/EXAM_ID` بتحويلها إلى مسار hash يمكن للتطبيق قراءته.
+* `_redirects` مفيد عند النشر على Netlify، أما GitHub Pages فيعتمد على `404.html`.
+* بيانات `localStorage` منفصلة حسب النطاق؛ أي بيانات أُنشئت على `github.io` لن تظهر تلقائياً على `arabya.net` إلا بعد تصدير النسخة الاحتياطية واستيرادها أو تفعيل مزامنة Google Sheets.
