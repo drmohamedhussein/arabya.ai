@@ -257,7 +257,20 @@ function arabyaGetExams() {
 }
 
 function normalizeArabyaStudentCode(code) {
-  return String(code || "").trim().toLowerCase();
+  var raw = String(code || "").trim();
+  if (!raw) return "";
+  var digits = raw.replace(/\D/g, "").slice(0, 5);
+  if (digits) {
+    if (/^0+$/.test(digits)) {
+      return "00000";
+    }
+    return digits;
+  }
+  return raw.toLowerCase();
+}
+
+function isArabyaSharedStudentCode(code) {
+  return normalizeArabyaStudentCode(code) === "00000";
 }
 
 function arabyaFindStudentsByCode(code) {
@@ -271,6 +284,11 @@ function arabyaFindStudentsByCode(code) {
 function validateArabyaStudentIdentity(id, code, currentId) {
   var cleanCode = String(code || "").trim();
   if (!cleanCode) return { ok: true };
+
+  var normalizedCode = normalizeArabyaStudentCode(cleanCode);
+  if (isArabyaSharedStudentCode(normalizedCode)) {
+    return { ok: true };
+  }
 
   var codeOwners = arabyaFindStudentsByCode(cleanCode);
   if (codeOwners.length > 1) {
@@ -288,11 +306,16 @@ function validateArabyaStudentIdentity(id, code, currentId) {
   var sameIdStudent = arabyaGetStudents().find(function(student) {
     return String(student.id || "") === String(id || "");
   });
-  if (sameIdStudent && normalizeArabyaStudentCode(sameIdStudent.code) && normalizeArabyaStudentCode(sameIdStudent.code) !== normalizeArabyaStudentCode(cleanCode)) {
+  if (sameIdStudent && normalizeArabyaStudentCode(sameIdStudent.code) && normalizeArabyaStudentCode(sameIdStudent.code) !== normalizedCode) {
     return { ok: false, message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. لا يمكن الدخول إلا بالكود الأصلي الخاص بهذا الطالب." };
   }
 
   return { ok: true };
+}
+
+if (typeof window !== "undefined") {
+  window.normalizeArabyaStudentCode = normalizeArabyaStudentCode;
+  window.isArabyaSharedStudentCode = isArabyaSharedStudentCode;
 }
 
 function enforceArabyaUniqueStudentCodes() {
@@ -326,7 +349,9 @@ function enforceArabyaUniqueStudentCodes() {
       var profileCode = ((document.getElementById("student-profile-code-input") || {}).value || (document.getElementById("student-access-code") || {}).value || "").trim();
       var matches = arabyaFindStudentsByCode(profileCode);
       if (!profileCode) validation = { ok: false, message: "اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي." };
-      else if (matches.length > 1) validation = { ok: false, message: "هذا الكود مكرر ولا يمكن استخدامه للدخول حتى يتم تصحيح قاعدة الطلاب بواسطة المعلم." };
+      else if (matches.length > 1 && !isArabyaSharedStudentCode(profileCode)) {
+        validation = { ok: false, message: "هذا الكود مكرر ولا يمكن استخدامه للدخول حتى يتم تصحيح قاعدة الطلاب بواسطة المعلم." };
+      }
     } else if (teacherSaveBtn) {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("new-student-id") || {}).value,
@@ -542,7 +567,7 @@ function ensureArabyaStudentProfileView() {
   }
 }
 
-function showArabyaStudentProfile(code) {
+function showArabyaStudentProfile(code, studentId) {
   ensureArabyaStudentProfileView();
   if (!code) {
     if (window.navigateToView) window.navigateToView("student-profile-view");
@@ -551,9 +576,19 @@ function showArabyaStudentProfile(code) {
     alert("اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي.");
     return;
   }
-  var student = arabyaGetStudents().find(function(s) {
-    return String(s.code || "").toLowerCase() === code.toLowerCase();
-  });
+  var normalizedCode = normalizeArabyaStudentCode(code);
+  var effectiveId = String(studentId || (document.getElementById("student-id-input") || {}).value || "").trim();
+  var student = null;
+  if (isArabyaSharedStudentCode(normalizedCode) && effectiveId) {
+    student = arabyaGetStudents().find(function(s) {
+      return String(s.id || "") === effectiveId && normalizeArabyaStudentCode(s.code) === normalizedCode;
+    });
+  }
+  if (!student) {
+    student = arabyaGetStudents().find(function(s) {
+      return normalizeArabyaStudentCode(s.code) === normalizedCode;
+    });
+  }
   if (!student) {
     if (window.navigateToView) window.navigateToView("student-profile-view");
     alert("لم يتم العثور على طالب بهذا الكود. تأكد من الكود أو تواصل مع المعلم.");
