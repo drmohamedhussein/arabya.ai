@@ -1794,10 +1794,6 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
   document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
   document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
-  const versionEl = document.getElementById("teacher-app-version-indicator");
-  if (versionEl) {
-    versionEl.textContent = `إصدار المنصة: ${ARABYA_APP_VERSION}`;
-  }
 
   document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
