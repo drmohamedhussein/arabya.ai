@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-05-30T01:08:46.489Z",
+  "updatedAt": "2026-05-30T01:45:41.614Z",
   "source": "arabya.net",
   "teachers": [
     {
@@ -417,6 +417,21 @@
         "1": 0,
         "2": 5
       }
+    },
+    {
+      "recordId": "crossdev-X1780105536845",
+      "timestamp": "٣٠‏/٥‏/٢٠٢٦، ١:٤٥:٣٩ ص",
+      "name": "طالب مزامنة",
+      "id": "SYNC1",
+      "accessCode": "C",
+      "examTitle": "امتحان مزامنة",
+      "examId": "EXSYNC",
+      "university": "القاهرة",
+      "faculty": "الآداب",
+      "level": "الأولى",
+      "examType": "أعمال فصلية",
+      "score": "10/10",
+      "details": "تفاصيل"
     }
   ],
   "auditLog": [
@@ -568,6 +583,16 @@
         "students": 3,
         "exams": 3,
         "results": 5
+      }
+    },
+    {
+      "at": "2026-05-30T01:45:41.614Z",
+      "reason": "add_result",
+      "counts": {
+        "teachers": 1,
+        "students": 3,
+        "exams": 3,
+        "results": 6
       }
     }
   ]
