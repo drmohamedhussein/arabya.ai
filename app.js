@@ -689,7 +689,7 @@ function getArabyaWebAppUrls() {
     const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
     if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) urls.add(u);
   } catch (e) {}
-  return Array.from(urls);
+  return Array.from(urls).map(normalizeArabyaWebAppUrl).filter(Boolean);
 }
 
 function mergeRemoteCollection_(current, incoming, keyFn) {
@@ -723,22 +723,124 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
   return true;
 }
 
+
+function normalizeArabyaWebAppUrl(rawUrl) {
+  let url = String(rawUrl || "").trim();
+  if (!url) return "";
+  if (url.includes("/macros/s/") || url.endsWith("/exec")) {
+    if (url.includes("/dev")) {
+      url = url.replace(/\/dev(\?|$)/, "/exec$1");
+    }
+    return url;
+  }
+  return url;
+}
+
+function buildSlimResultCloudPayload(payload) {
+  const slim = { ...payload };
+  if (slim.details && String(slim.details).length > 12000) {
+    slim.details = String(slim.details).slice(0, 12000) + "\n...[مختصر للمزامنة السحابية]";
+  }
+  delete slim.studentAnswers;
+  delete slim.questionScores;
+  delete slim.presentedQuestions;
+  return slim;
+}
+
+async function postToArabyaWebAppNoCors(url, payload) {
+  try {
+    await fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
 function postToArabyaWebApp(url, payload) {
-  return fetch(url, {
+  const targetUrl = normalizeArabyaWebAppUrl(url);
+  if (!targetUrl) return Promise.reject(new Error("رابط Web App غير صالح"));
+
+  const attempt = () => fetch(targetUrl, {
     method: "POST",
     mode: "cors",
     redirect: "follow",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify(payload)
   }).then(async res => {
-    const text = await res.text();
+    const text = (await res.text()) || "";
     let parsed = null;
-    try { parsed = text ? JSON.parse(text) : null; } catch (e) { parsed = null; }
-    if (!res.ok) throw new Error((parsed && parsed.message) || text || ("HTTP " + res.status));
-    if (parsed && parsed.status === "error") throw new Error(parsed.message || "Cloud sync error");
+    try { parsed = text ? JSON.parse(text) : null; } catch (e) {
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { parsed = JSON.parse(jsonMatch[0]); } catch (e2) { parsed = null; }
+      }
+    }
+    if (!res.ok) {
+      throw new Error((parsed && parsed.message) || text.slice(0, 200) || ("HTTP " + res.status));
+    }
+    if (parsed && parsed.status === "error") {
+      throw new Error(parsed.message || "Cloud sync error");
+    }
+    if (!parsed && text && !/success|تم/i.test(text)) {
+      throw new Error("استجابة غير متوقعة من الخادم. تأكد من نشر Apps Script كـ Web App للجميع (Anyone) واستخدام رابط /exec");
+    }
     return parsed || { status: "success" };
   });
+
+  return attempt().catch(err => {
+    console.warn("postToArabyaWebApp retry:", targetUrl, err);
+    return attempt();
+  });
 }
+
+async function pushCloudBackupNow() {
+  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  if (urlList.length === 0) return false;
+  const payload = {
+    action: "save_backup",
+    data: {
+      teachers: systemState.teachers,
+      students: systemState.students,
+      exams: systemState.exams,
+      results: systemState.results
+    }
+  };
+  let ok = false;
+  for (const url of urlList) {
+    try {
+      await postToArabyaWebApp(url, payload);
+      ok = true;
+    } catch (e) {
+      const sent = await postToArabyaWebAppNoCors(url, payload);
+      if (sent) ok = true;
+      console.warn("pushCloudBackupNow:", url, e);
+    }
+  }
+  return ok;
+}
+
+window.pullTeacherResultsFromCloud = async function() {
+  const el = document.getElementById("teacher-results-sync-status");
+  if (el) {
+    el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
+  }
+  const ok = await syncDatabaseFromCloud({ silent: false });
+  renderStudentResultsTable();
+  renderTeacherStudentsTable();
+  if (el) {
+    if (ok) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تم تحديث السجلات من السحابة (${systemState.results.length} نتيجة)`;
+    } else {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone) ثم اضغط «رفع نسخة احتياطية» من تبويب الربط أولاً.`;
+    }
+  }
+  return ok;
+};
 
 async function syncDatabaseFromCloud(options = {}) {
   const silent = !!options.silent;
@@ -1368,7 +1470,11 @@ function setupUIEventListeners() {
       if (targetPanel) targetPanel.classList.remove("hidden");
       reloadSystemStateFromLocalStorage();
       if (tabId === "results") {
-        syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
+        if (typeof pullTeacherResultsFromCloud === "function") {
+          pullTeacherResultsFromCloud();
+        } else {
+          syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
+        }
       } else if (tabId === "students") {
         syncDatabaseFromCloud({ silent: true }).finally(() => renderTeacherStudentsTable());
       } else if (tabId === "exams") {
@@ -3054,27 +3160,38 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     status: resultObj?.status || "completed",
     score: scoreString,
     details: details,
-    maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
-    presentedQuestions: resultObj?.presentedQuestions || [],
-    studentAnswers: resultObj?.studentAnswers || systemState.studentAnswers || {},
-    questionScores: resultObj?.questionScores || {}
+    maxScore: resultObj?.maxScore || getCurrentExamTotalScore()
   };
+  const slimPayload = buildSlimResultCloudPayload(payload);
 
   let successCount = 0, failCount = 0;
   const total = urlList.length;
+
+  const finishSyncUi = (backupOk) => {
+    if (!statusEl) return;
+    if (successCount > 0 || backupOk) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تمت مزامنة النتيجة مع Google Sheets بنجاح ✓`;
+    } else if (failCount === total) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشلت المزامنة. تأكد من: (1) نشر Apps Script كـ Web App لـ <b>Anyone</b> (2) استخدام رابط ينتهي بـ <b>/exec</b> (3) لصق الكود النهائي من تبويب الربط. تم حفظ نتيجتك محلياً على هذا الجهاز.`;
+    } else {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> مزامنة جزئية (${successCount}/${total}).`;
+    }
+  };
+
+  const backupPromise = pushCloudBackupNow();
+
   urlList.forEach(url => {
-    postToArabyaWebApp(url, payload).then(() => {
+    postToArabyaWebApp(url, slimPayload).then(() => {
       successCount++;
-      if (successCount + failCount === total && statusEl) {
-        statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تمت مزامنة النتيجة مع Google Sheets بنجاح ✓`;
+      if (successCount + failCount === total) {
+        backupPromise.then(finishSyncUi);
       }
-    }).catch(err => {
-      failCount++;
+    }).catch(async err => {
       console.error("Google Sheets sync error:", url, err);
-      if (successCount + failCount === total && statusEl) {
-        statusEl.innerHTML = failCount === total
-          ? `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشلت المزامنة. تأكد من نشر Apps Script كـ Web App لـ Anyone.`
-          : `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> مزامنة جزئية (${successCount}/${total} شيت نجح).`;
+      const sent = await postToArabyaWebAppNoCors(url, slimPayload);
+      if (sent) successCount++; else failCount++;
+      if (successCount + failCount === total) {
+        backupPromise.then(finishSyncUi);
       }
     });
   });
@@ -3208,7 +3325,8 @@ function renderStudentResultsTable() {
   tbody.innerHTML = "";
 
   if (systemState.results.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem;">لا توجد سجلات مسجلة للطلاب حتى الآن.</td></tr>`;
+    const hasCloud = getArabyaWebAppUrls().length > 0;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     return;
   }
 
