@@ -1513,6 +1513,18 @@ function getEffectiveExamSyncUrl(exam) {
     const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
     if (cfg.googleFormUrl) candidates.push(String(cfg.googleFormUrl).trim());
   } catch (e) {}
+  // احتياطي من حقول الشاشة (إذا غيّر المعلم الرابط ولم يغادر الصفحة بعد)
+  try {
+    const teacherUrlInput = document.getElementById("teacher-config-url");
+    if (teacherUrlInput && teacherUrlInput.value) candidates.push(String(teacherUrlInput.value).trim());
+    const examUrlInput = document.getElementById("edit-meta-google-url");
+    if (examUrlInput && examUrlInput.value) candidates.push(String(examUrlInput.value).trim());
+  } catch (e) {}
+  // إذا الرابط الحالي يحتوي s= نعيد استخدامه
+  try {
+    const s = getUrlParameter("s");
+    if (s) candidates.push(String(s).trim());
+  } catch (e) {}
   for (const u of candidates) {
     if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) return u;
   }
@@ -3744,22 +3756,80 @@ window.importStudentsFromJSON = function(event) {
 // ==========================================
 // 10. وظيفة نسخ رابط الامتحان بنجاح وتوافقية
 // ==========================================
+function buildExamShareLink(rawUrl) {
+  try {
+    const url = new URL(rawUrl, getAppBaseUrl());
+    let examId = url.searchParams.get("exam") || "";
+
+    // محاولة استخراج examId من المسار إذا لم يكن موجوداً في query
+    if (!examId) {
+      const segs = url.pathname.split('/').filter(Boolean);
+      const last = segs.length ? segs[segs.length - 1] : "";
+      const ex = (systemState.exams || []).find(e => String(e.id).toLowerCase() === String(last).toLowerCase());
+      if (ex) examId = ex.id;
+    }
+
+    let exam = null;
+    if (examId) {
+      exam = (systemState.exams || []).find(e => String(e.id).toLowerCase() === String(examId).toLowerCase()) || null;
+      url.searchParams.set("exam", examId);
+    }
+
+    if (!url.searchParams.get("teacher") && systemState.activeTeacher && systemState.activeTeacher.username) {
+      url.searchParams.set("teacher", systemState.activeTeacher.username);
+    }
+
+    // أضف s= دائماً عند توفر رابط مزامنة (حتى لو الرابط الأصلي كان قديماً)
+    let syncUrl = getEffectiveExamSyncUrl(exam || {});
+
+    // احتياطي: استنتاج الرابط من teacher الموجود داخل الرابط نفسه
+    if (!syncUrl) {
+      const teacherUser = url.searchParams.get("teacher") || "";
+      if (teacherUser && Array.isArray(systemState.teachers)) {
+        const t = systemState.teachers.find(x => x.username === teacherUser || x.name === teacherUser);
+        if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) {
+          const u = String(t.integrationConfig.googleFormUrl).trim();
+          if (u.includes("/macros/s/") || u.endsWith("/exec")) syncUrl = u;
+        }
+      }
+    }
+
+    // احتياطي أخير من التخزين المحلي
+    if (!syncUrl) {
+      try {
+        const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+        const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
+        if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) syncUrl = u;
+      } catch (e) {}
+    }
+
+    if (syncUrl) {
+      url.searchParams.set("s", syncUrl);
+    }
+
+    return url.toString();
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
 window.copyExamLink = function(url) {
   if (!url) {
     alert("رابط الامتحان غير صالح!");
     return;
   }
+  const normalizedUrl = buildExamShareLink(url);
   
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url)
+    navigator.clipboard.writeText(normalizedUrl)
       .then(() => {
         alert("تم نسخ رابط الامتحان بنجاح!");
       })
       .catch(err => {
-        fallbackCopyTextToClipboard(url);
+        fallbackCopyTextToClipboard(normalizedUrl);
       });
   } else {
-    fallbackCopyTextToClipboard(url);
+    fallbackCopyTextToClipboard(normalizedUrl);
   }
 };
 
