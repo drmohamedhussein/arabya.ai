@@ -669,7 +669,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
   if (!existingStudent && normalizedStudent.id) {
     existingStudent = findStudentById(normalizedStudent.id);
   }
-  if (!existingStudent && normalizedStudent.name) {
+  if (!existingStudent && normalizedStudent.name && !isSharedStudentCode(normalizedStudent.code)) {
     existingStudent = findStudentByName(normalizedStudent.name);
   }
 
@@ -2808,7 +2808,7 @@ function validateStudentAndStart() {
   if (!matchedStudent && normalizedId) {
     matchedStudent = findStudentById(normalizedId);
   }
-  if (!matchedStudent) {
+  if (!matchedStudent && !isSharedStudentCode(inputCode)) {
     matchedStudent = findStudentByName(name);
   }
 
