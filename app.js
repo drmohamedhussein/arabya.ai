@@ -254,9 +254,6 @@ function initDatabase() {
       systemState.teacherProfile = parsedProfile;
       if (parsedProfile.name) systemState.activeTeacher.name = parsedProfile.name;
       if (parsedProfile.subject) systemState.activeTeacher.subject = parsedProfile.subject;
-      if (parsedProfile.autoEntryCode) {
-        syncActiveTeacherCredentials(parsedProfile.autoEntryCode);
-      }
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     } catch(e){}
   }
@@ -338,6 +335,9 @@ function syncActiveTeacherCredentials(preferredCode = "") {
     autoEntryCode: code,
     teacherCode: code
   };
+  if (systemState.teacherProfile && typeof systemState.teacherProfile === "object") {
+    systemState.teacherProfile.autoEntryCode = code;
+  }
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
   if (idx !== -1) {
     systemState.teachers[idx].autoEntryCode = code;
@@ -346,6 +346,9 @@ function syncActiveTeacherCredentials(preferredCode = "") {
   try {
     localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    if (systemState.teacherProfile && typeof systemState.teacherProfile === "object") {
+      localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
+    }
   } catch (e) {}
 }
 
@@ -456,15 +459,11 @@ function findStudentByCode(code, options = {}) {
   if (isSharedStudentCode(clean)) {
     const normalizedId = normalizeStudentId(options.studentId);
     const normalizedName = normalizeStudentName(options.name);
-    if (normalizedId) {
-      const byId = systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentId(s.id) === normalizedId
-      );
-      if (byId) return byId;
-    }
     if (normalizedName) {
       return systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentName(s.name) === normalizedName
+        s => sanitizeStudentCodeInput(s.code) === clean &&
+          normalizeStudentName(s.name) === normalizedName &&
+          (!normalizeStudentId(s.id) || (normalizedId && normalizeStudentId(s.id) === normalizedId))
       ) || null;
     }
     return null;
@@ -713,7 +712,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
       name: normalizedStudent.name
     });
   }
-  if (!existingStudent && normalizedStudent.id) {
+  if (!existingStudent && normalizedStudent.id && !isSharedStudentCode(normalizedStudent.code)) {
     existingStudent = findStudentById(normalizedStudent.id);
   }
   if (!existingStudent && normalizedStudent.name && !isSharedStudentCode(normalizedStudent.code)) {
@@ -1927,6 +1926,12 @@ function saveTeacherIntegrationConfig() {
     entryDetails,
     autoEntryCode: systemState.activeTeacher.autoEntryCode || code
   };
+  systemState.teacherProfile = {
+    ...(systemState.teacherProfile || {}),
+    name: systemState.activeTeacher.name,
+    subject: systemState.activeTeacher.subject,
+    autoEntryCode: code
+  };
 
   // تحديث القائمة العامة والـ local storage
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
@@ -1936,6 +1941,7 @@ function saveTeacherIntegrationConfig() {
 
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   
   // تحديث مؤشر المزامنة فوراً بعد الحفظ
   const indicator = document.getElementById("cloud-sync-status-indicator");
@@ -2897,7 +2903,7 @@ function validateStudentAndStart() {
   if (isFiveDigitStudentCode(inputCode)) {
     matchedStudent = findStudentByCode(inputCode, { studentId: normalizedId, name });
   }
-  if (!matchedStudent && normalizedId) {
+  if (!matchedStudent && normalizedId && !isSharedStudentCode(inputCode)) {
     matchedStudent = findStudentById(normalizedId);
   }
   if (!matchedStudent && !isSharedStudentCode(inputCode)) {
