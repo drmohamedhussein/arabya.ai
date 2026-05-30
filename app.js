@@ -1088,10 +1088,18 @@ function setupUIEventListeners() {
       const targetPanel = document.getElementById(`teacher-tab-${tabId}`);
       if (targetPanel) targetPanel.classList.remove("hidden");
       reloadSystemStateFromLocalStorage();
-      if (tabId === "results") syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
-      else if (tabId === "students") syncDatabaseFromCloud({ silent: true }).finally(() => renderTeacherStudentsTable());
-      else if (tabId === "exams") renderExamsList();
-      else if (tabId === "integration" || tabId === "profile") loadTeacherDashboardData();
+      // العرض المحلي أولاً وفوراً (لا ننتظر المزامنة السحابية إطلاقاً)
+      if (tabId === "results") {
+        renderStudentResultsTable();
+        syncDatabaseFromCloud({ silent: true }).then(ok => { if (ok) renderStudentResultsTable(); }).catch(() => {});
+      } else if (tabId === "students") {
+        renderTeacherStudentsTable();
+        syncDatabaseFromCloud({ silent: true }).then(ok => { if (ok) renderTeacherStudentsTable(); }).catch(() => {});
+      } else if (tabId === "exams") {
+        renderExamsList();
+      } else if (tabId === "integration" || tabId === "profile") {
+        loadTeacherDashboardData();
+      }
     });
   });
 
@@ -2794,7 +2802,7 @@ function sendResultToGoogleSheets(scoreString, details, resultSource = "") {
         .then(() => { if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم إرسال النتيجة إلى Google Form بنجاح!`; })
         .catch(() => { if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشل الإرسال. تم حفظ النتيجة محلياً.`; });
     } else if (statusEl) {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> تم حفظ النتيجة محلياً ✓ (لم يتم ربط Google Sheets بعد)`;
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم حفظ نتيجتك بالكامل على الموقع بنجاح ✓ (المزامنة مع Google Sheets اختيارية وغير مفعّلة)`;
     }
     return;
   }
