@@ -254,9 +254,6 @@ function initDatabase() {
       systemState.teacherProfile = parsedProfile;
       if (parsedProfile.name) systemState.activeTeacher.name = parsedProfile.name;
       if (parsedProfile.subject) systemState.activeTeacher.subject = parsedProfile.subject;
-      if (parsedProfile.autoEntryCode) {
-        syncActiveTeacherCredentials(parsedProfile.autoEntryCode);
-      }
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     } catch(e){}
   }
@@ -338,6 +335,9 @@ function syncActiveTeacherCredentials(preferredCode = "") {
     autoEntryCode: code,
     teacherCode: code
   };
+  if (systemState.teacherProfile && typeof systemState.teacherProfile === "object") {
+    systemState.teacherProfile.autoEntryCode = code;
+  }
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
   if (idx !== -1) {
     systemState.teachers[idx].autoEntryCode = code;
@@ -346,6 +346,9 @@ function syncActiveTeacherCredentials(preferredCode = "") {
   try {
     localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    if (systemState.teacherProfile && typeof systemState.teacherProfile === "object") {
+      localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
+    }
   } catch (e) {}
 }
 
@@ -454,22 +457,25 @@ function findStudentByCode(code, options = {}) {
   const clean = sanitizeStudentCodeInput(code);
   if (!isFiveDigitStudentCode(clean)) return null;
   if (isSharedStudentCode(clean)) {
-    const normalizedId = normalizeStudentId(options.studentId);
-    const normalizedName = normalizeStudentName(options.name);
-    if (normalizedId) {
-      const byId = systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentId(s.id) === normalizedId
-      );
-      if (byId) return byId;
-    }
-    if (normalizedName) {
-      return systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentName(s.name) === normalizedName
-      ) || null;
-    }
-    return null;
+    return findStudentByIdentity(options.name, options.studentId, clean);
   }
   return systemState.students.find(student => sanitizeStudentCodeInput(student.code) === clean) || null;
+}
+
+function doesStudentIdentityMatch(student, name, studentId) {
+  const normalizedName = normalizeStudentName(name);
+  if (!normalizedName || normalizeStudentName(student?.name) !== normalizedName) return false;
+  const existingId = normalizeStudentId(student?.id);
+  const normalizedId = normalizeStudentId(studentId);
+  return !existingId || (normalizedId && existingId === normalizedId);
+}
+
+function findStudentByIdentity(name, studentId, code = "") {
+  const clean = sanitizeStudentCodeInput(code);
+  return systemState.students.find(student => {
+    if (clean && sanitizeStudentCodeInput(student.code) !== clean) return false;
+    return doesStudentIdentityMatch(student, name, studentId);
+  }) || null;
 }
 
 function findStudentById(studentId) {
@@ -713,11 +719,8 @@ function upsertStudentRecord(source, fallbackKey = "") {
       name: normalizedStudent.name
     });
   }
-  if (!existingStudent && normalizedStudent.id) {
-    existingStudent = findStudentById(normalizedStudent.id);
-  }
-  if (!existingStudent && normalizedStudent.name && !isSharedStudentCode(normalizedStudent.code)) {
-    existingStudent = findStudentByName(normalizedStudent.name);
+  if (!existingStudent && normalizedStudent.name && !isFiveDigitStudentCode(normalizedStudent.code)) {
+    existingStudent = findStudentByIdentity(normalizedStudent.name, normalizedStudent.id);
   }
 
   if (existingStudent) {
@@ -1927,6 +1930,12 @@ function saveTeacherIntegrationConfig() {
     entryDetails,
     autoEntryCode: systemState.activeTeacher.autoEntryCode || code
   };
+  systemState.teacherProfile = {
+    ...(systemState.teacherProfile || {}),
+    name: systemState.activeTeacher.name,
+    subject: systemState.activeTeacher.subject,
+    autoEntryCode: code
+  };
 
   // تحديث القائمة العامة والـ local storage
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
@@ -1936,6 +1945,7 @@ function saveTeacherIntegrationConfig() {
 
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   
   // تحديث مؤشر المزامنة فوراً بعد الحفظ
   const indicator = document.getElementById("cloud-sync-status-indicator");
@@ -2896,12 +2906,8 @@ function validateStudentAndStart() {
   let matchedStudent = null;
   if (isFiveDigitStudentCode(inputCode)) {
     matchedStudent = findStudentByCode(inputCode, { studentId: normalizedId, name });
-  }
-  if (!matchedStudent && normalizedId) {
-    matchedStudent = findStudentById(normalizedId);
-  }
-  if (!matchedStudent && !isSharedStudentCode(inputCode)) {
-    matchedStudent = findStudentByName(name);
+  } else {
+    matchedStudent = findStudentByIdentity(name, normalizedId);
   }
 
   if (isPrivateStudentCode(inputCode)) {
@@ -4163,8 +4169,12 @@ function setupStudentAutofill() {
     if (isFiveDigitStudentCode(codeVal) && !isSharedStudentCode(codeVal)) {
       matched = findStudentByCode(codeVal);
     }
-    if (!matched && idVal) {
-      matched = findStudentById(idVal);
+    if (!matched && nameInput.value.trim()) {
+      matched = findStudentByIdentity(
+        nameInput.value,
+        idVal,
+        isSharedStudentCode(codeVal) ? codeVal : ""
+      );
     }
     if (!matched) return;
 
