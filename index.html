@@ -160,9 +160,9 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="student-id-input">رقم المعرف (ID) <span class="required-badge" aria-hidden="true">*</span></label>
+          <label class="form-label" for="student-id-input">رقم المعرف (ID) (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-id-input" class="form-control" placeholder="أدخل رقمك الأكاديمي أو الجامعي..." required autocomplete="off" aria-required="true">
+            <input type="text" id="student-id-input" class="form-control" placeholder="اختياري: أدخل رقمك الأكاديمي أو الجامعي..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">badge</span>
           </div>
         </div>
@@ -170,8 +170,25 @@
         <div class="form-group">
           <label class="form-label" for="student-access-code">كود الاشتراك بموقع الامتحان (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-access-code" class="form-control" placeholder="أدخل كود الاشتراك إن وجد..." autocomplete="off">
+            <input type="text" id="student-access-code" class="form-control" placeholder="اختياري: 5 أرقام (مثال: 12345)" autocomplete="off" inputmode="numeric" maxlength="5">
             <span class="material-icons input-icon" aria-hidden="true">key</span>
+          </div>
+          <small style="color:var(--text-muted); font-size:0.8rem;">الكود الخاص يجب أن يكون 5 أرقام وفريد لكل طالب. الكود 00000 فقط يمكن استخدامه بشكل مشترك.</small>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-email-input">البريد الإلكتروني (اختياري)</label>
+          <div class="input-wrapper">
+            <input type="email" id="student-email-input" class="form-control" placeholder="اختياري: example@email.com" autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">mail</span>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-mobile-input">رقم الموبايل (اختياري)</label>
+          <div class="input-wrapper">
+            <input type="text" id="student-mobile-input" class="form-control" placeholder="اختياري: 01xxxxxxxxx" autocomplete="off">
+            <span class="material-icons input-icon" aria-hidden="true">call</span>
           </div>
         </div>
 
@@ -639,7 +656,32 @@
                   <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label" for="edit-meta-timelimit">وقت الامتحان الكلي (بالدقائق):</label>
                     <input type="number" id="edit-meta-timelimit" class="form-control" min="1" value="60" placeholder="60">
-                    <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
+                    <small style="color:var(--text-muted); font-size:0.8rem;">يُستخدم كاحتياطي إذا لم تُحدَّد مدة لكل سؤال. يمكنك ضبط مدة كل سؤال بالثواني أسفل كل سؤال.</small>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-max-cheat-attempts">عدد محاولات الغش المسموحة قبل إلغاء الامتحان:</label>
+                    <input type="number" id="edit-meta-max-cheat-attempts" class="form-control" min="0" step="1" value="5" placeholder="5">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">0 = بدون حد (تحذير فقط بدون إلغاء تلقائي). 1 = إلغاء الامتحان عند أول محاولة غش.</small>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-ends-at">انتهاء الاختبار (تاريخ ووقت):</label>
+                    <input type="datetime-local" id="edit-meta-ends-at" class="form-control">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">اتركه فارغاً لعدم تحديد موعد نهائي. بعد هذا الوقت لا يمكن للطلاب الدخول أو أداء الامتحان. غيّر التاريخ لإعادة فتحه.</small>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-randomize">ترتيب عرض الأسئلة للطلاب:</label>
+                    <div class="input-wrapper">
+                      <input type="checkbox" id="edit-meta-randomize" checked>
+                      <span style="font-size:0.8rem; color:var(--text-muted); margin-left:0.5rem;">عرض الأسئلة بطريقة عشوائية لكل طالب</span>
+                    </div>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-question-count">عدد الأسئلة المعروضة من بنك الأسئلة:</label>
+                    <input type="number" id="edit-meta-question-count" class="form-control" min="1" step="1" placeholder="اتركه فارغاً لعرض جميع الأسئلة">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">يحدد عدد الأسئلة العشوائية من بنك الأسئلة.</small>
                   </div>
                 </div>
 
@@ -731,11 +773,15 @@
                 </button>
                 <input type="file" id="teacher-results-file-input" style="display: none;" accept=".json">
                 
+                <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="pullTeacherResultsFromCloud()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">cloud_sync</span> مزامنة من السحابة
+                </button>
                 <button id="teacher-clear-results-btn" class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">delete</span> مسح السجلات
                 </button>
               </div>
             </div>
+            <div id="teacher-results-sync-status" style="margin:0.75rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;"></div>
 
             <div class="table-container">
               <table>
@@ -793,9 +839,15 @@
                 <!-- تُعبأ عبر JS -->
               </div>
               
-              <button class="btn btn-primary" onclick="saveResultDetailsManual()">
-                <span class="material-icons">save</span> حفظ كافة التعديلات والإجابات يدوياً
-              </button>
+              <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-top:1.5rem;">
+                <button class="btn btn-primary" onclick="saveResultDetailsManual()">
+                  <span class="material-icons">save</span> حفظ كافة التعديلات والإجابات يدوياً
+                </button>
+                <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="(()=>{ const res=systemState.currentGradingResult; if(!res){alert('لا توجد نتيجة محددة');return;} const el=document.getElementById('grading-sync-status'); sendUpdatedResultToCloud(res,el); })()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">cloud_sync</span> مزامنة الدرجات مع Google Sheets
+                </button>
+              </div>
+              <div id="grading-sync-status" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-muted); min-height:1.5rem;"></div>
             </div>
           </div>
 
@@ -895,110 +947,170 @@
 
               <h4 style="color:var(--accent); margin-bottom:0.5rem; font-weight:700; font-size:1.05rem;">الكود البرمجي الموحد للربط والمزامنة (Google Apps Script):</h4>
               <textarea id="google-sheets-sync-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem; min-height: 200px; direction: ltr; text-align: left; background: rgba(0,0,0,0.3); color:#34d399; margin-bottom:0.75rem;" readonly>/**
- * Google Apps Script - ARABYA.NET Platform Integration
- * يربط منصة الامتحانات بجداول Google Sheets تلقائياً
- * النسخة المحدّثة: تدعم add_result + save_backup + get_backup
+ * ARABYA.NET - Google Apps Script Backend (Final)
+ *
+ * يدعم:
+ * - add_result   : تسجيل/تحديث نتيجة طالب في ورقة "نتائج الطلاب"
+ * - save_backup  : حفظ نسخة JSON كاملة في ورقة "ARABYA_BACKUP"
+ * - get_backup   : استرجاع النسخة الاحتياطية (GET ?action=get_backup)
+ *
+ * خطوات النشر:
+ * 1) Extensions → Apps Script → الصق هذا الكود بالكامل
+ * 2) Deploy → New deployment → Web app
+ * 3) Execute as: Me | Who has access: Anyone
+ * 4) انسخ رابط /exec إلى تبويب "الربط بـ Google Sheets" في ARABYA.NET
  */
 
+var ARABYA_RESULTS_HEADERS = [
+  "معرف السجل",
+  "التاريخ والوقت",
+  "اسم الطالب",
+  "رقم ID",
+  "كود الاشتراك",
+  "مفتاح الطالب",
+  "البريد",
+  "الموبايل",
+  "الامتحان",
+  "معرف الامتحان",
+  "الجامعة",
+  "الكلية",
+  "الفرقة",
+  "النوع",
+  "الحالة",
+  "النتيجة",
+  "التفاصيل"
+];
+
 function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet();
-  var payload;
-  
-  // إضافة CORS headers
-  var output;
-  
   try {
-    payload = JSON.parse(e.postData.contents);
-  } catch(err) {
-    return ContentService.createTextOutput(
-      JSON.stringify({ status: "error", message: "Invalid JSON" })
-    ).setMimeType(ContentService.MimeType.JSON);
-  }
+    var payload = parseArabyaPayload_(e);
+    var action = payload.action || "add_result";
 
-  // ============================================
-  // 1. حفظ نتيجة طالب محدد (add_result أو أي طلب آخر)
-  // ============================================
-  if (!payload.action || payload.action === "add_result") {
-    var resultsSheet = sheet.getSheetByName("نتائج الطلاب");
-    if (!resultsSheet) {
-      resultsSheet = sheet.insertSheet("نتائج الطلاب");
-      resultsSheet.appendRow([
-        "معرف السجل", "التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك",
-        "الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"
-      ]);
-      // تنسيق الصف الأول
-      resultsSheet.getRange(1, 1, 1, 12).setFontWeight("bold").setBackground("#1e293b").setFontColor("#ffffff");
+    if (action === "add_result") {
+      upsertArabyaResult_(payload);
+      return jsonArabya_({ status: "success", action: action, message: "تم تسجيل/تحديث النتيجة بنجاح" });
     }
 
-    resultsSheet.appendRow([
-      payload.recordId || "",
-      payload.timestamp || new Date().toLocaleString("ar-EG"),
-      payload.name || "",
-      payload.id || "",
-      payload.subscriptionCode || "",
-      payload.examTitle || "",
-      payload.university || "",
-      payload.faculty || "",
-      payload.level || "",
-      payload.examType || "",
-      payload.score || "",
-      payload.details || ""
-    ]);
-
-    return ContentService.createTextOutput(
-      JSON.stringify({ status: "success", message: "تم تسجيل النتيجة بنجاح!" })
-    ).setMimeType(ContentService.MimeType.JSON);
-  }
-
-  // ============================================
-  // 2. حفظ النسخة الاحتياطية الكاملة (save_backup)
-  // ============================================
-  if (payload.action === "save_backup") {
-    var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
-    if (!backupSheet) {
-      backupSheet = sheet.insertSheet("ARABYA_BACKUP");
+    if (action === "save_backup") {
+      saveArabyaBackup_(payload.data || {});
+      return jsonArabya_({ status: "success", action: action, message: "تم حفظ النسخة الاحتياطية بنجاح" });
     }
-    backupSheet.clear();
-    backupSheet.appendRow(["Timestamp", "Database Backup (JSON)"]);
-    backupSheet.appendRow([new Date().toLocaleString("ar-EG"), JSON.stringify(payload.data)]);
 
-    return ContentService.createTextOutput(
-      JSON.stringify({ status: "success", message: "تم حفظ النسخة الاحتياطية بنجاح!" })
-    ).setMimeType(ContentService.MimeType.JSON);
+    return jsonArabya_({ status: "ignored", action: action });
+  } catch (err) {
+    return jsonArabya_({ status: "error", message: err.message });
   }
-
-  return ContentService.createTextOutput(
-    JSON.stringify({ status: "ok" })
-  ).setMimeType(ContentService.MimeType.JSON);
 }
 
 function doGet(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet();
-
-  // استعادة النسخة الاحتياطية
-  if (e.parameter.action === "get_backup") {
-    var backupSheet = sheet.getSheetByName("ARABYA_BACKUP");
-    if (!backupSheet || backupSheet.getLastRow() < 2) {
-      return ContentService.createTextOutput(
-        JSON.stringify({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." })
-      ).setMimeType(ContentService.MimeType.JSON);
+  try {
+    var action = e && e.parameter ? e.parameter.action : "";
+    if (action === "get_backup") {
+      var data = readArabyaBackup_();
+      if (!data) {
+        return jsonArabya_({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." });
+      }
+      return jsonArabya_({ status: "success", data: data });
     }
-    var backupDataStr = backupSheet.getRange(2, 2).getValue();
-    try {
-      return ContentService.createTextOutput(
-        JSON.stringify({ status: "success", data: JSON.parse(backupDataStr) })
-      ).setMimeType(ContentService.MimeType.JSON);
-    } catch(err) {
-      return ContentService.createTextOutput(
-        JSON.stringify({ status: "error", message: "بيانات النسخة الاحتياطية تالفة." })
-      ).setMimeType(ContentService.MimeType.JSON);
+    return jsonArabya_({ status: "active", service: "ARABYA.NET backend", version: 3 });
+  } catch (err) {
+    return jsonArabya_({ status: "error", message: err.message });
+  }
+}
+
+function parseArabyaPayload_(e) {
+  if (!e || !e.postData || !e.postData.contents) return {};
+  try {
+    return JSON.parse(e.postData.contents);
+  } catch (err) {
+    throw new Error("Invalid JSON payload: " + err.message);
+  }
+}
+
+function getResultsSheet_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("نتائج الطلاب");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("نتائج الطلاب");
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(ARABYA_RESULTS_HEADERS);
+    sheet.getRange(1, 1, 1, ARABYA_RESULTS_HEADERS.length)
+      .setFontWeight("bold")
+      .setBackground("#1e293b")
+      .setFontColor("#ffffff");
+  }
+  return sheet;
+}
+
+function buildResultRow_(payload) {
+  return [
+    payload.recordId || "",
+    payload.timestamp || new Date().toLocaleString("ar-EG"),
+    payload.name || "",
+    payload.id || "",
+    payload.subscriptionCode || payload.accessCode || "",
+    payload.studentLookupKey || "",
+    payload.email || "",
+    payload.mobile || "",
+    payload.examTitle || "",
+    payload.examId || "",
+    payload.university || "",
+    payload.faculty || "",
+    payload.level || "",
+    payload.examType || "",
+    payload.status || (payload.isManualGradeUpdate ? "updated" : "completed"),
+    payload.score || "",
+    payload.details || ""
+  ];
+}
+
+function upsertArabyaResult_(payload) {
+  var sheet = getResultsSheet_();
+  var rowValues = buildResultRow_(payload);
+  var recordId = String(payload.recordId || "").trim();
+
+  if (recordId) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]).trim() === recordId) {
+          sheet.getRange(i + 2, 1, 1, rowValues.length).setValues([rowValues]);
+          return;
+        }
+      }
     }
   }
 
-  return ContentService.createTextOutput(
-    "ARABYA.NET - خادم المزامنة نشط ويعمل بنجاح ✓"
-  );
-}</textarea>
+  sheet.appendRow(rowValues);
+}
+
+function saveArabyaBackup_(data) {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("ARABYA_BACKUP");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("ARABYA_BACKUP");
+  }
+  sheet.clear();
+  sheet.appendRow(["Timestamp", "Database Backup JSON"]);
+  sheet.appendRow([new Date().toLocaleString("ar-EG"), JSON.stringify(data)]);
+}
+
+function readArabyaBackup_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("ARABYA_BACKUP");
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  var raw = sheet.getRange(2, 2).getValue();
+  if (!raw) return null;
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
+}
+
+function jsonArabya_(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+</textarea>
               <button class="btn btn-outline btn-sm" style="border-color: var(--accent); color: var(--accent);" onclick="copyGoogleSheetsSyncScript()">نسخ كود الربط السحابي</button>
             </div>
 
@@ -1094,6 +1206,8 @@ function doGet(e) {
                     <th>اسم الطالب</th>
                     <th>رقم الـ ID</th>
                     <th>كود الاشتراك</th>
+                    <th>البريد</th>
+                    <th>الموبايل</th>
                     <th>تاريخ التسجيل</th>
                     <th>الإجراء</th>
                   </tr>
