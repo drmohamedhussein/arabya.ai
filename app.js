@@ -2967,7 +2967,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
       scoreRow.style.gap = "0.5rem";
       scoreRow.innerHTML = `
         <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
-        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" oninput="recalcResultTotal()" style="width:100px; padding:0.4rem 0.8rem;">
         <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات كحد أقصى</span>
       `;
 
@@ -3018,7 +3018,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
       scoreRow.style.gap = "0.5rem";
       scoreRow.innerHTML = `
         <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
-        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" oninput="recalcResultTotal()" style="width:100px; padding:0.4rem 0.8rem;">
         <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات</span>
       `;
 
@@ -3031,6 +3031,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
           } else {
             scoreInput.value = 0;
           }
+          recalcResultTotal();
         }
       });
 
@@ -3049,6 +3050,18 @@ window.closeResultDetailPanel = function() {
   if (panel) panel.classList.add("hidden");
   systemState.currentGradingResult = null;
   systemState.currentGradingExam = null;
+};
+
+// إعادة حساب النتيجة الإجمالية مباشرة من مجموع درجات الأسئلة المعدّلة وعرضها في حقل النتيجة
+window.recalcResultTotal = function() {
+  const exam = systemState.currentGradingExam;
+  if (!exam) return;
+  let total = 0;
+  document.querySelectorAll("#detail-questions-container .edit-student-q-score").forEach(el => {
+    total += parseFloat(el.value) || 0;
+  });
+  const field = document.getElementById("detail-total-score-input");
+  if (field) field.value = `${total}/${exam.totalScore || 100} (درجة كلية)`;
 };
 
 window.saveTotalScoreManual = function() {
@@ -3120,8 +3133,8 @@ window.saveResultDetailsManual = function() {
 
   res.details = detailsLog.join("\n");
 
-  const manualTotalInput = document.getElementById("detail-total-score-input").value.trim();
-  res.score = manualTotalInput || `${totalEarnedPoints}/${exam.totalScore || 100} (درجة كلية)`;
+  // المجموع يُعاد حسابه دائماً من درجات الأسئلة المعدّلة يدوياً
+  res.score = `${totalEarnedPoints}/${exam.totalScore || 100} (درجة كلية)`;
 
   saveSystemState(true);
   
