@@ -633,13 +633,14 @@
                     </select>
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label" for="edit-meta-totalscore">المجموع النهائي الكلي (درجة):</label>
-                    <input type="number" id="edit-meta-totalscore" class="form-control" min="1">
+                    <label class="form-label" for="edit-meta-totalscore">المجموع النهائي الكلي (درجة) — يُحسب تلقائياً:</label>
+                    <input type="number" id="edit-meta-totalscore" class="form-control" min="0" readonly style="background: rgba(20,184,166,0.06); font-weight:700; color:var(--secondary);">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">= مجموع درجات كل الأسئلة. عدّل درجة كل سؤال بالأسفل (الافتراضي 10 درجات لكل سؤال).</small>
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
-                    <label class="form-label" for="edit-meta-timelimit">وقت الامتحان الكلي (بالدقائق):</label>
-                    <input type="number" id="edit-meta-timelimit" class="form-control" min="1" value="60" placeholder="60">
-                    <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
+                    <label class="form-label" for="edit-meta-timelimit">وقت الامتحان الكلي (بالدقائق) — يُحسب تلقائياً:</label>
+                    <input type="number" id="edit-meta-timelimit" class="form-control" min="0" readonly style="background: rgba(20,184,166,0.06); font-weight:700; color:var(--secondary);">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">= مجموع أوقات كل الأسئلة. لكل سؤال وقت مخصص (الافتراضي دقيقة واحدة) ثم ينتقل تلقائياً للسؤال التالي.</small>
                   </div>
                 </div>
 
@@ -801,7 +802,18 @@
 
           <!-- تبويب ربط جوجل شيتس واستيراد جوجل فورم -->
           <div id="teacher-tab-integration" class="teacher-tab-panel hidden" role="tabpanel">
-            
+
+            <!-- صندوق توضيحي: الفرق بين الرابطين -->
+            <div class="config-card-box" style="background: rgba(20, 184, 166, 0.05); border-color: rgba(20, 184, 166, 0.25); margin-bottom: 2rem;">
+              <h4 style="color:var(--secondary); margin-bottom:0.75rem; font-weight:700;">كيف تعمل المزامنة؟ (اقرأ هذا أولاً)</h4>
+              <ul style="margin-right:1.25rem; line-height:1.9; color:var(--text-primary); font-size:0.9rem;">
+                <li><strong>كل البيانات تُحفظ داخل الموقع تلقائياً</strong> في حساب المعلم (المعلمون، الطلاب، الامتحانات، النتائج، التصحيح) — سواء ربطت Google Sheets أم لا. الربط اختياري للنسخ الاحتياطي والوصول من أجهزة متعددة.</li>
+                <li><strong>رابط المزامنة في هذا التبويب (بالأسفل) = قاعدة بيانات مركزية واحدة</strong> تجمع كل نشاط المعلم (كل الامتحانات والطلاب والنتائج) في جدول واحد للنسخ الاحتياطي والاستعادة.</li>
+                <li><strong>رابط المزامنة داخل كل امتحان (في «تعديل الامتحان») = جدول خاص بذلك الامتحان فقط</strong>، لكي يكون لكل امتحان شيت مستقل لا يتعارض مع غيره. اتركه فارغاً لاستخدام الرابط المركزي.</li>
+                <li>لمعرفة حالة المزامنة لأي امتحان: افتح تبويب «الامتحانات» واضغط زر <strong>(اختبار المزامنة)</strong> — أيقونة خضراء = يعمل، حمراء = لا يعمل.</li>
+              </ul>
+            </div>
+
             <!-- قسم الاستيراد والتصدير مع جوجل فورم -->
             <div class="panel-header">
               <div class="panel-title">استيراد امتحانات من Google Forms</div>
@@ -824,8 +836,8 @@
 
             <!-- إعدادات مزامنة جوجل شيتس -->
             <div class="panel-header" style="margin-top: 3rem;">
-              <div class="panel-title">إعدادات مزامنة Google Sheets السحابية</div>
-              <div style="font-size:0.85rem; color:var(--text-muted);">ربط تلقائي لترحيل الدرجات، الأسئلة المقالية والبيانات الأكاديمية</div>
+              <div class="panel-title">رابط قاعدة البيانات المركزية للمعلم (Google Sheets)</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">رابط واحد يجمع ويزامن كل بيانات المعلم (الامتحانات، الطلاب، النتائج) كنسخة احتياطية سحابية شاملة</div>
             </div>
 
             <div class="form-group">
@@ -834,8 +846,9 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="teacher-config-url">رابط المزامنة (Google Form Submit URL / Web App URL):</label>
+              <label class="form-label" for="teacher-config-url">رابط قاعدة البيانات المركزية (Web App URL المنتهي بـ /exec):</label>
               <input type="text" id="teacher-config-url" class="form-control" placeholder="https://script.google.com/macros/s/XXXX/exec">
+              <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">هذا الرابط يخص قاعدة البيانات الشاملة للمعلم. لربط امتحان معيّن بجدول مستقل، ضع رابطه داخل «تعديل الامتحان».</small>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">

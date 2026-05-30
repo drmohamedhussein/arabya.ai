@@ -116,7 +116,9 @@ document.addEventListener("DOMContentLoaded", () => {
             systemState.isExamActive = true;
             navigateToView("exam-runner-view");
             renderRunnerQuestion();
-            startRunnerTimerWithTime(session.timeRemaining || 60);
+            const resumeQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
+            systemState.timer.timeLimit = Math.max(5, Math.round((resumeQ && resumeQ.timeMinutes !== undefined ? resumeQ.timeMinutes : 1) * 60));
+            startRunnerTimerWithTime(session.timeRemaining || systemState.timer.timeLimit);
             return;
           }
         } else {
@@ -318,7 +320,10 @@ function saveSystemState(syncToCloud = true) {
   } catch(e) {
     console.error("saveSystemState: خطأ في حفظ البيانات محلياً:", e);
   }
-  
+
+  // إعلام لوحة المعلم بالتحديث الفوري في نفس النافذة (تبويبات الطلاب/النتائج)
+  try { window.dispatchEvent(new Event("arabya-data-changed")); } catch(e) {}
+
   if (syncToCloud) {
     autoSyncToCloud();
   }
@@ -1405,6 +1410,11 @@ function renderExamsList() {
     // ربط المعلم النشط بالرابط تلقائياً
     const examUrl = getExamDirectLink(exam);
     const totalExamScore = exam.totalScore || 100;
+    const totalExamTime = exam.timeLimit || (exam.questions || []).reduce((s, q) => s + (parseFloat(q.timeMinutes) || 1), 0);
+    const syncUrl = getEffectiveExamSyncUrl(exam);
+    const badge = syncUrl
+      ? `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_queue</span> رابط المزامنة مهيأ — اضغط (اختبار المزامنة) للتأكد</span>`
+      : `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_off</span> لا يوجد رابط مزامنة لهذا الامتحان (يُحفظ محلياً فقط)</span>`;
 
     card.innerHTML = `
       <div>
@@ -1414,13 +1424,15 @@ function renderExamsList() {
         </div>
         <div class="exam-info-details">
           <span>الكلية: ${exam.faculty || 'عام'} | الجامعة: ${exam.university || 'عام'}</span>
-          <span>المجموع النهائي الكلي: <code style="color:var(--accent); font-weight:700;">${totalExamScore} درجة</code></span>
+          <span>المجموع النهائي الكلي: <code style="color:var(--accent); font-weight:700;">${totalExamScore} درجة</code> | الوقت الكلي: <code style="color:var(--accent); font-weight:700;">${totalExamTime} دقيقة</code></span>
           <span>النوع: ${exam.examType || 'أعمال فصلية'} | عدد الأسئلة: ${exam.questions.length}</span>
+          <span style="margin-top:0.35rem; font-size:0.82rem;">${badge}</span>
         </div>
       </div>
       <div>
         <div class="exam-actions-row">
           <button class="btn btn-primary btn-sm" onclick="editExamQuestions('${exam.id}')">تعديل الامتحان والأسئلة</button>
+          <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="testExamSync('${exam.id}')">اختبار المزامنة</button>
           <button class="btn btn-outline btn-sm" onclick="copyExamLink('${examUrl}')">نسخ الرابط</button>
           <button class="btn btn-outline btn-sm" onclick="generateGoogleFormScript('${exam.id}')">تصدير لجوجل فورم</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteExam('${exam.id}')">حذف</button>
@@ -1430,6 +1442,46 @@ function renderExamsList() {
     container.appendChild(card);
   });
 }
+
+// الرابط السحابي الفعّال لهذا الامتحان: رابطه الخاص أولاً، ثم رابط المعلم العام
+function getEffectiveExamSyncUrl(exam) {
+  const candidates = [];
+  if (exam && exam.googleFormUrl) candidates.push(String(exam.googleFormUrl).trim());
+  if (systemState.config && systemState.config.googleFormUrl) candidates.push(String(systemState.config.googleFormUrl).trim());
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    candidates.push(String(systemState.activeTeacher.integrationConfig.googleFormUrl).trim());
+  }
+  for (const u of candidates) {
+    if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) return u;
+  }
+  return "";
+}
+
+// اختبار اتصال المزامنة لامتحان معيّن وإظهار أيقونة خضراء (نجاح) أو حمراء (فشل)
+window.testExamSync = function(examId) {
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return;
+  const badge = document.getElementById("sync-badge-" + examId);
+  const url = getEffectiveExamSyncUrl(exam);
+  if (!url) {
+    if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--error);">cloud_off</span> <span style="color:var(--error); font-weight:700;">لا يوجد رابط مزامنة. أضف رابط الويب اب في تعديل الامتحان أو في تبويب الربط.</span>`;
+    return;
+  }
+  if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--secondary); animation:spin 1s infinite linear;">sync</span> <span style="color:var(--secondary); font-weight:700;">جاري اختبار الاتصال بجوجل شيت...</span>`;
+  const testUrl = url + (url.includes("?") ? "&" : "?") + "action=get_backup";
+  fetch(testUrl, { method: "GET", headers: { Accept: "application/json" } })
+    .then(res => res.json())
+    .then(data => {
+      if (data && (data.status === "success" || data.status === "active")) {
+        if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--success);">cloud_done</span> <span style="color:var(--success); font-weight:700;">المزامنة تعمل بنجاح ✓ (الاتصال سليم)</span>`;
+      } else {
+        if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--error);">error</span> <span style="color:var(--error); font-weight:700;">استجابة غير متوقعة. تأكد من نشر Apps Script كـ Web App للجميع (Anyone).</span>`;
+      }
+    })
+    .catch(() => {
+      if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--error);">cloud_off</span> <span style="color:var(--error); font-weight:700;">فشل الاتصال. تحقق من الرابط ومن نشر Apps Script للجميع (Anyone).</span>`;
+    });
+};
 
 // إنشاء امتحان جديد
 function createNewExam() {
@@ -1565,14 +1617,18 @@ function renderQuestionsForEdit(exam) {
         <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteQuestion(${index})">حذف السؤال</button>
       </div>
       
-      <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 1rem; margin-bottom:1rem;">
+      <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 1rem; margin-bottom:1rem;">
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">نص السؤال:</label>
           <input type="text" class="form-control edit-q-text" value="${q.question}" data-index="${index}">
         </div>
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">درجة السؤال:</label>
-          <input type="number" class="form-control edit-q-points" value="${q.points !== undefined ? q.points : 10}" min="1" data-index="${index}">
+          <input type="number" class="form-control edit-q-points" value="${q.points !== undefined ? q.points : 10}" min="1" step="1" data-index="${index}" oninput="recalcExamTotals()">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">وقت السؤال (دقائق):</label>
+          <input type="number" class="form-control edit-q-time" value="${q.timeMinutes !== undefined ? q.timeMinutes : 1}" min="0.25" step="0.25" data-index="${index}" oninput="recalcExamTotals()">
         </div>
       </div>
     `;
@@ -1643,7 +1699,26 @@ function renderQuestionsForEdit(exam) {
   saveBtn.innerHTML = `<span class="material-icons">save</span> حفظ جميع التعديلات الحالية`;
   saveBtn.addEventListener("click", saveAllEditedQuestions);
   container.appendChild(saveBtn);
+
+  recalcExamTotals();
 }
+
+// إعادة حساب المجموع الكلي للدرجات والوقت من مجموع الأسئلة وعرضها مباشرة
+window.recalcExamTotals = function() {
+  let totalPoints = 0;
+  let totalMinutes = 0;
+  document.querySelectorAll("#editor-questions-list .edit-q-points").forEach(el => {
+    totalPoints += parseFloat(el.value) || 0;
+  });
+  document.querySelectorAll("#editor-questions-list .edit-q-time").forEach(el => {
+    totalMinutes += parseFloat(el.value) || 0;
+  });
+  totalMinutes = Math.round(totalMinutes * 100) / 100;
+  const scoreEl = document.getElementById("edit-meta-totalscore");
+  const timeEl = document.getElementById("edit-meta-timelimit");
+  if (scoreEl) scoreEl.value = totalPoints;
+  if (timeEl) timeEl.value = totalMinutes;
+};
 
 // حفظ الأسئلة والبيانات الأكاديمية لاحقاً (تعديل كامل)
 function saveAllEditedQuestions() {
@@ -1677,8 +1752,6 @@ function saveAllEditedQuestions() {
   exam.faculty = editFaculty;
   exam.university = editUniversity;
   exam.examType = editType;
-  exam.totalScore = editTotalScore;
-  exam.timeLimit = parseFloat(document.getElementById("edit-meta-timelimit")?.value) || 60;
   exam.googleFormUrl = editGoogleUrl;
   exam.entryName = editEntryName;
   exam.entryId = editEntryId;
@@ -1696,6 +1769,9 @@ function saveAllEditedQuestions() {
 
     const pointsInput = card.querySelector(".edit-q-points");
     const questionPoints = pointsInput ? parseFloat(pointsInput.value) || 10 : 10;
+
+    const timeInput = card.querySelector(".edit-q-time");
+    const questionTime = timeInput ? parseFloat(timeInput.value) || 1 : 1;
 
     const typeInput = exam.questions[index].type;
 
@@ -1721,11 +1797,17 @@ function saveAllEditedQuestions() {
       question: questionText,
       options,
       correctAnswer,
-      points: questionPoints // حفظ الوزن
+      points: questionPoints, // حفظ الوزن (الدرجة)
+      timeMinutes: questionTime // الوقت المخصص للسؤال بالدقائق
     });
   });
 
   exam.questions = updatedQuestions;
+
+  // المجموع الكلي = مجموع درجات الأسئلة، والوقت الكلي = مجموع أوقات الأسئلة
+  exam.totalScore = updatedQuestions.reduce((sum, q) => sum + (parseFloat(q.points) || 0), 0) || editTotalScore;
+  exam.timeLimit = Math.round(updatedQuestions.reduce((sum, q) => sum + (parseFloat(q.timeMinutes) || 0), 0) * 100) / 100 || 60;
+
   saveSystemState(true);
   
   // تحديث مؤشر حالة المزامنة بعد حفظ رابط الامتحان المخصص
@@ -1796,7 +1878,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب سؤال الاختيار من متعدد الجديد هنا...",
       options: ["الخيار الأول", "الخيار الثاني", "الخيار الثالث"],
       correctAnswer: 0,
-      points: 10
+      points: 10,
+      timeMinutes: 1
     };
   } else if (type === 'boolean') {
     newQ = {
@@ -1805,7 +1888,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب سؤال الصواب والخطأ هنا...",
       options: ["صواب", "خطأ"],
       correctAnswer: 0,
-      points: 10
+      points: 10,
+      timeMinutes: 1
     };
   } else {
     newQ = {
@@ -1814,7 +1898,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب نص السؤال المقالي الجديد هنا...",
       options: [],
       correctAnswer: "",
-      points: 10
+      points: 10,
+      timeMinutes: 1
     };
   }
 
@@ -2263,12 +2348,7 @@ function validateStudentAndStart() {
   updateLiveIncompleteResult();
   requestSecureExamMode();
 
-  // تعيين وقت الامتحان: الوقت الكلي (بالدقائق) مقسَّم على عدد الأسئلة = وقت كل سؤال (بالثواني)
-  const examTimeLimitMinutes = selectedExam.timeLimit || 60; // دقائق إجمالية
-  const questionsCount = systemState.shuffledQuestions.length || 1;
-  const perQuestionSeconds = Math.max(30, Math.floor((examTimeLimitMinutes * 60) / questionsCount));
-  systemState.timer.timeLimit = perQuestionSeconds;
-
+  // لكل سؤال وقته الخاص (timeMinutes)؛ يبدأ المؤقّت بوقت السؤال الحالي ثم ينتقل تلقائياً
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
   startRunnerTimer();
@@ -2410,7 +2490,10 @@ function selectRunnerOption(index) {
 }
 
 function startRunnerTimer() {
-  startRunnerTimerWithTime(systemState.timer.timeLimit);
+  const q = systemState.shuffledQuestions[systemState.currentQuestionIndex];
+  const perQuestionSeconds = Math.max(5, Math.round((q && q.timeMinutes !== undefined ? q.timeMinutes : 1) * 60));
+  systemState.timer.timeLimit = perQuestionSeconds;
+  startRunnerTimerWithTime(perQuestionSeconds);
 }
 
 function startRunnerTimerWithTime(seconds) {
