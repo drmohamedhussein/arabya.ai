@@ -37,9 +37,13 @@ function doPost(e) {
     }
 
     if (action === "save_backup") {
+      if (data.mode === "replace") {
+        var replaced = replaceArabyaBackup_(data.data || {});
+        return jsonArabya_({ status: "success", action: action, mode: "replace", counts: countArabya_(replaced) });
+      }
       var db = mergeArabyaDatabase_(data.data || {}, "save_backup");
       writeArabyaBackupSheet_(db);
-      return jsonArabya_({ status: "success", action: action, counts: countArabya_(db) });
+      return jsonArabya_({ status: "success", action: action, mode: "merge", counts: countArabya_(db) });
     }
 
     if (action === "save_entity") {
@@ -139,6 +143,21 @@ function mergeArabyaDatabase_(patch, reason) {
   db.auditLog = db.auditLog || [];
   db.auditLog.push({ at: db.updatedAt, reason: reason, counts: countArabya_(db) });
   if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
+  tryWriteArabyaGithub_(db);
+  return db;
+}
+
+function replaceArabyaBackup_(data) {
+  var db = cloneArabyaDefaultDb_();
+  ["teachers", "students", "exams", "results"].forEach(function(collection) {
+    if (Array.isArray(data[collection])) db[collection] = data[collection];
+  });
+  db.updatedAt = new Date().toISOString();
+  db.auditLog = (Array.isArray(data.auditLog) ? data.auditLog : []).concat([
+    { at: db.updatedAt, reason: "save_backup:replace", counts: countArabya_(db) }
+  ]);
+  if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
+  writeArabyaBackupSheet_(db);
   tryWriteArabyaGithub_(db);
   return db;
 }

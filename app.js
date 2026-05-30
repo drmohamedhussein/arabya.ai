@@ -579,6 +579,10 @@ window.backupDatabaseToCloud = function() {
     return;
   }
 
+  if (!confirm("سيتم استبدال النسخة الاحتياطية السحابية بالكامل ببياناتك الحالية على هذا الجهاز (المعلمون والطلاب والامتحانات والنتائج). هذا يطبّق أي عمليات حذف أجريتها محلياً. هل تريد المتابعة؟")) {
+    return;
+  }
+
   const dbBackup = {
     teachers: systemState.teachers,
     students: systemState.students,
@@ -588,6 +592,7 @@ window.backupDatabaseToCloud = function() {
 
   const payload = {
     action: "save_backup",
+    mode: "replace",
     data: dbBackup
   };
 
@@ -618,7 +623,7 @@ window.backupDatabaseToCloud = function() {
       autoSyncToCloud();
 
       if (failCount === 0) {
-        alert(`تم حفظ النسخة الاحتياطية سحابياً بنجاح على جميع جداول جوجل شيتس (${successCount}/${total})!`);
+        alert(`تم استبدال النسخة الاحتياطية السحابية ببياناتك الحالية بنجاح على جميع الجداول (${successCount}/${total})!`);
       } else if (successCount > 0) {
         alert(`تم حفظ النسخة الاحتياطية على (${successCount}/${total}) من الجداول وفشل الرفع على البعض الآخر.`);
       } else {
