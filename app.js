@@ -1293,23 +1293,11 @@ function fetchCloudBackupFromUrls(urlList) {
   });
 }
 
-function updateTeacherCloudHintBanner() {
-  const banner = document.getElementById("teacher-cloud-hint-banner");
-  if (!banner || !systemState.activeTeacher) return;
-  const urls = collectCloudSyncUrls();
-  if (urls.length > 0 || !isLikelyFreshLocalDatabase()) {
-    banner.classList.add("hidden");
-    return;
-  }
-  banner.classList.remove("hidden");
-}
-
 function finishTeacherLoginNavigation(options = {}) {
   navigateToView("teacher-dashboard-view");
   renderExamsList();
   renderTeacherStudentsTable();
   if (options.message) alert(options.message);
-  updateTeacherCloudHintBanner();
 }
 
 function syncTeacherDataOnLogin(options = {}) {
@@ -1319,11 +1307,6 @@ function syncTeacherDataOnLogin(options = {}) {
   const urls = collectCloudSyncUrls(extraSyncUrl);
   if (!urls.length) {
     finishTeacherLoginNavigation(options);
-    if (isLikelyFreshLocalDatabase()) {
-      setTimeout(() => {
-        alert("تنبيه: بيانات المنصة تُحفظ على هذا المتصفح فقط.\n\nللوصول لامتحاناتك ونتائجك من متصفح أو جهاز آخر:\n1) فعّل الربط بـ Google Sheets من لوحة المعلم\n2) ارفع نسخة احتياطية سحابية\n3) على الجهاز الجديد: أدخل نفس رابط Web App ثم سجّل الدخول");
-      }, 300);
-    }
     return Promise.resolve({ synced: false, reason: "no_url" });
   }
 
@@ -1534,8 +1517,7 @@ function navigateToView(viewId) {
     }
   } else if (viewId === "teacher-dashboard-view") {
     loadTeacherDashboardData();
-    updateTeacherCloudHintBanner();
-  }
+    }
 }
 
 // دالة مساعدة للحصول على المعاملات من الرابط (تدعم معاملات البحث بعد ? ومعاملات الهاش بعد #)
