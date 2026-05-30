@@ -5,6 +5,9 @@
  */
 
 // كائن الحالة العامة للنظام
+const ARABYA_APP_VERSION = "2026.05.30.3";
+window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
+
 let systemState = {
   activeView: "welcome-view",
   
@@ -90,6 +93,7 @@ document.addEventListener("DOMContentLoaded", () => {
   hydrateGoogleSheetsScriptBox();
 
   // ===== تشخيص ما تم تحميله =====
+  console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
   console.log(`[ARABYA] تم تحميل قاعدة البيانات:`,
     `معلمون=${systemState.teachers.length}`,
     `امتحانات=${systemState.exams.length}`,
@@ -249,11 +253,17 @@ function initDatabase() {
     try { 
       const parsedProfile = JSON.parse(savedProfile);
       systemState.teacherProfile = parsedProfile;
-      systemState.activeTeacher.name = parsedProfile.name;
-      systemState.activeTeacher.subject = parsedProfile.subject;
-      // حفظ محلي فقط دون مزامنة سحابية أثناء التهيئة
+      if (parsedProfile.name) systemState.activeTeacher.name = parsedProfile.name;
+      if (parsedProfile.subject) systemState.activeTeacher.subject = parsedProfile.subject;
+      if (parsedProfile.autoEntryCode) {
+        syncActiveTeacherCredentials(parsedProfile.autoEntryCode);
+      }
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     } catch(e){}
+  }
+
+  if (systemState.activeTeacher) {
+    syncActiveTeacherCredentials();
   }
   
   // 2. تهيئة قاعدة بيانات الامتحانات
@@ -310,6 +320,36 @@ function initDatabase() {
 }
 
 // حفظ قاعدة بيانات المعلمين محلياً (دون مزامنة سحابية)
+
+function syncActiveTeacherCredentials(preferredCode = "") {
+  if (!systemState.activeTeacher) return;
+  const code = String(
+    preferredCode ||
+    systemState.activeTeacher.autoEntryCode ||
+    systemState.activeTeacher.password ||
+    systemState.config?.autoEntryCode ||
+    systemState.config?.teacherCode ||
+    ""
+  ).trim();
+  if (!code) return;
+  systemState.activeTeacher.autoEntryCode = code;
+  systemState.activeTeacher.password = code;
+  systemState.config = {
+    ...(systemState.config || {}),
+    autoEntryCode: code,
+    teacherCode: code
+  };
+  const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+  if (idx !== -1) {
+    systemState.teachers[idx].autoEntryCode = code;
+    systemState.teachers[idx].password = code;
+  }
+  try {
+    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  } catch (e) {}
+}
+
 function saveTeachersToLocalStorage() {
   localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
 }
@@ -502,6 +542,14 @@ function sanitizeQuestionConfig(exam) {
       exam.endsAt = parsedEnd.toISOString();
     }
   }
+  exam.questions.forEach((question) => {
+    const parsedTime = parseInt(question.timeSeconds, 10);
+    if (!Number.isFinite(parsedTime) || parsedTime <= 0) {
+      question.timeSeconds = 60;
+    } else {
+      question.timeSeconds = Math.max(5, parsedTime);
+    }
+  });
 }
 
 
@@ -1746,6 +1794,10 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
   document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
   document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
+  const versionEl = document.getElementById("teacher-app-version-indicator");
+  if (versionEl) {
+    versionEl.textContent = `إصدار المنصة: ${ARABYA_APP_VERSION}`;
+  }
 
   document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
@@ -1828,7 +1880,7 @@ function saveTeacherProfile() {
     systemState.config.teacherCode = autoCode;
   }
 
-  systemState.teacherProfile = { name, subject };
+  systemState.teacherProfile = { name, subject, autoEntryCode: autoCode };
 
   // تحديث القائمة العامة
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
@@ -2109,7 +2161,7 @@ function renderQuestionsForEdit(exam) {
         <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteQuestion(${index})">حذف السؤال</button>
       </div>
       
-      <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1rem; margin-bottom:1rem;">
+      <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(110px, 1fr); gap: 1rem; margin-bottom:1rem;">
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">نص السؤال:</label>
           <input type="text" class="form-control edit-q-text" value="${q.question}" data-index="${index}">
