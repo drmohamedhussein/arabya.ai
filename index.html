@@ -768,11 +768,15 @@
                 </button>
                 <input type="file" id="teacher-results-file-input" style="display: none;" accept=".json">
                 
+                <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="pullTeacherResultsFromCloud()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">cloud_sync</span> مزامنة من السحابة
+                </button>
                 <button id="teacher-clear-results-btn" class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">delete</span> مسح السجلات
                 </button>
               </div>
             </div>
+            <div id="teacher-results-sync-status" style="margin:0.75rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;"></div>
 
             <div class="table-container">
               <table>
