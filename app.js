@@ -4079,24 +4079,79 @@ window.importStudentsFromJSON = function(event) {
 // ==========================================
 // 10. وظيفة نسخ رابط الامتحان بنجاح وتوافقية
 // ==========================================
+function buildExamShareLink(rawUrl) {
+  try {
+    const url = new URL(rawUrl, getAppBaseUrl());
+    let examId = url.searchParams.get("exam") || "";
+
+    if (!examId) {
+      const segs = url.pathname.split('/').filter(Boolean);
+      const last = segs.length ? segs[segs.length - 1] : "";
+      const ex = (systemState.exams || []).find(e => String(e.id).toLowerCase() === String(last).toLowerCase());
+      if (ex) examId = ex.id;
+    }
+
+    let exam = null;
+    if (examId) {
+      exam = (systemState.exams || []).find(e => String(e.id).toLowerCase() === String(examId).toLowerCase()) || null;
+      url.searchParams.set("exam", examId);
+    }
+
+    if (!url.searchParams.get("teacher") && systemState.activeTeacher && systemState.activeTeacher.username) {
+      url.searchParams.set("teacher", systemState.activeTeacher.username);
+    }
+
+    let syncUrl = getEffectiveExamSyncUrl(exam || {});
+
+    if (!syncUrl) {
+      const teacherUser = url.searchParams.get("teacher") || "";
+      if (teacherUser && Array.isArray(systemState.teachers)) {
+        const t = systemState.teachers.find(x => x.username === teacherUser || x.name === teacherUser);
+        if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) {
+          const u = String(t.integrationConfig.googleFormUrl).trim();
+          if (u.includes("/macros/s/") || u.endsWith("/exec")) syncUrl = u;
+        }
+      }
+    }
+
+    if (!syncUrl) {
+      try {
+        const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+        const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
+        if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) syncUrl = u;
+      } catch (e) {}
+    }
+
+    if (syncUrl) {
+      url.searchParams.set("s", syncUrl);
+    }
+
+    return url.toString();
+  } catch (e) {
+    return rawUrl;
+  }
+}
+
 window.copyExamLink = function(url) {
   if (!url) {
     alert("رابط الامتحان غير صالح!");
     return;
   }
+  const normalizedUrl = buildExamShareLink(url);
   
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url)
+    navigator.clipboard.writeText(normalizedUrl)
       .then(() => {
         alert("تم نسخ رابط الامتحان بنجاح!");
       })
       .catch(err => {
-        fallbackCopyTextToClipboard(url);
+        fallbackCopyTextToClipboard(normalizedUrl);
       });
   } else {
-    fallbackCopyTextToClipboard(url);
+    fallbackCopyTextToClipboard(normalizedUrl);
   }
 };
+
 
 function fallbackCopyTextToClipboard(text) {
   const textArea = document.createElement("textarea");
