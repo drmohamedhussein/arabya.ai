@@ -2839,7 +2839,6 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
     } else {
       statusEl.innerText = `للأسف، لم تجتز النسبة المطلوبة. درجتك هي: ${scaledScore} من ${examTotalScore} درجات.`;
       statusEl.style.color = "var(--error)";
-  systemState.currentExamRuntime = null;
     }
   }
 }
@@ -2871,6 +2870,11 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     mobile: resultObj?.mobile || systemState.currentStudent.mobile || "",
     examTitle: exam ? exam.title : "امتحان",
     examId: exam ? exam.id : "",
+    university: exam ? (exam.university || "") : (resultObj?.university || ""),
+    faculty: exam ? (exam.faculty || "") : (resultObj?.faculty || ""),
+    level: exam ? (exam.level || "") : (resultObj?.level || ""),
+    examType: exam ? (exam.examType || "") : (resultObj?.examType || ""),
+    status: resultObj?.status || "completed",
     score: scoreString,
     details: details,
     maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
@@ -2922,6 +2926,11 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     mobile: res.mobile || "",
     examTitle: res.examTitle || "",
     examId: res.examId || "",
+    university: res.university || "",
+    faculty: res.faculty || "",
+    level: res.level || "",
+    examType: res.examType || "",
+    status: res.status || "updated",
     score: res.score || "",
     details: res.details || "",
     maxScore: res.maxScore || "",
