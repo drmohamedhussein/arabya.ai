@@ -457,18 +457,25 @@ function findStudentByCode(code, options = {}) {
   const clean = sanitizeStudentCodeInput(code);
   if (!isFiveDigitStudentCode(clean)) return null;
   if (isSharedStudentCode(clean)) {
-    const normalizedId = normalizeStudentId(options.studentId);
-    const normalizedName = normalizeStudentName(options.name);
-    if (normalizedName) {
-      return systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean &&
-          normalizeStudentName(s.name) === normalizedName &&
-          (!normalizeStudentId(s.id) || (normalizedId && normalizeStudentId(s.id) === normalizedId))
-      ) || null;
-    }
-    return null;
+    return findStudentByIdentity(options.name, options.studentId, clean);
   }
   return systemState.students.find(student => sanitizeStudentCodeInput(student.code) === clean) || null;
+}
+
+function doesStudentIdentityMatch(student, name, studentId) {
+  const normalizedName = normalizeStudentName(name);
+  if (!normalizedName || normalizeStudentName(student?.name) !== normalizedName) return false;
+  const existingId = normalizeStudentId(student?.id);
+  const normalizedId = normalizeStudentId(studentId);
+  return !existingId || (normalizedId && existingId === normalizedId);
+}
+
+function findStudentByIdentity(name, studentId, code = "") {
+  const clean = sanitizeStudentCodeInput(code);
+  return systemState.students.find(student => {
+    if (clean && sanitizeStudentCodeInput(student.code) !== clean) return false;
+    return doesStudentIdentityMatch(student, name, studentId);
+  }) || null;
 }
 
 function findStudentById(studentId) {
@@ -712,11 +719,8 @@ function upsertStudentRecord(source, fallbackKey = "") {
       name: normalizedStudent.name
     });
   }
-  if (!existingStudent && normalizedStudent.id && !isSharedStudentCode(normalizedStudent.code)) {
-    existingStudent = findStudentById(normalizedStudent.id);
-  }
-  if (!existingStudent && normalizedStudent.name && !isSharedStudentCode(normalizedStudent.code)) {
-    existingStudent = findStudentByName(normalizedStudent.name);
+  if (!existingStudent && normalizedStudent.name && !isFiveDigitStudentCode(normalizedStudent.code)) {
+    existingStudent = findStudentByIdentity(normalizedStudent.name, normalizedStudent.id);
   }
 
   if (existingStudent) {
@@ -2902,12 +2906,8 @@ function validateStudentAndStart() {
   let matchedStudent = null;
   if (isFiveDigitStudentCode(inputCode)) {
     matchedStudent = findStudentByCode(inputCode, { studentId: normalizedId, name });
-  }
-  if (!matchedStudent && normalizedId && !isSharedStudentCode(inputCode)) {
-    matchedStudent = findStudentById(normalizedId);
-  }
-  if (!matchedStudent && !isSharedStudentCode(inputCode)) {
-    matchedStudent = findStudentByName(name);
+  } else {
+    matchedStudent = findStudentByIdentity(name, normalizedId);
   }
 
   if (isPrivateStudentCode(inputCode)) {
@@ -4169,8 +4169,12 @@ function setupStudentAutofill() {
     if (isFiveDigitStudentCode(codeVal) && !isSharedStudentCode(codeVal)) {
       matched = findStudentByCode(codeVal);
     }
-    if (!matched && idVal) {
-      matched = findStudentById(idVal);
+    if (!matched && nameInput.value.trim()) {
+      matched = findStudentByIdentity(
+        nameInput.value,
+        idVal,
+        isSharedStudentCode(codeVal) ? codeVal : ""
+      );
     }
     if (!matched) return;
 

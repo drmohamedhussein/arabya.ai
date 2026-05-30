@@ -41,18 +41,25 @@ function findStudentByCode(students, code, options = {}) {
   const clean = sanitizeStudentCodeInput(code);
   if (!isFiveDigitStudentCode(clean)) return null;
   if (isSharedStudentCode(clean)) {
-    const normalizedId = normalizeStudentId(options.studentId);
-    const normalizedName = normalizeStudentName(options.name);
-    if (normalizedName) {
-      return students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean &&
-          normalizeStudentName(s.name) === normalizedName &&
-          (!normalizeStudentId(s.id) || (normalizedId && normalizeStudentId(s.id) === normalizedId))
-      ) || null;
-    }
-    return null;
+    return findStudentByIdentity(students, options.name, options.studentId, clean);
   }
   return students.find(student => sanitizeStudentCodeInput(student.code) === clean) || null;
+}
+
+function doesStudentIdentityMatch(student, name, studentId) {
+  const normalizedName = normalizeStudentName(name);
+  if (!normalizedName || normalizeStudentName(student?.name) !== normalizedName) return false;
+  const existingId = normalizeStudentId(student?.id);
+  const normalizedId = normalizeStudentId(studentId);
+  return !existingId || (normalizedId && existingId === normalizedId);
+}
+
+function findStudentByIdentity(students, name, studentId, code = "") {
+  const clean = sanitizeStudentCodeInput(code);
+  return students.find(student => {
+    if (clean && sanitizeStudentCodeInput(student.code) !== clean) return false;
+    return doesStudentIdentityMatch(student, name, studentId);
+  }) || null;
 }
 
 function findStudentById(students, studentId) {
@@ -81,8 +88,8 @@ function upsertStudentRecord(students, source) {
       name: normalizedStudent.name
     });
   }
-  if (!existingStudent && normalizedStudent.id && !isSharedStudentCode(normalizedStudent.code)) {
-    existingStudent = findStudentById(students, normalizedStudent.id);
+  if (!existingStudent && normalizedStudent.name && !isFiveDigitStudentCode(normalizedStudent.code)) {
+    existingStudent = findStudentByIdentity(students, normalizedStudent.name, normalizedStudent.id);
   }
 
   if (existingStudent) {
@@ -107,12 +114,8 @@ function matchStudentForExamLogin(students, code, studentId, name) {
   let matchedStudent = null;
   if (isFiveDigitStudentCode(inputCode)) {
     matchedStudent = findStudentByCode(students, inputCode, { studentId: normalizedId, name });
-  }
-  if (!matchedStudent && normalizedId && !isSharedStudentCode(inputCode)) {
-    matchedStudent = findStudentById(students, normalizedId);
-  }
-  if (!matchedStudent && !isSharedStudentCode(inputCode)) {
-    matchedStudent = students.find(student => normalizeStudentName(student.name) === normalizeStudentName(name)) || null;
+  } else {
+    matchedStudent = findStudentByIdentity(students, name, normalizedId);
   }
   return matchedStudent;
 }
@@ -166,6 +169,8 @@ const sharedStudents = [{ code: "00000", id: "STU100", name: "Victim", studentKe
 assert.strictEqual(findStudentByCode(sharedStudents, "00000", { studentId: "STU100", name: "Attacker" }), null);
 assert.strictEqual(matchStudentForExamLogin(sharedStudents, "00000", "STU100", "Attacker"), null);
 assert.strictEqual(matchStudentForExamLogin(sharedStudents, "00000", "", "Victim"), null);
+assert.strictEqual(matchStudentForExamLogin(sharedStudents, "", "STU100", "Attacker"), null);
+assert.strictEqual(matchStudentForExamLogin(sharedStudents, "", "", "Victim"), null);
 assert.strictEqual(findStudentById(sharedStudents, "STU100").name, "Victim");
 const sharedInsert = upsertStudentRecord(sharedStudents, { name: "New Learner", id: "STU200", code: "00000" });
 assert.strictEqual(sharedInsert.name, "New Learner");
@@ -175,6 +180,7 @@ assert.strictEqual(sharedStudents.length, 2);
 // Shared code still reuses the same record when the submitted name and ID match.
 const matchedShared = findStudentByCode(sharedStudents, "00000", { studentId: "STU100", name: "Victim" });
 assert.strictEqual(matchedShared, sharedStudents[0]);
+assert.strictEqual(matchStudentForExamLogin(sharedStudents, "", "STU100", "Victim"), sharedStudents[0]);
 
 // Search: private code requires exact code
 const results = [
