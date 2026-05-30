@@ -131,8 +131,7 @@ document.addEventListener("DOMContentLoaded", () => {
               systemState.cheatViolations = session.cheatViolations || 0;
               systemState.isExamActive = true;
               systemState.isCheatingSuspended = false;
-              requestSecureExamMode();
-              navigateToView("exam-runner-view");
+                          navigateToView("exam-runner-view");
               renderRunnerQuestion();
               const resumeQuestion = systemState.shuffledQuestions[systemState.currentQuestionIndex];
               startRunnerTimerWithTime(session.timeRemaining || getQuestionTimeSeconds(resumeQuestion, matchedExam));
@@ -2967,7 +2966,6 @@ function validateStudentAndStart() {
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === selectedExam.id && r.status === "incomplete"));
   saveActiveStudentSession();
   updateLiveIncompleteResult();
-  requestSecureExamMode();
 
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
@@ -3971,12 +3969,7 @@ function setupAntiCheatHandlers() {
 }
 
 function requestSecureExamMode() {
-  const root = document.documentElement;
-  if (root.requestFullscreen && !document.fullscreenElement) {
-    root.requestFullscreen().catch(() => {
-      console.warn("Fullscreen mode was not granted by the browser.");
-    });
-  }
+  // ملء الشاشة معطّل — غير متناسق على الهواتف.
 }
 
 function releaseSecureExamMode() {
