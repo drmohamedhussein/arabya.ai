@@ -85,6 +85,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initDatabase();
+  stripEmptyHashFromUrl();
   setupNavigation();
   setupUIEventListeners();
   setupAntiCheatHandlers();
@@ -1473,6 +1474,34 @@ window.copyGoogleSheetsSyncScript = function() {
       }
     });
   }
+};
+
+function getCleanSiteUrl() {
+  return (window.location.pathname || "/") + (window.location.search || "");
+}
+
+function stripEmptyHashFromUrl() {
+  const hash = window.location.hash || "";
+  if (!hash || hash === "#") {
+    const cleanUrl = getCleanSiteUrl();
+    if (window.location.href !== window.location.origin + cleanUrl && window.location.href !== cleanUrl) {
+      history.replaceState(null, "", cleanUrl);
+    }
+  }
+}
+
+function cleanBrowserUrlForView(viewId) {
+  if (viewId === "welcome-view") {
+    history.replaceState(null, "", getCleanSiteUrl());
+  }
+}
+
+window.goToHomePage = function(event) {
+  if (event && typeof event.preventDefault === "function") {
+    event.preventDefault();
+  }
+  navigateToView("welcome-view");
+  history.replaceState(null, "", getCleanSiteUrl());
 };
 
 // إعداد نظام التوجيه والتنقل بين الصفحات

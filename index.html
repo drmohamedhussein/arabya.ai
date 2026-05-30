@@ -35,13 +35,13 @@
   <!-- شريط التنقل العلوي (Navbar) -->
   <header class="navbar" role="banner">
     <nav class="nav-container" role="navigation" aria-label="القائمة الرئيسية">
-      <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي ARABYA.NET">
+      <a href="/" class="logo" onclick="goToHomePage(event); return false;" aria-label="الشعار الرئيسي ARABYA.NET">
         <img src="logo.jpg" alt="شعار منصة ARABYA.NET" class="logo-img-tag">
         <span>ARABYA<span class="net-text">.NET</span></span>
       </a>
       
       <ul class="nav-links" role="menubar">
-        <li role="none"><a href="#" data-target="welcome-view" class="active-link" role="menuitem">الرئيسية</a></li>
+        <li role="none"><a href="/" data-target="welcome-view" class="active-link" role="menuitem">الرئيسية</a></li>
         <li role="none"><a href="#" data-target="student-login-view" role="menuitem">بوابة الطالب</a></li>
         <li role="none"><a href="#" data-target="result-search-view" role="menuitem">استعلام النتائج</a></li>
         <li role="none"><a href="#" data-target="teacher-login-view" role="menuitem">بوابة المعلم</a></li>
@@ -1286,7 +1286,7 @@ function jsonArabya_(obj) {
   <footer class="footer" role="contentinfo">
     <div class="footer-container">
       <div class="footer-brand">
-        <a href="#" class="logo" onclick="location.reload();" aria-label="الشعار الرئيسي ARABYA.NET">
+        <a href="/" class="logo" onclick="goToHomePage(event); return false;" aria-label="الشعار الرئيسي ARABYA.NET">
           <img src="logo.jpg" alt="شعار منصة ARABYA.NET" class="logo-img-tag">
           <span>ARABYA<span class="net-text">.NET</span></span>
         </a>
