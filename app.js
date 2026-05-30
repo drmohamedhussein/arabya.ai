@@ -392,6 +392,19 @@ function getArabyaWebAppUrls() {
       }
     });
   }
+  // رابط المعلم المركزي من سجل المعلمين (يعمل حتى لو لم يسجّل الطالب دخوله كمعلم)
+  if (Array.isArray(systemState.teachers)) {
+    systemState.teachers.forEach(t => {
+      const u = t && t.integrationConfig && t.integrationConfig.googleFormUrl ? String(t.integrationConfig.googleFormUrl).trim() : "";
+      if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) urls.add(u);
+    });
+  }
+  // احتياطي من التخزين المحلي
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
+    if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) urls.add(u);
+  } catch (e) {}
   return Array.from(urls);
 }
 
@@ -862,6 +875,9 @@ function getExamDirectLink(exam) {
   if (systemState.activeTeacher) {
     params.set("teacher", systemState.activeTeacher.username);
   }
+  // تضمين رابط المزامنة داخل الرابط ليعمل على أي جهاز للطالب
+  const syncUrl = getEffectiveExamSyncUrl(exam);
+  if (syncUrl) params.set("s", syncUrl);
   return `${getAppBaseUrl()}?${params.toString()}`;
 }
 
@@ -912,6 +928,28 @@ function checkUrlParameters() {
       };
       systemState.targetTeacherUsername = matchedTeacher.username;
     }
+  }
+
+  // 3.ب رابط المزامنة المضمّن في الرابط المباشر (يعمل عبر الأجهزة المختلفة)
+  const syncParam = getUrlParameter("s");
+  if (syncParam && (syncParam.includes("/macros/s/") || syncParam.endsWith("/exec"))) {
+    systemState.config = systemState.config || {};
+    systemState.config.googleFormUrl = syncParam;
+    try { localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config)); } catch (e) {}
+    // جلب بيانات المعلم وامتحاناته من السحابة (لكي تظهر للطالب على أي جهاز)
+    setTimeout(function() {
+      if (typeof syncDatabaseFromCloud === "function") {
+        syncDatabaseFromCloud({ silent: true }).then(function(ok) {
+          if (ok) {
+            try { populateExamSelectionList(); } catch (e) {}
+            if (systemState.lockedExamId) {
+              const sel = document.getElementById("student-exam-select");
+              if (sel) { sel.value = systemState.lockedExamId; sel.disabled = true; }
+            }
+          }
+        });
+      }
+    }, 50);
   }
 
   // 4. فتح امتحان مخصص للطالب (عبر البارامتر ?exam=... أو عبر المسار الفرعي الحقيقي في pathname)
@@ -1451,6 +1489,22 @@ function getEffectiveExamSyncUrl(exam) {
   if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
     candidates.push(String(systemState.activeTeacher.integrationConfig.googleFormUrl).trim());
   }
+  // المعلم صاحب الامتحان من سجل المعلمين
+  if (exam && exam.teacher && Array.isArray(systemState.teachers)) {
+    const t = systemState.teachers.find(x => x.username === exam.teacher);
+    if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) candidates.push(String(t.integrationConfig.googleFormUrl).trim());
+  }
+  // أي معلم لديه رابط مركزي
+  if (Array.isArray(systemState.teachers)) {
+    systemState.teachers.forEach(t => {
+      if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) candidates.push(String(t.integrationConfig.googleFormUrl).trim());
+    });
+  }
+  // احتياطي من التخزين المحلي
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    if (cfg.googleFormUrl) candidates.push(String(cfg.googleFormUrl).trim());
+  } catch (e) {}
   for (const u of candidates) {
     if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) return u;
   }
