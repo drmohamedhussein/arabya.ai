@@ -1,57 +1,51 @@
 /**
- * ARABYA.NET backend bridge
+ * ARABYA.NET - Google Apps Script Backend (Final)
  *
- * يحفظ بيانات المنصة في Google Sheets:
- * 1) ورقة "نتائج الطلاب" — صف لكل نتيجة بأعمدة منفصلة (13 عموداً)
- * 2) ورقة "ARABYA_BACKUP" — نسخة JSON كاملة للمزامنة مع لوحة المعلم
+ * يدعم:
+ * - add_result   : تسجيل/تحديث نتيجة طالب في ورقة "نتائج الطلاب"
+ * - save_backup  : حفظ نسخة JSON كاملة في ورقة "ARABYA_BACKUP"
+ * - get_backup   : استرجاع النسخة الاحتياطية (GET ?action=get_backup)
  *
- * GitHub اختياري (Script Properties): GITHUB_TOKEN, GITHUB_REPO, GITHUB_BRANCH, GITHUB_DB_PATH
+ * خطوات النشر:
+ * 1) Extensions → Apps Script → الصق هذا الكود بالكامل
+ * 2) Deploy → New deployment → Web app
+ * 3) Execute as: Me | Who has access: Anyone
+ * 4) انسخ رابط /exec إلى تبويب "الربط بـ Google Sheets" في ARABYA.NET
  */
 
-var ARABYA_DEFAULT_DB = {
-  schemaVersion: 1,
-  updatedAt: "",
-  source: "arabya.net",
-  teachers: [],
-  students: [],
-  exams: [],
-  results: [],
-  auditLog: []
-};
-
-var ARABYA_RESULT_HEADERS = [
-  "معرف السجل", "التاريخ", "اسم الطالب", "ID", "كود الاشتراك",
-  "الامتحان", "معرف الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"
+var ARABYA_RESULTS_HEADERS = [
+  "معرف السجل",
+  "التاريخ والوقت",
+  "اسم الطالب",
+  "رقم ID",
+  "كود الاشتراك",
+  "مفتاح الطالب",
+  "البريد",
+  "الموبايل",
+  "الامتحان",
+  "معرف الامتحان",
+  "الجامعة",
+  "الكلية",
+  "الفرقة",
+  "النوع",
+  "الحالة",
+  "النتيجة",
+  "التفاصيل"
 ];
 
 function doPost(e) {
   try {
-    var data = parseArabyaPayload_(e);
-    var action = data.action || "save_backup";
+    var payload = parseArabyaPayload_(e);
+    var action = payload.action || "add_result";
 
     if (action === "add_result") {
-      appendArabyaResult_(data);
-      var merged = mergeArabyaDatabase_({ results: [normaliseArabyaResult_(data)] }, "add_result");
-      writeArabyaBackupSheet_(merged);
-      return jsonArabya_({ status: "success", action: action, counts: countArabya_(merged) });
+      upsertArabyaResult_(payload);
+      return jsonArabya_({ status: "success", action: action, message: "تم تسجيل/تحديث النتيجة بنجاح" });
     }
 
     if (action === "save_backup") {
-      if (data.mode === "replace") {
-        var replaced = replaceArabyaBackup_(data.data || {});
-        return jsonArabya_({ status: "success", action: action, mode: "replace", counts: countArabya_(replaced) });
-      }
-      var db = mergeArabyaDatabase_(data.data || {}, "save_backup");
-      writeArabyaBackupSheet_(db);
-      return jsonArabya_({ status: "success", action: action, mode: "merge", counts: countArabya_(db) });
-    }
-
-    if (action === "save_entity") {
-      var patch = {};
-      patch[data.collection] = [data.record];
-      var entityDb = mergeArabyaDatabase_(patch, "save_entity:" + data.collection);
-      writeArabyaBackupSheet_(entityDb);
-      return jsonArabya_({ status: "success", action: action, counts: countArabya_(entityDb) });
+      saveArabyaBackup_(payload.data || {});
+      return jsonArabya_({ status: "success", action: action, message: "تم حفظ النسخة الاحتياطية بنجاح" });
     }
 
     return jsonArabya_({ status: "ignored", action: action });
@@ -64,10 +58,13 @@ function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_backup") {
-      var db = readArabyaDatabase_();
-      return jsonArabya_({ status: "success", data: db, counts: countArabya_(db) });
+      var data = readArabyaBackup_();
+      if (!data) {
+        return jsonArabya_({ status: "error", message: "لا توجد نسخة احتياطية سحابية بعد." });
+      }
+      return jsonArabya_({ status: "success", data: data });
     }
-    return jsonArabya_({ status: "active", service: "ARABYA.NET backend bridge" });
+    return jsonArabya_({ status: "active", service: "ARABYA.NET backend", version: 3 });
   } catch (err) {
     return jsonArabya_({ status: "error", message: err.message });
   }
@@ -82,204 +79,86 @@ function parseArabyaPayload_(e) {
   }
 }
 
-function appendArabyaResult_(data) {
+function getResultsSheet_() {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = spreadsheet.getSheetByName("نتائج الطلاب") || spreadsheet.insertSheet("نتائج الطلاب");
-  ensureArabyaResultHeaders_(sheet);
-  sheet.appendRow([
-    data.recordId || "",
-    data.timestamp || new Date(),
-    data.name || "",
-    data.id || "",
-    data.subscriptionCode || data.accessCode || "",
-    data.examTitle || "",
-    data.examId || "",
-    data.university || "",
-    data.faculty || "",
-    data.level || "",
-    data.examType || "",
-    data.score || "",
-    data.details || ""
-  ]);
+  var sheet = spreadsheet.getSheetByName("نتائج الطلاب");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("نتائج الطلاب");
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(ARABYA_RESULTS_HEADERS);
+    sheet.getRange(1, 1, 1, ARABYA_RESULTS_HEADERS.length)
+      .setFontWeight("bold")
+      .setBackground("#1e293b")
+      .setFontColor("#ffffff");
+  }
+  return sheet;
 }
 
-function ensureArabyaResultHeaders_(sheet) {
-  if (sheet.getLastRow() > 0) return;
-  sheet.appendRow(ARABYA_RESULT_HEADERS);
-  sheet.getRange(1, 1, 1, ARABYA_RESULT_HEADERS.length)
-    .setFontWeight("bold")
-    .setBackground("#1e293b")
-    .setFontColor("#ffffff");
+function buildResultRow_(payload) {
+  return [
+    payload.recordId || "",
+    payload.timestamp || new Date().toLocaleString("ar-EG"),
+    payload.name || "",
+    payload.id || "",
+    payload.subscriptionCode || payload.accessCode || "",
+    payload.studentLookupKey || "",
+    payload.email || "",
+    payload.mobile || "",
+    payload.examTitle || "",
+    payload.examId || "",
+    payload.university || "",
+    payload.faculty || "",
+    payload.level || "",
+    payload.examType || "",
+    payload.status || (payload.isManualGradeUpdate ? "updated" : "completed"),
+    payload.score || "",
+    payload.details || ""
+  ];
 }
 
-function writeArabyaBackupSheet_(db) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP") ||
-    SpreadsheetApp.getActiveSpreadsheet().insertSheet("ARABYA_BACKUP");
+function upsertArabyaResult_(payload) {
+  var sheet = getResultsSheet_();
+  var rowValues = buildResultRow_(payload);
+  var recordId = String(payload.recordId || "").trim();
+
+  if (recordId) {
+    var lastRow = sheet.getLastRow();
+    if (lastRow > 1) {
+      var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      for (var i = 0; i < ids.length; i++) {
+        if (String(ids[i][0]).trim() === recordId) {
+          sheet.getRange(i + 2, 1, 1, rowValues.length).setValues([rowValues]);
+          return;
+        }
+      }
+    }
+  }
+
+  sheet.appendRow(rowValues);
+}
+
+function saveArabyaBackup_(data) {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("ARABYA_BACKUP");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("ARABYA_BACKUP");
+  }
   sheet.clear();
   sheet.appendRow(["Timestamp", "Database Backup JSON"]);
-  sheet.appendRow([new Date(), JSON.stringify(db)]);
+  sheet.appendRow([new Date().toLocaleString("ar-EG"), JSON.stringify(data)]);
 }
 
-function readArabyaBackupSheet_() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP");
+function readArabyaBackup_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("ARABYA_BACKUP");
   if (!sheet || sheet.getLastRow() < 2) return null;
   var raw = sheet.getRange(2, 2).getValue();
   if (!raw) return null;
-  try {
-    return Object.assign(cloneArabyaDefaultDb_(), JSON.parse(String(raw)));
-  } catch (err) {
-    return null;
-  }
-}
-
-function mergeArabyaDatabase_(patch, reason) {
-  var db = readArabyaDatabase_();
-  ["teachers", "students", "exams", "results"].forEach(function(collection) {
-    if (Array.isArray(patch[collection])) {
-      db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
-    }
-  });
-  db.updatedAt = new Date().toISOString();
-  db.auditLog = db.auditLog || [];
-  db.auditLog.push({ at: db.updatedAt, reason: reason, counts: countArabya_(db) });
-  if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
-  tryWriteArabyaGithub_(db);
-  return db;
-}
-
-function replaceArabyaBackup_(data) {
-  var db = cloneArabyaDefaultDb_();
-  ["teachers", "students", "exams", "results"].forEach(function(collection) {
-    if (Array.isArray(data[collection])) db[collection] = data[collection];
-  });
-  db.updatedAt = new Date().toISOString();
-  db.auditLog = (Array.isArray(data.auditLog) ? data.auditLog : []).concat([
-    { at: db.updatedAt, reason: "save_backup:replace", counts: countArabya_(db) }
-  ]);
-  if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
-  writeArabyaBackupSheet_(db);
-  tryWriteArabyaGithub_(db);
-  return db;
-}
-
-function mergeArabyaCollection_(current, incoming, collection) {
-  var map = {};
-  current.forEach(function(item) {
-    map[getArabyaRecordKey_(item, collection)] = item;
-  });
-  incoming.forEach(function(item) {
-    if (!item) return;
-    var key = getArabyaRecordKey_(item, collection);
-    map[key] = Object.assign({}, map[key] || {}, item);
-  });
-  return Object.keys(map).map(function(key) { return map[key]; });
-}
-
-function getArabyaRecordKey_(item, collection) {
-  if (collection === "teachers") return String(item.username || item.quickCode || item.name || Utilities.getUuid());
-  if (collection === "students") return String(item.id || item.code || item.name || Utilities.getUuid());
-  if (collection === "exams") return String(item.id || item.title || Utilities.getUuid());
-  if (collection === "results") return String(item.recordId || [item.id, item.examId, item.timestamp].join(":") || Utilities.getUuid());
-  return String(item.id || Utilities.getUuid());
-}
-
-function normaliseArabyaResult_(data) {
-  return {
-    recordId: data.recordId || "",
-    timestamp: data.timestamp || new Date().toISOString(),
-    name: data.name || "",
-    id: data.id || "",
-    accessCode: data.subscriptionCode || data.accessCode || "",
-    examTitle: data.examTitle || "",
-    examId: data.examId || "",
-    university: data.university || "",
-    faculty: data.faculty || "",
-    level: data.level || "",
-    examType: data.examType || "",
-    score: data.score || "",
-    details: data.details || "",
-    studentAnswers: data.studentAnswers || {},
-    questionScores: data.questionScores || {}
-  };
-}
-
-function readArabyaDatabase_() {
-  var sheetDb = readArabyaBackupSheet_();
-  var props = PropertiesService.getScriptProperties();
-  var repo = props.getProperty("GITHUB_REPO");
-  var token = props.getProperty("GITHUB_TOKEN");
-  if (!repo || !token) return sheetDb || cloneArabyaDefaultDb_();
-
-  try {
-    var path = props.getProperty("GITHUB_DB_PATH") || "database/arabya-db.json";
-    var branch = props.getProperty("GITHUB_BRANCH") || "main";
-    var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURIComponent(path).replace(/%2F/g, "/") + "?ref=" + encodeURIComponent(branch);
-    var response = UrlFetchApp.fetch(url, {
-      method: "get",
-      muteHttpExceptions: true,
-      headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" }
-    });
-    if (response.getResponseCode() === 404) return sheetDb || cloneArabyaDefaultDb_();
-    if (response.getResponseCode() >= 300) throw new Error("GitHub read failed");
-
-    var body = JSON.parse(response.getContentText());
-    var decoded = Utilities.newBlob(Utilities.base64Decode(body.content)).getDataAsString("UTF-8");
-    var db = JSON.parse(decoded || "{}");
-    db._sha = body.sha;
-    return Object.assign(cloneArabyaDefaultDb_(), db);
-  } catch (err) {
-    return sheetDb || cloneArabyaDefaultDb_();
-  }
-}
-
-function tryWriteArabyaGithub_(db) {
-  var props = PropertiesService.getScriptProperties();
-  if (!props.getProperty("GITHUB_REPO") || !props.getProperty("GITHUB_TOKEN")) return;
-  try { writeArabyaDatabase_(db); } catch (err) {}
-}
-
-function writeArabyaDatabase_(db) {
-  var props = PropertiesService.getScriptProperties();
-  var repo = props.getProperty("GITHUB_REPO");
-  var path = props.getProperty("GITHUB_DB_PATH") || "database/arabya-db.json";
-  var branch = props.getProperty("GITHUB_BRANCH") || "main";
-  var token = props.getProperty("GITHUB_TOKEN");
-  if (!repo || !token) return;
-
-  var sha = db._sha;
-  var payloadDb = JSON.parse(JSON.stringify(db));
-  delete payloadDb._sha;
-  var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURIComponent(path).replace(/%2F/g, "/");
-  var payload = {
-    message: "Sync ARABYA.NET database",
-    branch: branch,
-    content: Utilities.base64Encode(JSON.stringify(payloadDb, null, 2), Utilities.Charset.UTF_8)
-  };
-  if (sha) payload.sha = sha;
-
-  var response = UrlFetchApp.fetch(url, {
-    method: "put",
-    muteHttpExceptions: true,
-    contentType: "application/json",
-    headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github+json" },
-    payload: JSON.stringify(payload)
-  });
-  if (response.getResponseCode() >= 300) throw new Error("GitHub write failed");
-}
-
-function cloneArabyaDefaultDb_() {
-  return JSON.parse(JSON.stringify(ARABYA_DEFAULT_DB));
-}
-
-function countArabya_(db) {
-  return {
-    teachers: (db.teachers || []).length,
-    students: (db.students || []).length,
-    exams: (db.exams || []).length,
-    results: (db.results || []).length
-  };
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
 }
 
 function jsonArabya_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
 }
