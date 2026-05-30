@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-05-30T01:06:14.790Z",
+  "updatedAt": "2026-05-30T01:08:46.489Z",
   "source": "arabya.net",
   "teachers": [
     {
@@ -406,7 +406,7 @@
       "faculty": "الآداب",
       "level": "الأولى",
       "examType": "أعمال فصلية",
-      "score": "0/20",
+      "score": "5/20 (درجة كلية)",
       "details": "س (وزنها 15 نقاط): س1 | إجابة الطالب: ب | الصحيحة: أ [درجة السؤال المعدلة: 0 من 15]\nس مقالي (وزنها 5 نقاط): س2 مقالي \n إجابة الطالب: إجابة مقالية\n [درجة السؤال المعدلة: 5 من 5]\n-----------------",
       "timestamp": "now",
       "studentAnswers": {
@@ -552,6 +552,16 @@
     },
     {
       "at": "2026-05-30T01:06:14.790Z",
+      "reason": "save_backup",
+      "counts": {
+        "teachers": 1,
+        "students": 3,
+        "exams": 3,
+        "results": 5
+      }
+    },
+    {
+      "at": "2026-05-30T01:08:46.489Z",
       "reason": "save_backup",
       "counts": {
         "teachers": 1,
