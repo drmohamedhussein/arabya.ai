@@ -419,6 +419,11 @@ function findStudentByName(name) {
   return systemState.students.find(student => normalizeStudentName(student.name) === normalized) || null;
 }
 
+function findStudentByKey(studentKey) {
+  if (!studentKey) return null;
+  return systemState.students.find(student => student.studentKey === studentKey) || null;
+}
+
 function ensureStudentsDataShape() {
   if (!Array.isArray(systemState.students)) {
     systemState.students = [];
@@ -3900,8 +3905,8 @@ function renderTeacherStudentsTable() {
       <td>${s.mobile || "--"}</td>
       <td>${s.timestamp || 'غير معروف'}</td>
       <td>
-        <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary); padding: 0.25rem 0.5rem; margin-left:0.25rem;" onclick="editStudentByTeacher('${s.studentKey}')">تعديل</button>
-        <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.25rem 0.5rem;" onclick="deleteStudentByTeacher('${s.studentKey}')">حذف</button>
+        <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary); padding: 0.25rem 0.5rem; margin-left:0.25rem;" onclick="editStudentByTeacher(${JSON.stringify(studentKey)})">تعديل</button>
+        <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.25rem 0.5rem;" onclick="deleteStudentByTeacher(${JSON.stringify(studentKey)})">حذف</button>
       </td>
     `;
     tbody.appendChild(row);
@@ -3941,61 +3946,77 @@ window.hideAddStudentModal = function() {
 // حفظ طالب جديد أو تعديل بياناته من قبل المعلم
 window.saveNewStudentByTeacher = function() {
   const name = document.getElementById("new-student-name").value.trim();
-  const id = document.getElementById("new-student-id").value.trim();
-  const code = document.getElementById("new-student-code").value.trim();
+  const id = normalizeStudentId(document.getElementById("new-student-id").value.trim());
+  const rawCode = document.getElementById("new-student-code").value.trim();
+  const code = sanitizeStudentCodeInput(rawCode);
 
-  if (!name || !id || !code) {
-    alert("يرجى ملء جميع الحقول المطلوبة (الاسم، ID، كود الاشتراك)!");
+  if (!name) {
+    alert("يرجى إدخال اسم الطالب!");
+    return;
+  }
+  if (rawCode && !isFiveDigitStudentCode(code)) {
+    alert("كود الاشتراك يجب أن يكون 5 أرقام (أو اتركه فارغاً).");
     return;
   }
 
   if (systemState.editingStudentKey) {
-    // تعديل بيانات طالب موجود
-    const student = systemState.students.find(s => s.id === systemState.editingStudentKey);
-    if (student) {
-      // التأكد من عدم تكرار الـ ID الجديد مع طالب آخر
-      const isDuplicate = systemState.students.some(s => s.id === id && s.id !== systemState.editingStudentKey);
-      if (isDuplicate) {
-        alert("رقم المعرف ID الجديد مسجل بالفعل لطالب آخر!");
-        return;
-      }
-      student.name = name;
-      student.id = id;
-      student.code = code;
-      saveSystemState(true);
-      renderTeacherStudentsTable();
-      hideAddStudentModal();
-      alert(`تم تعديل بيانات الطالب "${name}" بنجاح!`);
-    }
-  } else {
-    // إضافة طالب جديد
-    const isDuplicate = id && systemState.students.some(s => normalizeStudentId(s.id) === id);
-    if (isDuplicate) {
-      alert("رقم المعرف ID هذا مسجل بالفعل لطالب آخر!");
+    const existing = findStudentByKey(systemState.editingStudentKey);
+    if (!existing) {
+      alert("لم يتم العثور على الطالب للتعديل!");
       return;
     }
-
-    const studentObj = {
-      name,
-      id,
-      code,
-      timestamp: new Date().toLocaleDateString("ar-EG")
-    };
-
-    systemState.students.push(studentObj);
+    if (isPrivateStudentCode(code)) {
+      const duplicateCode = systemState.students.find(s => sanitizeStudentCodeInput(s.code) === code && s.studentKey !== existing.studentKey);
+      if (duplicateCode) {
+        alert("كود الاشتراك الخاص مستخدم بالفعل لطالب آخر!");
+        return;
+      }
+    }
+    if (id) {
+      const duplicateId = systemState.students.find(s => normalizeStudentId(s.id) === id && s.studentKey !== existing.studentKey);
+      if (duplicateId) {
+        alert("رقم المعرف ID مسجل بالفعل لطالب آخر!");
+        return;
+      }
+    }
+    existing.name = name;
+    existing.id = id;
+    existing.code = code;
+    existing.studentKey = getStudentLookupKey(existing) || existing.studentKey;
     saveSystemState(true);
     renderTeacherStudentsTable();
     hideAddStudentModal();
-    alert(`تم تسجيل الطالب "${name}" وكود اشتراكه بنجاح!`);
+    alert(`تم تعديل بيانات الطالب "${name}" بنجاح!`);
+    return;
   }
+
+  if (isPrivateStudentCode(code)) {
+    const duplicateCode = findStudentByCode(code);
+    if (duplicateCode) {
+      alert("كود الاشتراك الخاص مستخدم بالفعل لطالب آخر!");
+      return;
+    }
+  }
+  if (id) {
+    const duplicateId = findStudentById(id);
+    if (duplicateId) {
+      alert("رقم المعرف ID مسجل بالفعل لطالب آخر!");
+      return;
+    }
+  }
+
+  upsertStudentRecord({ name, id, code });
+  saveSystemState(true);
+  renderTeacherStudentsTable();
+  hideAddStudentModal();
+  alert(`تم تسجيل الطالب "${name}" بنجاح!`);
 };
 
-// تعديل طالب من قبل المعلم
-window.editStudentByTeacher = function(studentId) {
-  const student = systemState.students.find(s => s.id === studentId);
+window.editStudentByTeacher = function(studentKey) {
+  const student = findStudentByKey(studentKey);
   if (!student) return;
 
-  systemState.editingStudentKey = studentId;
+  systemState.editingStudentKey = student.studentKey;
 
   const card = document.getElementById("add-student-form-card");
   if (card) {
@@ -4006,18 +4027,18 @@ window.editStudentByTeacher = function(studentId) {
     if (saveBtn) saveBtn.innerText = "حفظ التعديلات";
   }
 
-  document.getElementById("new-student-name").value = student.name;
-  document.getElementById("new-student-id").value = student.id;
-  document.getElementById("new-student-code").value = student.code;
+  document.getElementById("new-student-name").value = student.name || "";
+  document.getElementById("new-student-id").value = student.id || "";
+  document.getElementById("new-student-code").value = student.code || "";
 };
 
-// حذف طالب بواسطة المعلم
-window.deleteStudentByTeacher = function(id) {
-  if (confirm("هل أنت متأكد من حذف هذا الطالب وإلغاء كود اشتراكه؟")) {
-    systemState.students = systemState.students.filter(s => s.id !== id);
-    saveSystemState(true);
-    renderTeacherStudentsTable();
-  }
+window.deleteStudentByTeacher = function(studentKey) {
+  const student = findStudentByKey(studentKey);
+  if (!student) return;
+  if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟`)) return;
+  systemState.students = systemState.students.filter(s => s.studentKey !== studentKey);
+  saveSystemState(true);
+  renderTeacherStudentsTable();
 };
 
 // تصدير الطلاب كملف JSON
