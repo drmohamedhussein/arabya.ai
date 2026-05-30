@@ -298,14 +298,11 @@ function saveTeachersToLocalStorage() {
 
 // حفظ قاعدة بيانات الطلاب محلياً (دون مزامنة سحابية)
 function saveStudentsToLocalStorage() {
-  ensureStudentsDataShape();
   localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
 }
 
 // دالة موحدة لحفظ حالة النظام بالكامل ومزامنتها سحابياً
 function saveSystemState(syncToCloud = true) {
-  ensureStudentsDataShape();
-  ensureExamsDataShape();
   try {
     if (Array.isArray(systemState.teachers)) {
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
@@ -2804,6 +2801,76 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
   });
 }
 
+
+// مزامنة نتيجة معدّلة يدوياً (من قبل المعلم) مع Google Sheets
+function sendUpdatedResultToCloud(res, syncStatusEl = null) {
+  const urls = new Set();
+  if (systemState.config && systemState.config.googleFormUrl) {
+    const u = systemState.config.googleFormUrl.trim();
+    if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
+  }
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    const u = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
+    if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
+  }
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (exam.googleFormUrl) {
+        const u = exam.googleFormUrl.trim();
+        if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
+      }
+    });
+  }
+
+  if (urls.size === 0) {
+    if (syncStatusEl) syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle; font-size:1rem;">cloud_queue</span> لم يتم ربط Google Sheets بعد — تم الحفظ محلياً فقط.`;
+    return;
+  }
+
+  if (syncStatusEl) syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; font-size:1rem; animation:spin 1s infinite linear;">sync</span> جاري مزامنة الدرجات مع Google Sheets...`;
+
+  const payload = {
+    action: "add_result",
+    recordId: res.recordId || createRecordId("result"),
+    timestamp: res.timestamp || new Date().toLocaleString("ar-EG"),
+    name: res.name,
+    id: res.id,
+    subscriptionCode: res.accessCode || "",
+    studentLookupKey: res.studentLookupKey || "",
+    email: res.email || "",
+    mobile: res.mobile || "",
+    examTitle: res.examTitle || "",
+    examId: res.examId || "",
+    score: res.score || "",
+    details: res.details || "",
+    maxScore: res.maxScore || "",
+    isManualGradeUpdate: true
+  };
+
+  let done = 0;
+  const total = urls.size;
+  urls.forEach(url => {
+    fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    })
+    .then(() => {
+      done++;
+      if (done === total && syncStatusEl) {
+        syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle; font-size:1rem;">cloud_done</span> تمت مزامنة التصحيح مع Google Sheets بنجاح!`;
+      }
+    })
+    .catch(() => {
+      done++;
+      if (done === total && syncStatusEl) {
+        syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle; font-size:1rem;">cloud_off</span> فشلت المزامنة — تم الحفظ محلياً.`;
+      }
+    });
+  });
+}
+
 // الاستعلام عن نتائج الطلاب بالاسم، المعرف، أو كود الاشتراك الموزع
 function searchStudentResults() {
   const rawQuery = document.getElementById("search-student-query").value.trim();
@@ -3085,7 +3152,10 @@ window.saveTotalScoreManual = function() {
   res.score = inputVal;
   saveSystemState(true);
   renderStudentResultsTable();
-  alert("تم تعديل النتيجة الإجمالية بنجاح!");
+  // Sync to cloud
+  const syncEl = document.getElementById("grading-sync-status");
+  sendUpdatedResultToCloud(res, syncEl);
+  alert("تم تعديل النتيجة الإجمالية بنجاح! تجري المزامنة في الخلفية.");
 };
 
 window.saveResultDetailsManual = function() {
@@ -3145,10 +3215,14 @@ window.saveResultDetailsManual = function() {
   res.score = manualTotalInput || `${totalEarnedPoints}/${exam.totalScore || 100} (درجة كلية)`;
 
   saveSystemState(true);
-  
   renderStudentResultsTable();
-  closeResultDetailPanel();
-  alert("تم حفظ كافة التعديلات، إجابات الطالب، والدرجات يدوياً بنجاح!");
+  // Sync to cloud immediately
+  const syncEl = document.getElementById("grading-sync-status");
+  if (syncEl) syncEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; font-size:1rem; animation:spin 1s infinite linear;">sync</span> جاري مزامنة الدرجات المعدّلة...`;
+  sendUpdatedResultToCloud(res, syncEl);
+  // Close after 3s so user sees sync status
+  setTimeout(() => { closeResultDetailPanel(); }, 3000);
+  alert("تم حفظ كافة التعديلات، إجابات الطالب، والدرجات يدوياً بنجاح! جارٍ المزامنة مع Google Sheets.");
 };
 
 function exportTeacherResultsToCSV() {
