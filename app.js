@@ -2159,7 +2159,7 @@ function renderQuestionsForEdit(exam) {
       <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(110px, 1fr); gap: 1rem; margin-bottom:1rem;">
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">نص السؤال:</label>
-          <input type="text" class="form-control edit-q-text" value="${q.question}" data-index="${index}">
+          <textarea class="form-control edit-q-text" data-index="${index}" rows="3" dir="auto" style="resize:vertical; min-height:3.5rem;"></textarea>
         </div>
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">درجة السؤال:</label>
@@ -2171,6 +2171,11 @@ function renderQuestionsForEdit(exam) {
         </div>
       </div>
     `;
+
+    const questionTextInput = card.querySelector(".edit-q-text");
+    if (questionTextInput) {
+      questionTextInput.value = q.question == null ? "" : String(q.question);
+    }
 
     const optionsWrapper = document.createElement("div");
     optionsWrapper.style.marginTop = "0.75rem";
@@ -2193,10 +2198,21 @@ function renderQuestionsForEdit(exam) {
         optGroup.style.gap = "0.5rem";
         optGroup.style.marginBottom = "0.5rem";
 
-        optGroup.innerHTML = `
-          <input type="radio" name="edit-correct-${index}" value="${optIdx}" ${isCorrect ? 'checked' : ''}>
-          <input type="text" class="form-control edit-q-option" value="${opt}" style="padding: 0.5rem 1rem;" data-question-index="${index}" data-option-index="${optIdx}" readonly>
-        `;
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = `edit-correct-${index}`;
+        radio.value = String(optIdx);
+        if (isCorrect) radio.checked = true;
+        const optInput = document.createElement("input");
+        optInput.type = "text";
+        optInput.className = "form-control edit-q-option";
+        optInput.style.padding = "0.5rem 1rem";
+        optInput.dataset.questionIndex = String(index);
+        optInput.dataset.optionIndex = String(optIdx);
+        optInput.readOnly = true;
+        optInput.value = opt == null ? "" : String(opt);
+        optGroup.appendChild(radio);
+        optGroup.appendChild(optInput);
         optionsWrapper.appendChild(optGroup);
       });
     } else {
@@ -2209,11 +2225,30 @@ function renderQuestionsForEdit(exam) {
         optGroup.style.gap = "0.5rem";
         optGroup.style.marginBottom = "0.5rem";
 
-        optGroup.innerHTML = `
-          <input type="radio" name="edit-correct-${index}" value="${optIdx}" ${isCorrect ? 'checked' : ''}>
-          <input type="text" class="form-control edit-q-option" value="${opt}" style="padding: 0.5rem 1rem;" data-question-index="${index}" data-option-index="${optIdx}">
-          <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.4rem;" onclick="removeOptionFromQuestion(${index}, ${optIdx})" title="حذف البديل">&times;</button>
-        `;
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        radio.name = `edit-correct-${index}`;
+        radio.value = String(optIdx);
+        if (isCorrect) radio.checked = true;
+        const optInput = document.createElement("input");
+        optInput.type = "text";
+        optInput.className = "form-control edit-q-option";
+        optInput.style.padding = "0.5rem 1rem";
+        optInput.dataset.questionIndex = String(index);
+        optInput.dataset.optionIndex = String(optIdx);
+        optInput.value = opt == null ? "" : String(opt);
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn btn-outline btn-sm";
+        removeBtn.style.borderColor = "var(--error)";
+        removeBtn.style.color = "var(--error)";
+        removeBtn.style.padding = "0.4rem";
+        removeBtn.title = "حذف البديل";
+        removeBtn.innerHTML = "&times;";
+        removeBtn.addEventListener("click", () => removeOptionFromQuestion(index, optIdx));
+        optGroup.appendChild(radio);
+        optGroup.appendChild(optInput);
+        optGroup.appendChild(removeBtn);
         optionsWrapper.appendChild(optGroup);
       });
 
@@ -2465,6 +2500,17 @@ window.deleteQuestion = function(index) {
 // ==========================================
 // 5. التصدير والاستيراد لـ Google Forms
 // ==========================================
+
+
+/** تهريب نصوص HTML (محتوى أو سمات) لعرض آمن دون حذف علامات الاقتباس أو الرموز */
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function escapeAppsScriptString(str) {
   if (!str) return "";
@@ -3602,7 +3648,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
         <span style="font-weight:700; color:var(--secondary);">سؤال ${index + 1} (${questionTypeName})</span>
         <span style="font-size:0.85rem; color:var(--text-muted);">وزن السؤال: ${qPoints} درجة</span>
       </div>
-      <div style="font-size:1.1rem; color:white; margin-bottom:1rem; font-weight:600; line-height:1.6;">${q.question}</div>
+      <div style="font-size:1.1rem; color:white; margin-bottom:1rem; font-weight:600; line-height:1.6;">${escapeHtml(q.question)}</div>
     `;
 
     const body = document.createElement("div");
@@ -3663,7 +3709,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
         indicator.innerHTML = `<span style="color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1.1rem; vertical-align:middle;">check_circle</span> إجابة الطالب صحيحة</span>`;
       } else {
         const correctText = q.options[q.correctAnswer] || "";
-        indicator.innerHTML = `<span style="color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1.1rem; vertical-align:middle;">cancel</span> إجابة الطالب خاطئة</span> (الإجابة النموذجية: ${correctText})`;
+        indicator.innerHTML = `<span style="color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1.1rem; vertical-align:middle;">cancel</span> إجابة الطالب خاطئة</span> (الإجابة النموذجية: ${escapeHtml(correctText)})`;
       }
 
       const scoreRow = document.createElement("div");
