@@ -656,12 +656,17 @@
                   <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label" for="edit-meta-timelimit">وقت الامتحان الكلي (بالدقائق):</label>
                     <input type="number" id="edit-meta-timelimit" class="form-control" min="1" value="60" placeholder="60">
-                    <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
+                    <small style="color:var(--text-muted); font-size:0.8rem;">يُستخدم كاحتياطي إذا لم تُحدَّد مدة لكل سؤال. يمكنك ضبط مدة كل سؤال بالثواني أسفل كل سؤال.</small>
                   </div>
                   <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label" for="edit-meta-max-cheat-attempts">عدد محاولات الغش المسموحة قبل إلغاء الامتحان:</label>
                     <input type="number" id="edit-meta-max-cheat-attempts" class="form-control" min="0" step="1" value="5" placeholder="5">
                     <small style="color:var(--text-muted); font-size:0.8rem;">0 = بدون حد (تحذير فقط بدون إلغاء تلقائي). 1 = إلغاء الامتحان عند أول محاولة غش.</small>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-ends-at">انتهاء الاختبار (تاريخ ووقت):</label>
+                    <input type="datetime-local" id="edit-meta-ends-at" class="form-control">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">اتركه فارغاً لعدم تحديد موعد نهائي. بعد هذا الوقت لا يمكن للطلاب الدخول أو أداء الامتحان. غيّر التاريخ لإعادة فتحه.</small>
                   </div>
                 </div>
 

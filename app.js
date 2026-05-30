@@ -115,19 +115,25 @@ document.addEventListener("DOMContentLoaded", () => {
               ? "لا يمكن استكمال هذا الامتحان لأنه مُلغى. تواصل مع المعلم."
               : "لا يمكن استكمال هذا الامتحان لأنه مُسلَّم مسبقاً.");
           } else if (matchedExam) {
-            systemState.currentExam = matchedExam;
-            systemState.shuffledQuestions = session.shuffledQuestions || buildRuntimeQuestionsForExam(matchedExam);
-            systemState.currentExamRuntime = session.currentExamRuntime || calculateRuntimeExamMeta(systemState.shuffledQuestions);
-            systemState.currentQuestionIndex = session.currentQuestionIndex || 0;
-            systemState.studentAnswers = session.studentAnswers || {};
-            systemState.cheatViolations = session.cheatViolations || 0;
-            systemState.isExamActive = true;
-            systemState.isCheatingSuspended = false;
-            requestSecureExamMode();
-            navigateToView("exam-runner-view");
-            renderRunnerQuestion();
-            startRunnerTimerWithTime(session.timeRemaining || 60);
-            return;
+            if (isExamPastDeadline(matchedExam)) {
+              alert(getExamDeadlineBlockMessage(matchedExam));
+              localStorage.removeItem("arabya_active_student_session");
+            } else {
+              systemState.currentExam = matchedExam;
+              systemState.shuffledQuestions = session.shuffledQuestions || buildRuntimeQuestionsForExam(matchedExam);
+              systemState.currentExamRuntime = session.currentExamRuntime || calculateRuntimeExamMeta(systemState.shuffledQuestions);
+              systemState.currentQuestionIndex = session.currentQuestionIndex || 0;
+              systemState.studentAnswers = session.studentAnswers || {};
+              systemState.cheatViolations = session.cheatViolations || 0;
+              systemState.isExamActive = true;
+              systemState.isCheatingSuspended = false;
+              requestSecureExamMode();
+              navigateToView("exam-runner-view");
+              renderRunnerQuestion();
+              const resumeQuestion = systemState.shuffledQuestions[systemState.currentQuestionIndex];
+              startRunnerTimerWithTime(session.timeRemaining || getQuestionTimeSeconds(resumeQuestion, matchedExam));
+              return;
+            }
           }
         } else {
           localStorage.removeItem("arabya_active_student_session");
@@ -372,7 +378,11 @@ function normalizeContactField(value) {
 }
 
 function sanitizeStudentCodeInput(code) {
-  return (code || "").toString().replace(/\D/g, "").slice(0, 5);
+  const digits = (code || "").toString().replace(/\D/g, "").slice(0, 5);
+  if (digits && /^0+$/.test(digits)) {
+    return "00000";
+  }
+  return digits;
 }
 
 function isFiveDigitStudentCode(code) {
@@ -401,9 +411,25 @@ function getStudentLookupKey(student) {
   return normalizedName ? `name:${normalizedName}` : "";
 }
 
-function findStudentByCode(code) {
+function findStudentByCode(code, options = {}) {
   const clean = sanitizeStudentCodeInput(code);
   if (!isFiveDigitStudentCode(clean)) return null;
+  if (isSharedStudentCode(clean)) {
+    const normalizedId = normalizeStudentId(options.studentId);
+    const normalizedName = normalizeStudentName(options.name);
+    if (normalizedId) {
+      const byId = systemState.students.find(
+        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentId(s.id) === normalizedId
+      );
+      if (byId) return byId;
+    }
+    if (normalizedName) {
+      return systemState.students.find(
+        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentName(s.name) === normalizedName
+      ) || null;
+    }
+    return null;
+  }
   return systemState.students.find(student => sanitizeStudentCodeInput(student.code) === clean) || null;
 }
 
@@ -467,6 +493,14 @@ function sanitizeQuestionConfig(exam) {
     exam.questionCount = "";
   } else {
     exam.questionCount = parsedCount;
+  }
+  if (exam.endsAt) {
+    const parsedEnd = new Date(exam.endsAt);
+    if (Number.isNaN(parsedEnd.getTime())) {
+      exam.endsAt = "";
+    } else {
+      exam.endsAt = parsedEnd.toISOString();
+    }
   }
 }
 
@@ -554,6 +588,57 @@ function calculateRuntimeExamMeta(questions) {
   return { maxScore };
 }
 
+function teacherCredentialMatches(teacher, credential) {
+  if (!teacher || credential === undefined || credential === null) return false;
+  const val = String(credential).trim();
+  if (!val) return false;
+  return teacher.password === val || teacher.autoEntryCode === val;
+}
+
+function parseExamEndsAtInput(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString();
+}
+
+function formatExamEndsAtForInput(isoValue) {
+  if (!isoValue) return "";
+  const parsed = new Date(isoValue);
+  if (Number.isNaN(parsed.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+
+function isExamPastDeadline(exam) {
+  if (!exam || !exam.endsAt) return false;
+  const end = new Date(exam.endsAt);
+  if (Number.isNaN(end.getTime())) return false;
+  return Date.now() > end.getTime();
+}
+
+function getExamDeadlineBlockMessage(exam) {
+  if (!exam || !exam.endsAt) return "";
+  const end = new Date(exam.endsAt);
+  const when = Number.isNaN(end.getTime())
+    ? exam.endsAt
+    : end.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
+  return `انتهى موعد هذا الامتحان في ${when}. لا يمكن الدخول أو أداء الأسئلة. يمكن للمعلم تمديد الموعد من إعدادات الامتحان.`;
+}
+
+function getQuestionTimeSeconds(question, exam) {
+  if (question && question.timeSeconds !== undefined && question.timeSeconds !== null) {
+    const perQ = parseInt(question.timeSeconds, 10);
+    if (Number.isFinite(perQ) && perQ > 0) {
+      return Math.max(5, perQ);
+    }
+  }
+  const examTimeLimitMinutes = (exam && exam.timeLimit) || 60;
+  const questionsCount = (exam && exam.questions && exam.questions.length) || 1;
+  return Math.max(30, Math.floor((examTimeLimitMinutes * 60) / questionsCount));
+}
+
 function getCurrentExamTotalScore() {
   if (systemState.currentExamRuntime && Number.isFinite(systemState.currentExamRuntime.maxScore)) {
     return systemState.currentExamRuntime.maxScore;
@@ -575,6 +660,11 @@ function upsertStudentRecord(source, fallbackKey = "") {
   let existingStudent = null;
   if (isPrivateStudentCode(normalizedStudent.code)) {
     existingStudent = findStudentByCode(normalizedStudent.code);
+  } else if (isSharedStudentCode(normalizedStudent.code)) {
+    existingStudent = findStudentByCode(normalizedStudent.code, {
+      studentId: normalizedStudent.id,
+      name: normalizedStudent.name
+    });
   }
   if (!existingStudent && normalizedStudent.id) {
     existingStudent = findStudentById(normalizedStudent.id);
@@ -1268,7 +1358,7 @@ function checkUrlParameters() {
   // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
   const autoCode = getUrlParameter("teacher_autocode");
   if (autoCode) {
-    const matched = systemState.teachers.find(t => t.autoEntryCode === autoCode);
+    const matched = systemState.teachers.find(t => teacherCredentialMatches(t, autoCode));
     if (matched) {
       loginTeacherObject(matched);
       navigateToView("teacher-dashboard-view");
@@ -1281,7 +1371,9 @@ function checkUrlParameters() {
   const user = getUrlParameter("teacher_username");
   const pass = getUrlParameter("teacher_pass");
   if (user && pass) {
-    const matched = systemState.teachers.find(t => t.username.toLowerCase() === user.toLowerCase() && t.password === pass);
+    const matched = systemState.teachers.find(t =>
+      t.username.toLowerCase() === user.toLowerCase() && teacherCredentialMatches(t, pass)
+    );
     if (matched) {
       loginTeacherObject(matched);
       navigateToView("teacher-dashboard-view");
@@ -1392,6 +1484,10 @@ function checkUrlParameters() {
   if (examId) {
     const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
     if (targetExam) {
+      if (isExamPastDeadline(targetExam)) {
+        alert(getExamDeadlineBlockMessage(targetExam));
+        return redirected;
+      }
       systemState.lockedExamId = targetExam.id;
       navigateToView("student-login-view");
       setTimeout(() => {
@@ -1559,9 +1655,9 @@ function handleTeacherLogin() {
     return;
   }
 
-  const matched = systemState.teachers.find(t => 
-    (t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput) && 
-    t.password === passwordInput
+  const matched = systemState.teachers.find(t =>
+    (t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput) &&
+    teacherCredentialMatches(t, passwordInput)
   );
 
   if (matched) {
@@ -1583,10 +1679,7 @@ function handleTeacherQuickLogin() {
   }
 
   // البحث عن المعلم المطابق للرمز السريع أو الرقم السري
-  const matched = systemState.teachers.find(t => 
-    t.autoEntryCode === codeVal || 
-    t.password === codeVal
-  );
+  const matched = systemState.teachers.find(t => teacherCredentialMatches(t, codeVal));
 
   if (matched) {
     loginTeacherObject(matched);
@@ -1729,7 +1822,12 @@ function saveTeacherProfile() {
   systemState.activeTeacher.name = name;
   systemState.activeTeacher.subject = subject;
   systemState.activeTeacher.autoEntryCode = autoCode;
-  
+  systemState.activeTeacher.password = autoCode;
+  if (systemState.config) {
+    systemState.config.autoEntryCode = autoCode;
+    systemState.config.teacherCode = autoCode;
+  }
+
   systemState.teacherProfile = { name, subject };
 
   // تحديث القائمة العامة
@@ -1763,6 +1861,7 @@ function saveTeacherIntegrationConfig() {
   }
 
   systemState.activeTeacher.password = code;
+  systemState.activeTeacher.autoEntryCode = code;
   systemState.activeTeacher.integrationConfig = {
     googleFormUrl: url,
     entryName,
@@ -1961,6 +2060,8 @@ window.editExamQuestions = function(examId) {
   if (questionCountEl) questionCountEl.value = exam.questionCount || "";
   const maxCheatEl = document.getElementById("edit-meta-max-cheat-attempts");
   if (maxCheatEl) maxCheatEl.value = exam.maxCheatAttempts ?? 5;
+  const endsAtEl = document.getElementById("edit-meta-ends-at");
+  if (endsAtEl) endsAtEl.value = formatExamEndsAtForInput(exam.endsAt || "");
   document.getElementById("edit-meta-google-url").value = exam.googleFormUrl || "";
   document.getElementById("edit-meta-entry-name").value = exam.entryName || "";
   document.getElementById("edit-meta-entry-id").value = exam.entryId || "";
@@ -2008,7 +2109,7 @@ function renderQuestionsForEdit(exam) {
         <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteQuestion(${index})">حذف السؤال</button>
       </div>
       
-      <div style="display: grid; grid-template-columns: 3fr 1fr; gap: 1rem; margin-bottom:1rem;">
+      <div style="display: grid; grid-template-columns: 3fr 1fr 1fr; gap: 1rem; margin-bottom:1rem;">
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">نص السؤال:</label>
           <input type="text" class="form-control edit-q-text" value="${q.question}" data-index="${index}">
@@ -2016,6 +2117,10 @@ function renderQuestionsForEdit(exam) {
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">درجة السؤال:</label>
           <input type="number" class="form-control edit-q-points" value="${q.points !== undefined ? q.points : 10}" min="1" data-index="${index}">
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">مدة الإجابة (ثانية):</label>
+          <input type="number" class="form-control edit-q-time" value="${q.timeSeconds !== undefined ? q.timeSeconds : 60}" min="5" data-index="${index}">
         </div>
       </div>
     `;
@@ -2125,6 +2230,7 @@ function saveAllEditedQuestions() {
   exam.examType = editType;
   exam.totalScore = editTotalScore;
   exam.timeLimit = parseFloat(document.getElementById("edit-meta-timelimit")?.value) || 60;
+  exam.endsAt = parseExamEndsAtInput(document.getElementById("edit-meta-ends-at")?.value || "");
   exam.shuffleQuestions = editRandomizeQuestions;
   exam.questionCount = rawQuestionCount;
   const maxCheatAttemptsNumber = parseInt(rawMaxCheatAttempts, 10);
@@ -2151,6 +2257,9 @@ function saveAllEditedQuestions() {
     const pointsInput = card.querySelector(".edit-q-points");
     const questionPoints = pointsInput ? parseFloat(pointsInput.value) || 10 : 10;
 
+    const timeInput = card.querySelector(".edit-q-time");
+    const questionTimeSeconds = timeInput ? parseInt(timeInput.value, 10) || 60 : 60;
+
     const typeInput = exam.questions[index].type;
 
     let options = [];
@@ -2175,7 +2284,8 @@ function saveAllEditedQuestions() {
       question: questionText,
       options,
       correctAnswer,
-      points: questionPoints // حفظ الوزن
+      points: questionPoints,
+      timeSeconds: Math.max(5, questionTimeSeconds)
     });
   });
 
@@ -2262,7 +2372,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب سؤال الاختيار من متعدد الجديد هنا...",
       options: ["الخيار الأول", "الخيار الثاني", "الخيار الثالث"],
       correctAnswer: 0,
-      points: 10
+      points: 10,
+      timeSeconds: 60
     };
   } else if (type === 'boolean') {
     newQ = {
@@ -2271,7 +2382,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب سؤال الصواب والخطأ هنا...",
       options: ["صواب", "خطأ"],
       correctAnswer: 0,
-      points: 10
+      points: 10,
+      timeSeconds: 60
     };
   } else {
     newQ = {
@@ -2280,7 +2392,8 @@ window.addNewQuestionToExam = function(type) {
       question: "اكتب نص السؤال المقالي الجديد هنا...",
       options: [],
       correctAnswer: "",
-      points: 10
+      points: 10,
+      timeSeconds: 60
     };
   }
 
@@ -2630,7 +2743,13 @@ function populateExamSelectionList() {
   filteredExams.forEach(exam => {
     const opt = document.createElement("option");
     opt.value = exam.id;
-    opt.innerText = `${exam.title} (${exam.subject})`;
+    const expired = isExamPastDeadline(exam);
+    opt.innerText = expired
+      ? `${exam.title} (${exam.subject}) — منتهي الموعد`
+      : `${exam.title} (${exam.subject})`;
+    if (expired) {
+      opt.disabled = true;
+    }
     select.appendChild(opt);
   });
 
@@ -2677,9 +2796,14 @@ function validateStudentAndStart() {
     return;
   }
 
+  if (isExamPastDeadline(selectedExam)) {
+    alert(getExamDeadlineBlockMessage(selectedExam));
+    return;
+  }
+
   let matchedStudent = null;
   if (isFiveDigitStudentCode(inputCode)) {
-    matchedStudent = findStudentByCode(inputCode);
+    matchedStudent = findStudentByCode(inputCode, { studentId: normalizedId, name });
   }
   if (!matchedStudent && normalizedId) {
     matchedStudent = findStudentById(normalizedId);
@@ -2751,11 +2875,6 @@ function validateStudentAndStart() {
   saveActiveStudentSession();
   updateLiveIncompleteResult();
   requestSecureExamMode();
-
-  const examTimeLimitMinutes = selectedExam.timeLimit || 60;
-  const questionsCount = systemState.shuffledQuestions.length || 1;
-  const perQuestionSeconds = Math.max(30, Math.floor((examTimeLimitMinutes * 60) / questionsCount));
-  systemState.timer.timeLimit = perQuestionSeconds;
 
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
@@ -2876,6 +2995,8 @@ function renderRunnerQuestion() {
     nextBtn.innerHTML = `السؤال التالي <span class="material-icons">arrow_back</span>`;
     nextBtn.setAttribute("aria-label", "الانتقال للسؤال التالي");
   }
+
+  systemState.timer.timeLimit = getQuestionTimeSeconds(question, exam);
 }
 
 function selectRunnerOption(index) {
@@ -3953,7 +4074,7 @@ function setupStudentAutofill() {
     const codeVal = sanitizeStudentCodeInput(codeInput.value.trim());
 
     let matched = null;
-    if (isFiveDigitStudentCode(codeVal)) {
+    if (isFiveDigitStudentCode(codeVal) && !isSharedStudentCode(codeVal)) {
       matched = findStudentByCode(codeVal);
     }
     if (!matched && idVal) {
