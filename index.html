@@ -641,6 +641,11 @@
                     <input type="number" id="edit-meta-timelimit" class="form-control" min="1" value="60" placeholder="60">
                     <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
                   </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-max-cheat-attempts">عدد محاولات الغش المسموحة قبل إلغاء الامتحان:</label>
+                    <input type="number" id="edit-meta-max-cheat-attempts" class="form-control" min="0" step="1" value="5" placeholder="5">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">0 = بدون حد (تحذير فقط بدون إلغاء تلقائي). 1 = إلغاء الامتحان عند أول محاولة غش.</small>
+                  </div>
                 </div>
 
                 <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
@@ -793,16 +798,9 @@
                 <!-- تُعبأ عبر JS -->
               </div>
               
-              <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-top:1.5rem;">
-                <button class="btn btn-primary" onclick="saveResultDetailsManual()">
-                  <span class="material-icons">save</span> حفظ كافة التعديلات والإجابات يدوياً
-                </button>
-                <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="(()=>{ const res=systemState.currentGradingResult; if(!res){alert('لا توجد نتيجة محددة');return;} const el=document.getElementById('grading-sync-status'); sendUpdatedResultToCloud(res,el); })()">
-                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">cloud_sync</span> مزامنة الدرجات مع Google Sheets
-                </button>
-              </div>
-              <!-- حالة المزامنة -->
-              <div id="grading-sync-status" style="margin-top:0.75rem; font-size:0.85rem; color:var(--text-muted); min-height:1.5rem;"></div>
+              <button class="btn btn-primary" onclick="saveResultDetailsManual()">
+                <span class="material-icons">save</span> حفظ كافة التعديلات والإجابات يدوياً
+              </button>
             </div>
           </div>
 

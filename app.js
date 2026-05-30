@@ -105,13 +105,23 @@ document.addEventListener("DOMContentLoaded", () => {
         if (resume) {
           systemState.currentStudent = session.student;
           const matchedExam = systemState.exams.find(e => e.id === session.examId);
-          if (matchedExam) {
+          const resumeKey = session.student?.studentKey || getStudentLookupKey(session.student || {});
+          const blocking = findBlockingExamResult(resumeKey, session.examId);
+          if (blocking) {
+            localStorage.removeItem("arabya_active_student_session");
+            alert(blocking.status === "canceled"
+              ? "لا يمكن استكمال هذا الامتحان لأنه مُلغى. تواصل مع المعلم."
+              : "لا يمكن استكمال هذا الامتحان لأنه مُسلَّم مسبقاً.");
+          } else if (matchedExam) {
             systemState.currentExam = matchedExam;
-            systemState.shuffledQuestions = session.shuffledQuestions;
-            systemState.currentQuestionIndex = session.currentQuestionIndex;
-            systemState.studentAnswers = session.studentAnswers;
+            systemState.shuffledQuestions = session.shuffledQuestions || buildRuntimeQuestionsForExam(matchedExam);
+            systemState.currentExamRuntime = session.currentExamRuntime || calculateRuntimeExamMeta(systemState.shuffledQuestions);
+            systemState.currentQuestionIndex = session.currentQuestionIndex || 0;
+            systemState.studentAnswers = session.studentAnswers || {};
             systemState.cheatViolations = session.cheatViolations || 0;
             systemState.isExamActive = true;
+            systemState.isCheatingSuspended = false;
+            requestSecureExamMode();
             navigateToView("exam-runner-view");
             renderRunnerQuestion();
             startRunnerTimerWithTime(session.timeRemaining || 60);
@@ -439,12 +449,64 @@ function sanitizeQuestionConfig(exam) {
   if (typeof exam.shuffleQuestions !== "boolean") {
     exam.shuffleQuestions = true;
   }
+  const parsedMaxCheat = parseInt(exam.maxCheatAttempts, 10);
+  if (!Number.isFinite(parsedMaxCheat) || parsedMaxCheat < 0) {
+    exam.maxCheatAttempts = 5;
+  } else {
+    exam.maxCheatAttempts = parsedMaxCheat;
+  }
   const parsedCount = parseInt(exam.questionCount, 10);
   if (!Number.isFinite(parsedCount) || parsedCount <= 0) {
     exam.questionCount = "";
   } else {
     exam.questionCount = parsedCount;
   }
+}
+
+
+function getExamMaxCheatAttempts(exam) {
+  if (!exam) return 5;
+  const parsed = parseInt(exam.maxCheatAttempts, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 5;
+  return parsed;
+}
+
+function shouldCancelExamForCheating(exam, violations) {
+  const maxAttempts = getExamMaxCheatAttempts(exam);
+  if (maxAttempts === 0) return false;
+  return violations >= maxAttempts;
+}
+
+function findBlockingExamResult(studentLookupKey, examId) {
+  if (!studentLookupKey || !examId) return null;
+  return systemState.results.find(r =>
+    r.studentLookupKey === studentLookupKey &&
+    r.examId === examId &&
+    r.status !== "incomplete" &&
+    r.allowRetake !== true &&
+    (r.status === "completed" || r.status === "canceled")
+  ) || null;
+}
+
+function getStudentCanceledExamIds(studentLookupKey) {
+  if (!studentLookupKey) return [];
+  const ids = new Set();
+  systemState.results.forEach(r => {
+    if (r.studentLookupKey === studentLookupKey && r.status === "canceled" && r.allowRetake !== true && r.examId) {
+      ids.add(r.examId);
+    }
+  });
+  return [...ids];
+}
+
+function formatResultStatusBadge(res) {
+  if (res.status === "canceled" && res.allowRetake !== true) {
+    return '<span style="color:var(--error); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[تم إلغاء الامتحان]</span>';
+  }
+  if (res.status === "incomplete") {
+    return '<span style="color:var(--warning); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[جاري]</span>';
+  }
+  return "";
 }
 
 function ensureExamsDataShape() {
@@ -1566,6 +1628,7 @@ function createNewExam() {
     totalScore: 100, // افتراضياً المجموع 100
     shuffleQuestions: true,
     questionCount: "",
+    maxCheatAttempts: 5,
     questions: []
   };
 
@@ -1631,6 +1694,8 @@ window.editExamQuestions = function(examId) {
   if (randomizeEl) randomizeEl.checked = exam.shuffleQuestions !== false;
   const questionCountEl = document.getElementById("edit-meta-question-count");
   if (questionCountEl) questionCountEl.value = exam.questionCount || "";
+  const maxCheatEl = document.getElementById("edit-meta-max-cheat-attempts");
+  if (maxCheatEl) maxCheatEl.value = exam.maxCheatAttempts ?? 5;
   document.getElementById("edit-meta-google-url").value = exam.googleFormUrl || "";
   document.getElementById("edit-meta-entry-name").value = exam.entryName || "";
   document.getElementById("edit-meta-entry-id").value = exam.entryId || "";
@@ -1774,6 +1839,7 @@ function saveAllEditedQuestions() {
   const editTotalScore = parseFloat(document.getElementById("edit-meta-totalscore").value) || 100;
   const editRandomizeQuestions = document.getElementById("edit-meta-randomize")?.checked !== false;
   const rawQuestionCount = document.getElementById("edit-meta-question-count")?.value.trim() || "";
+  const rawMaxCheatAttempts = document.getElementById("edit-meta-max-cheat-attempts")?.value.trim() ?? "5";
   const editGoogleUrl = document.getElementById("edit-meta-google-url").value.trim();
   const editEntryName = document.getElementById("edit-meta-entry-name").value.trim();
   const editEntryId = document.getElementById("edit-meta-entry-id").value.trim();
@@ -1796,6 +1862,12 @@ function saveAllEditedQuestions() {
   exam.timeLimit = parseFloat(document.getElementById("edit-meta-timelimit")?.value) || 60;
   exam.shuffleQuestions = editRandomizeQuestions;
   exam.questionCount = rawQuestionCount;
+  const maxCheatAttemptsNumber = parseInt(rawMaxCheatAttempts, 10);
+  if (!Number.isFinite(maxCheatAttemptsNumber) || maxCheatAttemptsNumber < 0) {
+    alert("عدد محاولات الغش المسموحة يجب أن يكون 0 أو أكبر.");
+    return;
+  }
+  exam.maxCheatAttempts = maxCheatAttemptsNumber;
   exam.googleFormUrl = editGoogleUrl;
   exam.entryName = editEntryName;
   exam.entryId = editEntryId;
@@ -2387,6 +2459,18 @@ function validateStudentAndStart() {
     email: studentRecord.email || "",
     mobile: studentRecord.mobile || ""
   };
+
+  const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
+  const blockingResult = findBlockingExamResult(studentLookupKey, examId);
+  if (blockingResult) {
+    if (blockingResult.status === "canceled") {
+      alert("تم إلغاء امتحانك سابقاً بسبب تجاوز محاولات الغش المسموحة. تواصل مع المعلم لإعادة السماح بالتقديم.");
+    } else {
+      alert("لقد أنهيت هذا الامتحان وتسليم إجاباتك مسبقاً. لا يمكن الدخول إليه مرة أخرى.");
+    }
+    return;
+  }
+
   systemState.currentExam = selectedExam;
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
@@ -2398,7 +2482,6 @@ function validateStudentAndStart() {
   systemState.isCheatingSuspended = false;
   systemState.cheatViolations = 0;
 
-  const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === selectedExam.id && r.status === "incomplete"));
   saveActiveStudentSession();
   updateLiveIncompleteResult();
@@ -2722,9 +2805,7 @@ function submitFinishedExam() {
     maxScore: examTotalScore,
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions)),
     status: "completed",
-    maxScore: examTotalScore,
-    presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions)),
-    status: "completed"
+    allowRetake: false
   };
 
   systemState.results.push(resultObj);
@@ -2756,7 +2837,7 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
       statusEl.innerText = `تهانينا، لقد اجتزت الامتحان بنجاح وحققت: ${scaledScore} من المجموع النهائي البالغ ${examTotalScore} درجات.`;
       statusEl.style.color = "var(--secondary)";
     } else {
-      statusEl.innerText = `للأسف، لم تجتز النسبة المطلوبة. درجتك هي: ${scaledScore} من ${examTotalScore} درجات. حاول مجدداً!`;
+      statusEl.innerText = `للأسف، لم تجتز النسبة المطلوبة. درجتك هي: ${scaledScore} من ${examTotalScore} درجات.`;
       statusEl.style.color = "var(--error)";
   systemState.currentExamRuntime = null;
     }
@@ -2940,14 +3021,18 @@ function renderStudentResultsTable() {
 
   sorted.forEach(res => {
     const row = document.createElement("tr");
+    const statusBadge = formatResultStatusBadge(res);
+    const uncancelBtn = (res.status === "canceled" && res.allowRetake !== true)
+      ? `<button class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning); margin-right:0.25rem;" onclick="uncancelStudentExam('${res.recordId || ""}')">إلغاء علامة الإلغاء</button>`
+      : "";
     row.innerHTML = `
-      <td>${res.name}</td>
-      <td><code>${res.id}</code></td>
+      <td>${statusBadge}${res.name}</td>
+      <td><code>${res.id || "--"}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${res.accessCode || "لا يوجد"}</span></td>
       <td>${res.examTitle} (${res.level || 'عام'})</td>
       <td style="font-weight:700; color:var(--secondary);">${res.score}</td>
       <td>${res.timestamp}</td>
-      <td><button class="btn btn-outline btn-sm" onclick="viewTeacherResultDetail('${res.recordId || ""}', '${res.id}', '${res.examId}')">عرض</button></td>
+      <td style="display:flex; gap:0.25rem; flex-wrap:wrap;">${uncancelBtn}<button class="btn btn-outline btn-sm" onclick="viewTeacherResultDetail('${res.recordId || ""}', '${res.id}', '${res.examId}')">عرض</button></td>
     `;
     tbody.appendChild(row);
   });
@@ -3290,16 +3375,30 @@ function setupAntiCheatHandlers() {
     }
   });
   document.addEventListener("copy", e => {
-    if (systemState.isExamActive) {
+    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
+      e.preventDefault();
+      triggerRunnerCheatPenalty("copy");
+    } else if (systemState.isExamActive) {
       e.preventDefault();
     }
   });
   document.addEventListener("cut", e => {
-    if (systemState.isExamActive) {
+    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
+      e.preventDefault();
+      triggerRunnerCheatPenalty("cut");
+    } else if (systemState.isExamActive) {
       e.preventDefault();
     }
   });
   document.addEventListener("paste", e => {
+    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
+      e.preventDefault();
+      triggerRunnerCheatPenalty("paste");
+    } else if (systemState.isExamActive) {
+      e.preventDefault();
+    }
+  });
+  document.addEventListener("selectstart", e => {
     if (systemState.isExamActive) {
       e.preventDefault();
     }
@@ -3315,10 +3414,16 @@ function setupAntiCheatHandlers() {
     if (
       e.key === "F12" || 
       (commandKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c" || e.key === "K" || e.key === "k" || e.key === "E" || e.key === "e")) ||
-      (commandKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s" || e.key === "A" || e.key === "a" || e.key === "C" || e.key === "c" || e.key === "V" || e.key === "v" || e.key === "X" || e.key === "x"))
+      (commandKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s"))
     ) {
       e.preventDefault();
       alert("حظر: غير مصرح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
+      return false;
+    }
+
+    if (systemState.isExamActive && !systemState.isCheatingSuspended && commandKey && (e.key === "C" || e.key === "c" || e.key === "V" || e.key === "v" || e.key === "X" || e.key === "x" || e.key === "A" || e.key === "a")) {
+      e.preventDefault();
+      triggerRunnerCheatPenalty("keyboard-shortcut");
       return false;
     }
 
@@ -3359,36 +3464,34 @@ function triggerRunnerCheatPenalty(reason) {
     clearInterval(systemState.timer.intervalId);
   }
 
-  // زيادة عدد الانتهاكات
   systemState.cheatViolations++;
 
   const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
-  if (currentQ.type === "essay") {
+  if (currentQ && currentQ.type === "essay") {
     systemState.studentAnswers[currentQ.id] = "(ملغي - تم كشف محاولة غش/تصوير)";
-  } else {
+  } else if (currentQ) {
     systemState.studentAnswers[currentQ.id] = -2;
   }
 
   const overlay = document.getElementById("runner-cheat-overlay");
   const mainWrapper = document.getElementById("app-main-wrapper");
+  const msg = document.getElementById("runner-cheat-msg");
+  const exam = systemState.currentExam;
+  const shouldCancel = shouldCancelExamForCheating(exam, systemState.cheatViolations);
 
   mainWrapper.classList.add("blurred-content");
   overlay.classList.remove("hidden");
 
-  const msg = document.getElementById("runner-cheat-msg");
-  
-  if (systemState.cheatViolations >= 5) {
-    // الانتهاك الخامس -> إلغاء الامتحان بالكامل فوراً وتصفير الدرجة
+  if (shouldCancel) {
     msg.innerHTML = `
-      <span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان وتصفير النتيجة!</span>
-      لقد قمت بمحاولة الغش أو الخروج من صفحة الامتحان للمرة الخامسة متجاوزاً الحد المسموح به. تم إنهاء اختبارك نهائياً وحرمانك من التقديم.
+      <span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان!</span>
+      تم اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تم إنهاء اختبارك وتسجيل حالة الإلغاء.
     `;
-    
-    // تصفير جميع درجات الأسئلة وتعيينها كغش
+
     systemState.shuffledQuestions.forEach(q => {
       if (systemState.studentAnswers[q.id] === undefined) {
         if (q.type === "essay") {
-          systemState.studentAnswers[q.id] = "(ملغي - غش متكرر)";
+          systemState.studentAnswers[q.id] = "(ملغي - غش)";
         } else {
           systemState.studentAnswers[q.id] = -2;
         }
@@ -3400,22 +3503,12 @@ function triggerRunnerCheatPenalty(reason) {
       mainWrapper.classList.remove("blurred-content");
       systemState.isCheatingSuspended = false;
       systemState.isExamActive = false;
-      
-      // توثيق وحفظ النتيجة كـ "راسب/ملغي بسبب الغش"
       submitCheatedExam();
     }, 4500);
-    
   } else {
-    // التحذيرات من الأول إلى الرابع
-    const warningWords = ["الأول", "الثاني", "الثالث", "الرابع"];
-    const warningWord = warningWords[systemState.cheatViolations - 1] || systemState.cheatViolations;
-    const actionText = reason === "screenshot" ? "التقاط لقطة شاشة للامتحان" : "الخروج من صفحة أو تبويب الامتحان";
-    
     msg.innerHTML = `
-      <span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير ${warningWord} (محاولة ${systemState.cheatViolations} من 5)</span>
-      لقد حاولت ${actionText}! تم إلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي.
-      <br>
-      <span style="color:var(--error); font-weight:bold; font-size:0.95rem; display:block; margin-top:0.5rem;">انتبه: متبقي لك ${5 - systemState.cheatViolations} محاولات قبل إلغاء الامتحان بالكامل تلقائياً!</span>
+      <span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير أمني</span>
+      تم اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تم إلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي.
     `;
 
     setTimeout(() => {
@@ -3463,24 +3556,29 @@ function submitCheatedExam() {
     details: detailsFormatted,
     timestamp: new Date().toLocaleString("ar-EG"),
     studentAnswers: studentAnswersMap,
-    questionScores: questionScoresMap
+    questionScores: questionScoresMap,
+    maxScore: examTotalScore,
+    presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions || [])),
+    status: "canceled",
+    allowRetake: false,
+    cheatViolations: systemState.cheatViolations
   };
 
   systemState.results.push(resultObj);
+  systemState.currentExamRuntime = null;
   saveSystemState(true);
 
   sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
-  
-  // الانتقال لصفحة النتيجة مع تخصيص المظهر للغش
+
   navigateToView("student-result-view");
   document.getElementById("runner-res-score").innerText = "0";
   document.getElementById("runner-res-total").innerText = examTotalScore;
   document.getElementById("runner-res-name").innerText = systemState.currentStudent.name;
   document.getElementById("runner-res-id").innerText = systemState.currentStudent.id || "--";
   document.getElementById("runner-res-title").innerText = `${systemState.currentExam.title} [${systemState.currentExam.examType}]`;
-  
+
   const statusEl = document.getElementById("runner-res-status");
-  statusEl.innerText = "للأسف، تم إلغاء اختبارك وتصفير النتيجة نهائياً بسبب رصد محاولات غش متكررة أو الخروج من صفحة الاختبار.";
+  statusEl.innerText = "تم إلغاء امتحانك بسبب اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تواصل مع المعلم إذا لزم الأمر.";
   statusEl.style.color = "var(--error)";
 }
 
@@ -3562,6 +3660,28 @@ function setupStudentAutofill() {
 }
 
 // عرض قائمة الطلاب وأكوادهم في لوحة المعلم
+
+window.uncancelStudentExam = function(recordId) {
+  const res = systemState.results.find(r => r.recordId === recordId);
+  if (!res) {
+    alert("لم يتم العثور على سجل النتيجة.");
+    return;
+  }
+  if (res.status !== "canceled") {
+    alert("هذا السجل ليس بحالة إلغاء.");
+    return;
+  }
+  if (!confirm(`هل تريد إلغاء علامة "تم إلغاء الامتحان" للطالب ${res.name} والسماح له بإعادة التقديم؟`)) {
+    return;
+  }
+  res.allowRetake = true;
+  res.uncanceledAt = new Date().toLocaleString("ar-EG");
+  saveSystemState(true);
+  renderStudentResultsTable();
+  renderTeacherStudentsTable();
+  alert("تم السماح للطالب بإعادة أداء الامتحان.");
+};
+
 function renderTeacherStudentsTable() {
   const tbody = document.getElementById("teacher-students-table-body");
   if (!tbody) return;
@@ -3576,9 +3696,14 @@ function renderTeacherStudentsTable() {
   const reversed = [...systemState.students].reverse();
 
   reversed.forEach(s => {
+    const studentKey = s.studentKey || getStudentLookupKey(s);
+    const canceledExamIds = getStudentCanceledExamIds(studentKey);
+    const canceledBadge = canceledExamIds.length
+      ? `<span style="color:var(--error); font-weight:700; font-size:0.75rem; display:block; margin-top:0.15rem;">تم إلغاء الامتحان</span>`
+      : "";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${s.name}</td>
+      <td>${s.name}${canceledBadge}</td>
       <td><code>${s.id || "--"}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${s.code || "لا يوجد"}</span></td>
       <td>${s.email || "--"}</td>
@@ -3892,6 +4017,7 @@ function saveActiveStudentSession() {
     currentQuestionIndex: systemState.currentQuestionIndex,
     studentAnswers: systemState.studentAnswers,
     cheatViolations: systemState.cheatViolations,
+    currentExamRuntime: systemState.currentExamRuntime,
     timeRemaining: systemState.timer.timeRemaining
   };
   localStorage.setItem("arabya_active_student_session", JSON.stringify(session));
