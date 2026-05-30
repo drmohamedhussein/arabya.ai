@@ -400,6 +400,18 @@
           </div>
         </div>
 
+        <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:10px; padding:0.85rem 1rem; margin-bottom:1rem; font-size:0.85rem; line-height:1.6; color:var(--text-muted);">
+          <strong style="color:var(--accent);">مهم:</strong> كل متصفح يحفظ البيانات على جهازك فقط. الرقم السري <code>TEACHER2026</code> للدخول فقط — وليس لمزامنة البيانات بين الأجهزة. لاسترجاع امتحاناتك من متصفح آخر، أدخل <strong>رابط المزامنة السحابية</strong> (Web App) أدناه إن كان مفعّلاً.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="teacher-login-sync-url">رابط المزامنة السحابية (اختياري — Web App URL):</label>
+          <div class="input-wrapper">
+            <input type="url" id="teacher-login-sync-url" class="form-control" placeholder="https://script.google.com/macros/s/XXXX/exec" autocomplete="off" dir="ltr" style="text-align:left;">
+            <span class="material-icons input-icon" aria-hidden="true">cloud_sync</span>
+          </div>
+        </div>
+
         <div class="form-group">
           <label class="form-label" for="teacher-password">الرقم السري للمعلم:</label>
           <div class="input-wrapper">
@@ -532,6 +544,10 @@
         </aside>
 
         <!-- اللوحة الرئيسية المتغيرة -->
+          <div id="teacher-cloud-hint-banner" class="hidden" style="margin:0 0 1.25rem; padding:1rem 1.1rem; border-radius:10px; border:1px solid rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); color:var(--text-muted); font-size:0.88rem; line-height:1.7;">
+            <strong style="color:var(--accent); display:block; margin-bottom:0.35rem;">البيانات محفوظة على هذا المتصفح فقط</strong>
+            امتحاناتك ونتائج الطلاب لا تنتقل تلقائياً بين المتصفحات. من تبويب <strong>الربط بـ Google Sheets</strong>: أدخل رابط Web App، ثم اضغط <strong>حفظ نسخة احتياطية سحابية</strong>. على أي متصفح آخر: أدخل نفس الرابط عند تسجيل الدخول أو اضغط <strong>استعادة النسخة الاحتياطية</strong>.
+          </div>
         <div class="teacher-main-panel">
           
           <!-- تبويب الامتحانات (Exams Tab) -->

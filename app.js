@@ -1177,6 +1177,192 @@ function autoSyncToCloud() {
   }
 }
 
+function isValidCloudSyncUrl(url) {
+  const clean = (url || "").trim();
+  return !!(clean && (clean.includes("/macros/s/") || clean.endsWith("/exec")));
+}
+
+function collectCloudSyncUrls(extraUrl) {
+  const urls = new Set();
+  [extraUrl, systemState.config?.googleFormUrl, systemState.activeTeacher?.integrationConfig?.googleFormUrl].forEach(url => {
+    if (isValidCloudSyncUrl(url)) urls.add(url.trim());
+  });
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (isValidCloudSyncUrl(exam.googleFormUrl)) urls.add(exam.googleFormUrl.trim());
+    });
+  }
+  return Array.from(urls);
+}
+
+function countLocalTeacherData() {
+  return {
+    exams: Array.isArray(systemState.exams) ? systemState.exams.length : 0,
+    results: Array.isArray(systemState.results) ? systemState.results.length : 0,
+    students: Array.isArray(systemState.students) ? systemState.students.length : 0
+  };
+}
+
+function countCloudBackupData(data) {
+  return {
+    exams: Array.isArray(data?.exams) ? data.exams.length : 0,
+    results: Array.isArray(data?.results) ? data.results.length : 0,
+    students: Array.isArray(data?.students) ? data.students.length : 0
+  };
+}
+
+function isLikelyFreshLocalDatabase() {
+  if (localStorage.getItem("arabya_teacher_has_custom_data") === "yes") return false;
+  const activeUsername = systemState.activeTeacher?.username || "";
+  const teacherExams = (systemState.exams || []).filter(exam => !exam.teacher || exam.teacher === activeUsername);
+  const hasResults = (systemState.results || []).length > 0;
+  const hasStudents = (systemState.students || []).length > 1;
+  const defaultExamIds = new Set(["arabic_grammar", "arabic_rhetoric", "arabic_literature"]);
+  const hasCustomExams = teacherExams.some(exam => !defaultExamIds.has(exam.id));
+  return !hasResults && !hasStudents && !hasCustomExams;
+}
+
+function markTeacherHasCustomData() {
+  try {
+    localStorage.setItem("arabya_teacher_has_custom_data", "yes");
+  } catch (e) {}
+}
+
+function persistCloudSyncUrlForTeacher(url) {
+  if (!isValidCloudSyncUrl(url) || !systemState.activeTeacher) return;
+  const clean = url.trim();
+  systemState.activeTeacher.integrationConfig = systemState.activeTeacher.integrationConfig || {};
+  systemState.activeTeacher.integrationConfig.googleFormUrl = clean;
+  systemState.config = systemState.config || {};
+  systemState.config.googleFormUrl = clean;
+  const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+  if (idx !== -1) {
+    systemState.teachers[idx] = systemState.activeTeacher;
+  }
+  saveTeachersToLocalStorage();
+  localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  localStorage.setItem("arabya_pending_cloud_sync_url", clean);
+}
+
+function applyCloudBackupData(data) {
+  if (data.teachers && Array.isArray(data.teachers)) {
+    systemState.teachers = data.teachers;
+    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    if (systemState.activeTeacher) {
+      const restoredTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username)
+        || systemState.teachers.find(t => t.password === systemState.activeTeacher.password)
+        || systemState.teachers[0];
+      if (restoredTeacher) loginTeacherObject(restoredTeacher);
+    }
+  }
+  if (data.students && Array.isArray(data.students)) {
+    systemState.students = data.students;
+    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+  }
+  if (data.exams && Array.isArray(data.exams)) {
+    systemState.exams = data.exams;
+    localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+  }
+  if (data.results && Array.isArray(data.results)) {
+    systemState.results = data.results;
+    localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+    ensureResultRecordIds();
+  }
+  markTeacherHasCustomData();
+}
+
+function fetchCloudBackupFromUrls(urlList) {
+  return new Promise((resolve, reject) => {
+    let index = 0;
+    function tryFetchNext() {
+      if (index >= urlList.length) {
+        reject(new Error("No cloud backup found"));
+        return;
+      }
+      const rawUrl = urlList[index++];
+      const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+      fetch(fetchUrl, { method: "GET", headers: { "Accept": "application/json" } })
+        .then(res => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
+        .then(response => {
+          if (response && response.status === "success" && response.data) resolve(response.data);
+          else tryFetchNext();
+        })
+        .catch(() => tryFetchNext());
+    }
+    tryFetchNext();
+  });
+}
+
+function updateTeacherCloudHintBanner() {
+  const banner = document.getElementById("teacher-cloud-hint-banner");
+  if (!banner || !systemState.activeTeacher) return;
+  const urls = collectCloudSyncUrls();
+  if (urls.length > 0 || !isLikelyFreshLocalDatabase()) {
+    banner.classList.add("hidden");
+    return;
+  }
+  banner.classList.remove("hidden");
+}
+
+function finishTeacherLoginNavigation(options = {}) {
+  navigateToView("teacher-dashboard-view");
+  renderExamsList();
+  renderTeacherStudentsTable();
+  if (options.message) alert(options.message);
+  updateTeacherCloudHintBanner();
+}
+
+function syncTeacherDataOnLogin(options = {}) {
+  const extraSyncUrl = (options.extraSyncUrl || "").trim();
+  if (extraSyncUrl) persistCloudSyncUrlForTeacher(extraSyncUrl);
+
+  const urls = collectCloudSyncUrls(extraSyncUrl);
+  if (!urls.length) {
+    finishTeacherLoginNavigation(options);
+    if (isLikelyFreshLocalDatabase()) {
+      setTimeout(() => {
+        alert("تنبيه: بيانات المنصة تُحفظ على هذا المتصفح فقط.\n\nللوصول لامتحاناتك ونتائجك من متصفح أو جهاز آخر:\n1) فعّل الربط بـ Google Sheets من لوحة المعلم\n2) ارفع نسخة احتياطية سحابية\n3) على الجهاز الجديد: أدخل نفس رابط Web App ثم سجّل الدخول");
+      }, 300);
+    }
+    return Promise.resolve({ synced: false, reason: "no_url" });
+  }
+
+  return fetchCloudBackupFromUrls(urls)
+    .then(data => {
+      const local = countLocalTeacherData();
+      const cloud = countCloudBackupData(data);
+      const fresh = isLikelyFreshLocalDatabase();
+      const cloudHasMore = cloud.exams > local.exams || cloud.results > local.results || cloud.students > local.students;
+
+      if (!fresh && !cloudHasMore) {
+        finishTeacherLoginNavigation(options);
+        return { synced: false, reason: "local_current" };
+      }
+
+      if (!fresh && cloudHasMore && !options.skipConfirm) {
+        if (!confirm("وُجدت نسخة أحدث في السحابة. هل تريد استبدال البيانات المحلية على هذا المتصفح بالنسخة السحابية؟")) {
+          finishTeacherLoginNavigation(options);
+          return { synced: false, reason: "declined" };
+        }
+      }
+
+      applyCloudBackupData(data);
+      finishTeacherLoginNavigation({
+        message: options.message || "تم جلب بياناتك من السحابة بنجاح! ستجد امتحاناتك ونتائجك كما على جهازك الآخر."
+      });
+      return { synced: true };
+    })
+    .catch(err => {
+      console.error("syncTeacherDataOnLogin failed:", err);
+      finishTeacherLoginNavigation(options);
+      if (isLikelyFreshLocalDatabase()) {
+        alert("تعذر جلب البيانات من السحابة.\n\nتأكد من:\n- إدخال رابط Web App الصحيح (ينتهي بـ /exec)\n- رفع نسخة احتياطية سحابية من المتصفح الأصلي\n- نشر Apps Script للوصول Anyone");
+      }
+      return { synced: false, reason: "fetch_failed" };
+    });
+}
+
+
 // حفظ نسخة احتياطية سحابية يدوياً
 window.backupDatabaseToCloud = function() {
   const urls = new Set();
@@ -1340,8 +1526,15 @@ function navigateToView(viewId) {
 
   if (viewId === "student-login-view") {
     populateExamSelectionList();
+  } else if (viewId === "teacher-login-view") {
+    const pendingSyncUrl = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+    const syncInput = document.getElementById("teacher-login-sync-url");
+    if (syncInput && pendingSyncUrl && !syncInput.value.trim()) {
+      syncInput.value = pendingSyncUrl;
+    }
   } else if (viewId === "teacher-dashboard-view") {
     loadTeacherDashboardData();
+    updateTeacherCloudHintBanner();
   }
 }
 
@@ -1709,7 +1902,8 @@ function handleTeacherLogin() {
 
   if (matched) {
     loginTeacherObject(matched);
-    navigateToView("teacher-dashboard-view");
+    const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+    syncTeacherDataOnLogin({ extraSyncUrl });
     document.getElementById("teacher-password").value = "";
   } else {
     alert("بيانات المعلم غير صحيحة أو الحساب غير موجود!");
@@ -1730,9 +1924,12 @@ function handleTeacherQuickLogin() {
 
   if (matched) {
     loginTeacherObject(matched);
-    navigateToView("teacher-dashboard-view");
+    const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+    syncTeacherDataOnLogin({
+      extraSyncUrl,
+      message: `مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول بنجاح عبر رمز الدخول السريع.`
+    });
     if (codeInput) codeInput.value = "";
-    alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول بنجاح عبر رمز الدخول السريع.`);
   } else {
     alert("رمز الدخول السريع غير صحيح أو الحساب غير موجود!");
   }
