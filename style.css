@@ -950,6 +950,11 @@ tr:hover td {
   pointer-events: none !important;
 }
 
+#exam-runner-view.exam-secure-active #runner-question-text {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .hidden {
   display: none !important;
 }
@@ -1272,138 +1277,4 @@ tr:hover td {
 /* حالة المزامنة السحابية */
 .cloud-sync-active {
   animation: spin 1s infinite linear;
-}
-.teacher-stats-status-grid {
-  margin-top: 1rem;
-}
-
-.teacher-stats-two-col {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1rem;
-  margin-top: 1.5rem;
-}
-
-.teacher-stats-card {
-  padding: 1.25rem;
-}
-
-.teacher-stats-card--wide {
-  margin-top: 1rem;
-}
-
-.teacher-stats-card-title {
-  color: white;
-  margin-bottom: 0.75rem;
-  font-weight: 700;
-}
-
-.teacher-stats-card-title--secondary {
-  color: var(--secondary);
-}
-
-.teacher-stats-card-title--accent {
-  color: var(--accent);
-}
-
-.teacher-stats-clickable {
-  cursor: pointer;
-  transition: var(--transition-smooth);
-}
-
-.teacher-stats-clickable:hover {
-  transform: translateY(-2px);
-  border-color: rgba(20, 184, 166, 0.35);
-}
-
-.teacher-stats-list-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.65rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  font-size: 0.9rem;
-}
-
-.teacher-stats-list-item:last-child {
-  border-bottom: none;
-}
-
-.teacher-stats-bar-row {
-  margin-bottom: 0.85rem;
-}
-
-.teacher-stats-bar-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-  margin-bottom: 0.35rem;
-}
-
-.teacher-stats-bar-track {
-  height: 8px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-}
-
-.teacher-stats-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--secondary), var(--accent));
-}
-
-
-.teacher-sortable-th {
-  cursor: pointer;
-  user-select: none;
-  white-space: nowrap;
-}
-
-.teacher-sortable-th.is-sorted {
-  color: var(--secondary);
-}
-
-.teacher-sortable-th:hover {
-  color: var(--accent);
-}
-
-.detail-attempt-item.is-current {
-  box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.35);
-}
-
-.detail-attempt-item:hover {
-  border-color: var(--secondary) !important;
-}
-
-
-.exam-secure-mode #exam-runner-view.exam-secure-active {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.exam-secure-mode #exam-runner-view.exam-secure-active .essay-textarea {
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-.runner-security-shield {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin: 0 0 1rem;
-  padding: 0.85rem 1rem;
-  border-radius: 10px;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fecaca;
-  font-weight: 700;
-  line-height: 1.6;
-}
-
-.runner-security-shield .material-icons {
-  color: var(--error);
 }

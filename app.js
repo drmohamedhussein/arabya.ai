@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.15";
+const ARABYA_APP_VERSION = "2026.05.31.16";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -4808,7 +4808,9 @@ function renderRunnerQuestion() {
   const qTextEl = document.getElementById("runner-question-text");
   qTextEl.innerText = `${question.question} (${qPoints} درجات)`;
   qTextEl.setAttribute("tabindex", "-1");
-  qTextEl.focus(); // نقل التركيز فوراً ليقرأه قارئ الشاشة كفيف الحركة تلقائياً!
+  if (getExamDeviceCategory() === "desktop") {
+    qTextEl.focus();
+  }
 
   const optionsWrapper = document.getElementById("runner-options-list");
   optionsWrapper.innerHTML = "";
@@ -6735,10 +6737,7 @@ function startExamSecurityWatchdog() {
     } else {
       hideExamSecurityShield();
     }
-    if (!document.hasFocus()) {
-      recordAntiCheatViolation("focus-watchdog");
-    }
-  }, 450);
+  }, 900);
 }
 
 function getExamBlockingMessage(blockingResult) {
@@ -6872,6 +6871,16 @@ function getCheatPenaltyMessage(reason, isExamCanceled) {
     `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>`;
 }
 
+function preventExamClipboardAction(e) {
+  if (!systemState.isExamActive) return;
+  e.preventDefault();
+}
+
+function blockExamRightClick(e) {
+  if (!systemState.isExamActive) return;
+  if (e.button === 2) e.preventDefault();
+}
+
 function setupAntiCheatHandlers() {
   window.addEventListener("beforeunload", e => {
     if (systemState.isExamActive) {
@@ -6889,21 +6898,14 @@ function setupAntiCheatHandlers() {
     }
   });
 
-  window.addEventListener("blur", () => {
-    recordAntiCheatViolation("blur");
-  });
-
   document.addEventListener("visibilitychange", () => {
+    if (!systemState.isExamActive) return;
     if (document.hidden) {
       showExamSecurityShield("تم إخفاء الامتحان — ارجع فوراً إلى تبويب ARABYA.NET.");
       recordAntiCheatViolation("visibility");
     } else {
       hideExamSecurityShield();
     }
-  });
-
-  window.addEventListener("focusout", () => {
-    recordAntiCheatViolation("blur");
   });
 
   document.addEventListener("freeze", () => {
@@ -6913,27 +6915,20 @@ function setupAntiCheatHandlers() {
   document.addEventListener("contextmenu", e => {
     if (systemState.isExamActive) e.preventDefault();
   });
+  document.addEventListener("mousedown", blockExamRightClick);
+  document.addEventListener("auxclick", blockExamRightClick);
 
-  document.addEventListener("copy", e => {
-    if (!systemState.isExamActive) return;
-    e.preventDefault();
-    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("copy");
-  });
-
-  document.addEventListener("cut", e => {
-    if (!systemState.isExamActive) return;
-    e.preventDefault();
-    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("cut");
-  });
-
-  document.addEventListener("paste", e => {
-    if (!systemState.isExamActive) return;
-    e.preventDefault();
-    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("paste");
-  });
+  document.addEventListener("copy", preventExamClipboardAction);
+  document.addEventListener("cut", preventExamClipboardAction);
+  document.addEventListener("paste", preventExamClipboardAction);
 
   document.addEventListener("selectstart", e => {
-    if (systemState.isExamActive) e.preventDefault();
+    if (!systemState.isExamActive) return;
+    const t = e.target;
+    if (t && (t.closest(".option-card, button, textarea, input, select, a, label") || t.isContentEditable)) {
+      return;
+    }
+    e.preventDefault();
   });
 
   document.addEventListener("dragstart", e => {
@@ -6952,9 +6947,8 @@ function setupAntiCheatHandlers() {
       alert("حظر: غير مسموح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
       return false;
     }
-    if (!systemState.isCheatingSuspended && commandKey && /[cvxa]/i.test(e.key)) {
+    if (commandKey && /[cvxa]/i.test(e.key)) {
       e.preventDefault();
-      recordAntiCheatViolation("keyboard-shortcut");
       return false;
     }
     if (commandKey && /p/i.test(e.key)) {
@@ -6969,7 +6963,7 @@ function setupAntiCheatHandlers() {
     }
     if (e.key === "Meta" || e.key === "OS") {
       e.preventDefault();
-      recordAntiCheatViolation("keyboard-shortcut");
+      if (!systemState.isCheatingSuspended) recordAntiCheatViolation("keyboard-shortcut");
     }
   });
 
@@ -6982,17 +6976,12 @@ function setupAntiCheatHandlers() {
 }
 
 function requestSecureExamMode() {
-  const cat = getExamDeviceCategory();
-  if (cat === "desktop" || cat === "tablet") {
-    const root = document.documentElement;
-    if (root.requestFullscreen && !document.fullscreenElement) {
-      root.requestFullscreen().catch(() => {});
-    }
-  }
+  // لا نستخدم ملء الشاشة — غير متوافق مع كل الأجهزة؛ التأمين عبر التبويب والنسخ فقط.
 }
 
 function releaseSecureExamMode() {
   stopExamSecurityWatchdog();
+  disableExamSecureMode();
   if (document.fullscreenElement && document.exitFullscreen) {
     document.exitFullscreen().catch(() => {});
   }
