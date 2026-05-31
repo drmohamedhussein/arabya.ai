@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.6";
+const ARABYA_APP_VERSION = "2026.05.30.7";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -1179,6 +1179,77 @@ function propagateStudentEditsToResults(student, previousKey = "") {
   });
 }
 
+
+async function syncTeacherCredentialsToCloud(teacher = systemState.activeTeacher) {
+  if (!teacher) return { ok: false, reason: "no_teacher" };
+  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  if (urlList.length === 0) return { ok: false, reason: "no_url" };
+
+  const record = {
+    username: teacher.username || teacher.name || "",
+    name: teacher.name || "",
+    subject: teacher.subject || "",
+    password: teacher.password || "",
+    autoEntryCode: teacher.autoEntryCode || teacher.password || "",
+    integrationConfig: teacher.integrationConfig || {}
+  };
+
+  const payload = {
+    action: "save_entity",
+    collection: "teachers",
+    record
+  };
+
+  let entityOk = false;
+  for (const url of urlList) {
+    try {
+      await postToArabyaWebApp(url, payload);
+      entityOk = true;
+    } catch (e) {
+      try {
+        if (await postToArabyaWebAppNoCors(url, payload)) entityOk = true;
+      } catch (e2) {}
+    }
+  }
+
+  let backupOk = false;
+  try {
+    backupOk = await pushCloudBackupNow();
+  } catch (e) {}
+
+  return {
+    ok: entityOk || backupOk,
+    entityOk,
+    backupOk,
+    reason: (entityOk || backupOk) ? "synced" : "failed"
+  };
+}
+
+function formatTeacherCredentialSyncMessage(syncResult) {
+  if (!syncResult) return "تم الحفظ محلياً.";
+  if (syncResult.ok) return "تم حفظ الرمز ومزامنته مع Google Sheets بنجاح!";
+  if (syncResult.reason === "no_url") return "تم الحفظ محلياً. اربط Google Sheets من تبويب الربط لمزامنة الرمز على جميع الأجهزة.";
+  return "تم الحفظ محلياً، لكن فشلت المزامنة السحابية. تحقق من الرابط ونشر Apps Script ثم أعد الحفظ.";
+}
+
+function updateTeacherCredentialSyncIndicator(syncResult, syncing = false) {
+  const indicator = document.getElementById("cloud-sync-status-indicator");
+  if (!indicator) return;
+  if (syncing) {
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري مزامنة رمز الدخول مع Google Sheets...`;
+    return;
+  }
+  if (syncResult && syncResult.ok) {
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--success); font-size:1.1rem; vertical-align:middle;">cloud_done</span> تم تحديث رمز الدخول في Google Sheets`;
+    return;
+  }
+  if (syncResult && syncResult.reason === "no_url") {
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> الرمز محفوظ محلياً — أضف رابط Web App للمزامنة`;
+    return;
+  }
+  indicator.innerHTML = `<span class="material-icons" style="color:var(--error); font-size:1.1rem; vertical-align:middle;">cloud_off</span> فشلت مزامنة الرمز — تم الحفظ محلياً فقط`;
+}
+
 async function syncStudentRecordToCloud(student) {
   if (!student) return false;
   const urlList = getArabyaWebAppUrls();
@@ -2338,7 +2409,7 @@ function loadTeacherDashboardData() {
   });
 }
 
-function saveTeacherProfile() {
+async function saveTeacherProfile() {
   if (!systemState.activeTeacher) return;
 
   const name = document.getElementById("teacher-profile-name").value.trim();
@@ -2350,7 +2421,6 @@ function saveTeacherProfile() {
     return;
   }
 
-  // فحص عدم تكرار رمز الدخول التلقائي مع معلمين آخرين
   const isCodeDuplicate = systemState.teachers.some(t => t.username !== systemState.activeTeacher.username && t.autoEntryCode === autoCode);
   if (isCodeDuplicate) {
     alert("رمز الدخول التلقائي هذا مستخدم بالفعل من قبل معلم آخر! اختر رمزاً فريداً.");
@@ -2368,7 +2438,6 @@ function saveTeacherProfile() {
 
   systemState.teacherProfile = { name, subject, autoEntryCode: autoCode };
 
-  // تحديث القائمة العامة
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
   if (idx !== -1) {
     systemState.teachers[idx] = systemState.activeTeacher;
@@ -2378,13 +2447,16 @@ function saveTeacherProfile() {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
-  saveSystemState(true);
-
+  saveSystemState(false);
   loadTeacherDashboardData();
-  alert("تم حفظ بيانات الملف الشخصي وتحديث رمز الدخول بنجاح! جارٍ رفع التغيير للمزامنة السحابية.");
+
+  updateTeacherCredentialSyncIndicator(null, true);
+  const syncResult = await syncTeacherCredentialsToCloud();
+  updateTeacherCredentialSyncIndicator(syncResult, false);
+  alert(formatTeacherCredentialSyncMessage(syncResult));
 }
 
-function saveTeacherIntegrationConfig() {
+async function saveTeacherIntegrationConfig() {
   if (!systemState.activeTeacher) return;
 
   const code = document.getElementById("teacher-config-code").value.trim();
@@ -2437,20 +2509,12 @@ function saveTeacherIntegrationConfig() {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
-  saveSystemState(true);
+  saveSystemState(false);
 
-  const indicator = document.getElementById("cloud-sync-status-indicator");
-  if (indicator) {
-    if (url && (url.includes("/macros/s/") || url.endsWith("/exec"))) {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال`;
-      // محاولة مزامنة أولى فورية
-      autoSyncToCloud();
-    } else {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (أدخل رابط الويب اب لتمكين المزامنة)`;
-    }
-  }
-
-  alert("تم حفظ إعدادات التكامل ومزامنة شيتات جوجل بنجاح!");
+  updateTeacherCredentialSyncIndicator(null, true);
+  const syncResult = await syncTeacherCredentialsToCloud();
+  updateTeacherCredentialSyncIndicator(syncResult, false);
+  alert(formatTeacherCredentialSyncMessage(syncResult));
 }
 
 // عرض الامتحانات
