@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.18";
+const ARABYA_APP_VERSION = "2026.05.31.19";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -132,6 +132,7 @@ document.addEventListener("DOMContentLoaded", () => {
               systemState.cheatViolations = session.cheatViolations || 0;
               systemState.cheatAttemptLog = Array.isArray(session.cheatAttemptLog) ? session.cheatAttemptLog : [];
               systemState.examMaxCheatAttemptsAllowed = session.examMaxCheatAttemptsAllowed ?? getExamMaxCheatAttempts(matchedExam);
+              systemState.examDeviceProfile = session.examDeviceProfile || examDeviceProfileFromStudent(session.student);
               systemState.isExamActive = true;
               systemState.isCheatingSuspended = false;
               markExamAntiCheatStarted();
@@ -1408,6 +1409,7 @@ const RESULTS_TABLE_SORTABLE_COLUMNS = [
   { key: "accessCode", label: "كود الاشتراك" },
   { key: "examTitle", label: "الامتحان" },
   { key: "score", label: "النتيجة" },
+  { key: "clientIp", label: "IP / الجهاز" },
   { key: "timestamp", label: "التاريخ والوقت" }
 ];
 
@@ -1431,6 +1433,9 @@ function getColumnSortValue(item, key, indexMap) {
   if (key === "score") {
     const match = String(item.score || "").match(/(\d+(?:\.\d+)?)/);
     return match ? parseFloat(match[1]) : -1;
+  }
+  if (key === "clientIp") {
+    return formatResultDeviceSummary(item).toLocaleLowerCase("ar");
   }
   return String(item[key] || "").toLocaleLowerCase("ar");
 }
@@ -6010,7 +6015,7 @@ function renderStudentResultsTable() {
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, filtersActive);
     return;
   }
@@ -6027,7 +6032,7 @@ function renderStudentResultsTable() {
     const emptyMsg = filters.searchQuery
       ? `لا توجد نتائج تطابق «${escapeHtml(filters.searchQuery)}»`
       : "لا توجد نتائج تطابق الفلاتر المحددة";
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} سجل.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} سجل.</td></tr>`;
     updateResultsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
@@ -6050,6 +6055,7 @@ function renderStudentResultsTable() {
       <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(res.accessCode || "لا يوجد")}</span></td>
       <td>${escapeHtml(res.examTitle || "")} (${escapeHtml(res.level || "عام")})</td>
       <td style="font-weight:700; color:var(--secondary);">${escapeHtml(res.score || "")}</td>
+      <td><code style="font-size:0.78rem;">${escapeHtml(formatResultDeviceSummary(res))}</code></td>
       <td>${escapeHtml(res.timestamp || "")}</td>
       <td class="teacher-results-actions" style="display:flex; gap:0.25rem; flex-wrap:wrap;"></td>
     `;
@@ -6114,12 +6120,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-stu-code").innerText = res.accessCode || "لا يوجد";
   document.getElementById("detail-exam-title").innerText = res.examTitle || examForDisplay.title;
   document.getElementById("detail-exam-date").innerText = res.timestamp;
-  const deviceInfoEl = document.getElementById("detail-device-info");
-  if (deviceInfoEl) {
-    const ip = res.clientIp || "—";
-    const dev = res.deviceId ? `${String(res.deviceId).slice(0, 12)}…` : "—";
-    deviceInfoEl.innerHTML = `<div><strong>بصمة الجهاز:</strong> <code>${escapeHtml(dev)}</code></div><div style="margin-top:0.35rem;"><strong>IP عند التقديم:</strong> <code>${escapeHtml(ip)}</code></div>`;
-  }
+  renderTeacherDeviceInfo(res);
   document.getElementById("detail-total-score-input").value = res.score;
   renderResultRetakeManagementPanel(res);
   renderStudentAttemptsPanel(res);
@@ -6372,7 +6373,7 @@ function exportTeacherResultsToCSV() {
   }
 
   let csvContent = "\ufeffsep=,\n";
-  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,إعادة التقديم,محاولات غش,حد الغش,تفاصيل محاولات الغش,النتيجة,التاريخ والوقت\n";
+  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,إعادة التقديم,محاولات غش,حد الغش,تفاصيل محاولات الغش,معرف الجهاز,بصمة الجهاز,IP,النتيجة,التاريخ والوقت\n";
 
   exportRows.forEach(res => {
     csvContent += buildCsvLine([
@@ -6389,6 +6390,9 @@ function exportTeacherResultsToCSV() {
       formatCheatAttemptsTeacherSummary(res),
       res.maxCheatAttemptsAllowed ?? "",
       formatCheatAttemptsExportText(res),
+      res.deviceId || "",
+      res.deviceFingerprint || "",
+      res.clientIp || "",
       res.score || "",
       res.timestamp || ""
     ]);
@@ -6413,6 +6417,7 @@ async function clearTeacherResults() {
 
 
 // ==========================================
+// ==========================================
 // 8b. بصمة الجهاز ومنع مشاركة الجهاز بين الطلاب
 // ==========================================
 // ملاحظة: المتصفح لا يسمح بالوصول إلى MAC Address — نستخدم بصمة جهاز + IP.
@@ -6422,60 +6427,47 @@ const EXAM_DEVICE_REGISTRY_KEY = "arabya_exam_device_registry";
 function loadExamDeviceRegistry() {
   try {
     const raw = localStorage.getItem(EXAM_DEVICE_REGISTRY_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && Array.isArray(parsed.bindings)) return parsed;
-  } catch (e) {}
-  return { bindings: [] };
+    if (!raw) return { bindings: [] };
+    const parsed = JSON.parse(raw);
+    return parsed && Array.isArray(parsed.bindings) ? parsed : { bindings: [] };
+  } catch (e) {
+    return { bindings: [] };
+  }
 }
 
 function saveExamDeviceRegistry(registry) {
   try {
     localStorage.setItem(EXAM_DEVICE_REGISTRY_KEY, JSON.stringify(registry));
-  } catch (e) {
-    console.warn("[ARABYA] تعذر حفظ سجل أجهزة الامتحان:", e);
-  }
+  } catch (e) {}
 }
 
 function pruneExamDeviceRegistry(registry) {
+  const maxAgeMs = 1000 * 60 * 60 * 24 * 400;
   const now = Date.now();
-  const maxAgeMs = 1000 * 60 * 60 * 24 * 120;
   registry.bindings = (registry.bindings || []).filter(entry => {
-    const at = Date.parse(entry.boundAt || "") || entry.savedAt || 0;
-    return !at || now - at < maxAgeMs;
+    const savedAt = Number(entry.savedAt) || 0;
+    return savedAt && now - savedAt < maxAgeMs;
   });
   return registry;
 }
 
-async function sha256Hex(text) {
-  const data = new TextEncoder().encode(String(text || ""));
-  if (window.crypto && window.crypto.subtle) {
-    const hash = await window.crypto.subtle.digest("SHA-256", data);
-    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
-  }
-  let h = 0;
-  const s = String(text || "");
-  for (let i = 0; i < s.length; i++) {
-    h = ((h << 5) - h) + s.charCodeAt(i);
-    h |= 0;
-  }
-  return `fallback_${Math.abs(h)}_${s.length}`;
+async function sha256Hex(value) {
+  const data = new TextEncoder().encode(String(value || ""));
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
 function getCanvasFingerprintToken() {
   try {
     const canvas = document.createElement("canvas");
-    canvas.width = 280;
-    canvas.height = 60;
     const ctx = canvas.getContext("2d");
     if (!ctx) return "";
     ctx.textBaseline = "top";
-    ctx.font = "16px 'Segoe UI', Tahoma, Arial";
-    ctx.fillStyle = "#0f766e";
-    ctx.fillRect(0, 0, 280, 60);
-    ctx.fillStyle = "#111827";
-    ctx.fillText("ARABYA.NET exam device fingerprint", 12, 12);
-    ctx.strokeStyle = "#f59e0b";
-    ctx.strokeRect(2, 2, 276, 56);
+    ctx.font = "14px Arial";
+    ctx.fillStyle = "#f60";
+    ctx.fillRect(0, 0, 100, 30);
+    ctx.fillStyle = "#069";
+    ctx.fillText("ARABYA.NET", 2, 2);
     return canvas.toDataURL();
   } catch (e) {
     return "";
@@ -6497,19 +6489,50 @@ function getWebglFingerprintToken() {
 }
 
 async function fetchClientIpAddress() {
-  const controllers = [
-    "https://api.ipify.org?format=json",
-    "https://api64.ipify.org?format=json"
+  const providers = [
+    {
+      url: "https://api.ipify.org?format=json",
+      parse: async res => {
+        const data = await res.json();
+        return String(data.ip || "").trim();
+      }
+    },
+    {
+      url: "https://api64.ipify.org?format=json",
+      parse: async res => {
+        const data = await res.json();
+        return String(data.ip || "").trim();
+      }
+    },
+    {
+      url: "https://ipwho.is/",
+      parse: async res => {
+        const data = await res.json();
+        return String(data.ip || "").trim();
+      }
+    },
+    {
+      url: "https://www.cloudflare.com/cdn-cgi/trace",
+      parse: async res => {
+        const text = await res.text();
+        const match = text.match(/ip=([^\n]+)/);
+        return match ? String(match[1]).trim() : "";
+      }
+    }
   ];
-  for (const url of controllers) {
+
+  for (const provider of providers) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+      const timer = setTimeout(() => controller.abort(), 4500);
+      const res = await fetch(provider.url, {
+        signal: controller.signal,
+        cache: "no-store",
+        mode: "cors"
+      });
       clearTimeout(timer);
       if (!res.ok) continue;
-      const data = await res.json();
-      const ip = String(data.ip || "").trim();
+      const ip = await provider.parse(res);
       if (ip) return ip;
     } catch (e) {}
   }
@@ -6549,6 +6572,28 @@ async function collectExamDeviceProfile() {
   };
 }
 
+function examDeviceProfileFromStudent(student) {
+  if (!student) return null;
+  if (!student.deviceId && !student.deviceFingerprint) return null;
+  return {
+    deviceId: student.deviceId || "",
+    deviceFingerprint: student.deviceFingerprint || "",
+    clientIp: student.lastKnownIp || student.clientIp || "",
+    userAgent: student.deviceMeta?.userAgent || "",
+    platform: student.deviceMeta?.platform || "",
+    screen: student.deviceMeta?.screen || "",
+    timezone: student.deviceMeta?.timezone || "",
+    collectedAt: student.lastDeviceSeenAt || ""
+  };
+}
+
+function attachDeviceFieldsToResult(res) {
+  if (!res) return res;
+  const profile = systemState.examDeviceProfile || examDeviceProfileFromStudent(systemState.currentStudent);
+  if (profile) Object.assign(res, buildResultDeviceFields(profile));
+  return res;
+}
+
 function mergeDeviceProfileIntoStudent(student, profile) {
   if (!student || !profile) return student;
   student.deviceId = profile.deviceId;
@@ -6564,35 +6609,44 @@ function mergeDeviceProfileIntoStudent(student, profile) {
   return student;
 }
 
-function findDeviceBindingConflict(deviceId, examId, studentLookupKey) {
-  if (!deviceId || !studentLookupKey) return null;
+function deviceBindingMatchesEntry(profile, entry) {
+  if (!profile || !entry) return false;
+  if (profile.deviceFingerprint && entry.deviceFingerprint && profile.deviceFingerprint === entry.deviceFingerprint) {
+    return true;
+  }
+  return !!(profile.deviceId && entry.deviceId && profile.deviceId === entry.deviceId);
+}
+
+function findDeviceBindingConflict(profile, examId, studentLookupKey) {
+  if (!profile || !studentLookupKey) return null;
+  if (!profile.deviceFingerprint && !profile.deviceId) return null;
   const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
   const bindings = registry.bindings || [];
   const globalConflict = bindings.find(entry =>
-    entry.deviceId === deviceId &&
     entry.studentLookupKey &&
-    entry.studentLookupKey !== studentLookupKey
+    entry.studentLookupKey !== studentLookupKey &&
+    deviceBindingMatchesEntry(profile, entry)
   );
   if (globalConflict) return globalConflict;
   if (!examId) return null;
   return bindings.find(entry =>
-    entry.deviceId === deviceId &&
     entry.examId === examId &&
     entry.studentLookupKey &&
-    entry.studentLookupKey !== studentLookupKey
+    entry.studentLookupKey !== studentLookupKey &&
+    deviceBindingMatchesEntry(profile, entry)
   ) || null;
 }
 
 function registerExamDeviceBinding(deviceProfile, studentLookupKey, studentName, examId) {
-  if (!deviceProfile?.deviceId || !studentLookupKey || !examId) return;
+  if (!deviceProfile?.deviceFingerprint && !deviceProfile?.deviceId) return;
+  if (!studentLookupKey || !examId) return;
   const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
   registry.bindings = (registry.bindings || []).filter(entry =>
-    !(entry.deviceId === deviceProfile.deviceId && entry.examId === examId && entry.studentLookupKey !== studentLookupKey)
+    !deviceBindingMatchesEntry(deviceProfile, entry) ||
+    (entry.examId === examId && entry.studentLookupKey === studentLookupKey)
   );
   const existingIdx = registry.bindings.findIndex(entry =>
-    entry.deviceId === deviceProfile.deviceId &&
-    entry.examId === examId &&
-    entry.studentLookupKey === studentLookupKey
+    entry.examId === examId && entry.studentLookupKey === studentLookupKey
   );
   const row = {
     deviceId: deviceProfile.deviceId,
@@ -6611,14 +6665,21 @@ function registerExamDeviceBinding(deviceProfile, studentLookupKey, studentName,
 
 async function enforceExamDeviceBinding(studentLookupKey, studentName, examId) {
   const profile = await collectExamDeviceProfile();
-  const conflict = findDeviceBindingConflict(profile.deviceId, examId, studentLookupKey);
+  if (!profile.deviceFingerprint) {
+    return {
+      ok: false,
+      message: "تعذر إنشاء بصمة الجهاز في هذا المتصفح. جرّب متصفحاً حديثاً (Chrome / Edge / Firefox) ثم أعد المحاولة.",
+      profile
+    };
+  }
+  const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey);
   if (conflict) {
     return {
       ok: false,
       message:
         "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
         `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
-        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط.",
+        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.",
       profile
     };
   }
@@ -6639,6 +6700,43 @@ function buildResultDeviceFields(profile) {
       userAgent: profile.userAgent || ""
     }
   };
+}
+
+function formatTeacherDeviceInfoHtml(res) {
+  const ip = (res?.clientIp || "").trim() || "غير متاح (حظر الشبكة أو بدون اتصال)";
+  const fp = (res?.deviceFingerprint || "").trim();
+  const deviceId = (res?.deviceId || "").trim();
+  const meta = res?.deviceMeta || {};
+  const fpShort = fp ? `${fp.slice(0, 16)}…` : "—";
+  const idShort = deviceId ? `${deviceId.slice(0, 16)}…` : "—";
+  return (
+    `<div style="display:grid; gap:0.5rem; font-size:0.9rem;">` +
+    `<div><strong>معرف الجهاز:</strong> <code title="${escapeHtml(deviceId)}">${escapeHtml(idShort)}</code></div>` +
+    `<div><strong>بصمة الجهاز (SHA-256):</strong> <code title="${escapeHtml(fp)}">${escapeHtml(fpShort)}</code></div>` +
+    `<div><strong>عنوان IP عند التقديم:</strong> <code>${escapeHtml(ip)}</code></div>` +
+    `<div><strong>المنصة / الشاشة:</strong> ${escapeHtml(meta.platform || "—")} · ${escapeHtml(meta.screen || "—")}</div>` +
+    `<div><strong>المنطقة الزمنية:</strong> ${escapeHtml(meta.timezone || "—")}</div>` +
+    `<div style="font-size:0.78rem; color:var(--text-muted); word-break:break-all;"><strong>المتصفح:</strong> ${escapeHtml((meta.userAgent || "").slice(0, 120))}</div>` +
+    `</div>`
+  );
+}
+
+function renderTeacherDeviceInfo(res) {
+  const el = document.getElementById("detail-device-info");
+  if (!el) return;
+  const hasData = !!(res?.deviceFingerprint || res?.deviceId || res?.clientIp);
+  if (!hasData) {
+    el.innerHTML = `<span style="color:var(--warning);">لم تُسجَّل بصمة جهاز أو IP لهذا السجل (نتيجة قديمة أو امتحان قبل التحديث).</span>`;
+    return;
+  }
+  el.innerHTML = formatTeacherDeviceInfoHtml(res);
+}
+
+function formatResultDeviceSummary(res) {
+  const ip = (res?.clientIp || "").trim();
+  if (ip) return ip;
+  if (res?.deviceFingerprint) return `جهاز ${String(res.deviceFingerprint).slice(0, 8)}…`;
+  return "—";
 }
 
 window.arabyaCollectExamDeviceProfile = collectExamDeviceProfile;
@@ -7985,7 +8083,8 @@ function saveActiveStudentSession() {
     cheatAttemptLog: systemState.cheatAttemptLog || [],
     examMaxCheatAttemptsAllowed: systemState.examMaxCheatAttemptsAllowed,
     currentExamRuntime: systemState.currentExamRuntime,
-    timeRemaining: systemState.timer.timeRemaining
+    timeRemaining: systemState.timer.timeRemaining,
+    examDeviceProfile: systemState.examDeviceProfile || null
   };
   localStorage.setItem("arabya_active_student_session", JSON.stringify(session));
 }
@@ -8065,6 +8164,9 @@ function updateLiveIncompleteResult() {
   res.studentAnswers = { ...systemState.studentAnswers };
   res.questionScores = questionScoresMap;
   Object.assign(res, buildCheatTrackingFields());
+  attachDeviceFieldsToResult(res);
+  res.email = systemState.currentStudent.email || res.email || "";
+  res.mobile = systemState.currentStudent.mobile || res.mobile || "";
   res.maxScore = getCurrentExamTotalScore();
   res.presentedQuestions = JSON.parse(JSON.stringify(systemState.shuffledQuestions));
   res.timestamp = new Date().toLocaleString("ar-EG");
