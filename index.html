@@ -408,8 +408,8 @@
           دخول سريع عبر الرمز <span class="material-icons" aria-hidden="true">bolt</span>
         </button>
 
-        <div style="text-align: center; margin-top: 1.5rem;">
-          <a href="#" onclick="navigateToView('teacher-register-view');" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً</a>
+        <div id="teacher-public-register-link" style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('teacher-register-view'); return false;" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً (مدير المنصة)</a>
         </div>
       </div>
     </section>
@@ -775,27 +775,6 @@
                 <div><strong>كود الاشتراك:</strong> <span id="detail-stu-code" style="color:var(--accent); font-weight:700;">---</span></div>
                 <div><strong>اسم الامتحان:</strong> <span id="detail-exam-title">---</span></div>
                 <div><strong>تاريخ التقدم:</strong> <span id="detail-exam-date">---</span></div>
-                <div style="grid-column: 1 / -1; border-top: 1px dashed var(--border-color); padding-top: 0.75rem; margin-top: 0.25rem;">
-                  <strong style="color: var(--secondary); display: block; margin-bottom: 0.5rem;">بصمة الجهاز وعنوان IP</strong>
-                  <div id="detail-device-info" style="font-size: 0.88rem; color: var(--text-muted);">—</div>
-                </div>
-              </div>
-
-              <div id="detail-retake-panel" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem; border: 1px solid rgba(20, 184, 166, 0.25); border-radius: 12px; background: rgba(20, 184, 166, 0.04); text-align: right;">
-                <div style="font-weight: 700; color: var(--secondary); margin-bottom: 0.5rem;">إعادة التقديم</div>
-                <div id="detail-retake-status" style="margin-bottom: 0.75rem;"></div>
-                <div id="detail-retake-actions" style="display: flex; gap: 0.5rem; flex-wrap: wrap;"></div>
-              </div>
-
-              <div id="detail-attempts-panel" class="hidden" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem; border: 1px solid var(--border-color); border-radius: 12px; background: rgba(255,255,255,0.02); text-align: right;">
-                <div style="font-weight: 700; color: white; margin-bottom: 0.75rem;">محاولات الطالب لهذا الامتحان</div>
-                <div id="detail-attempts-list"></div>
-              </div>
-
-              <div id="detail-cheat-attempts-panel" class="hidden" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem; border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 12px; background: rgba(239, 68, 68, 0.04); text-align: right;">
-                <div style="font-weight: 700; color: var(--error); margin-bottom: 0.5rem;">سجل محاولات الغش</div>
-                <div id="detail-cheat-attempts-summary" style="margin-bottom: 0.75rem; font-size: 0.9rem;"></div>
-                <div id="detail-cheat-attempts-list"></div>
               </div>
 
               <!-- حقل تعديل النتيجة النهائية الإجمالية يدوياً -->

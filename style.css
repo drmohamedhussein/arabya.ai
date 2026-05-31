@@ -950,11 +950,6 @@ tr:hover td {
   pointer-events: none !important;
 }
 
-#exam-runner-view.exam-secure-active #runner-question-text {
-  -webkit-user-select: none;
-  user-select: none;
-}
-
 .hidden {
   display: none !important;
 }
@@ -1277,4 +1272,35 @@ tr:hover td {
 /* حالة المزامنة السحابية */
 .cloud-sync-active {
   animation: spin 1s infinite linear;
+}
+
+.teacher-app-version-label {
+  margin-top: 1.25rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.02em;
+}
+
+.teacher-role-badge {
+  display: inline-block;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.teacher-role-badge.is-super-admin {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+
+.teacher-role-badge.is-teacher {
+  background: rgba(20, 184, 166, 0.12);
+  color: var(--secondary);
+  border: 1px solid rgba(20, 184, 166, 0.3);
 }
