@@ -284,6 +284,8 @@
           </div>
         </div>
 
+        <div id="runner-mobile-exam-hint" class="hidden" style="margin:0 0 1rem; padding:0.75rem 1rem; border-radius:10px; border:1px solid rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); color:var(--accent); font-size:0.9rem; line-height:1.6; text-align:right;" role="status" aria-live="polite"></div>
+
         <!-- شريط تقدم الاختبار الخطي -->
         <div style="width: 100%; height: 5px; background: rgba(255,255,255,0.03); border-radius:10px; overflow:hidden; margin-bottom:2rem;" aria-hidden="true">
           <div id="runner-progress-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, var(--secondary), var(--primary)); transition: width 0.35s ease;"></div>
@@ -565,6 +567,18 @@
               </div>
             </div>
             <div id="teacher-stats-sync-status" style="margin:0.5rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;" aria-live="polite"></div>
+            <div id="teacher-stats-date-range" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; margin-bottom:1rem; padding:0.85rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+              <div class="form-group" style="margin:0; min-width:150px;">
+                <label class="form-label" for="teacher-stats-date-from" style="font-size:0.8rem;">من تاريخ</label>
+                <input type="date" id="teacher-stats-date-from" class="form-control" style="padding:0.4rem 0.65rem;">
+              </div>
+              <div class="form-group" style="margin:0; min-width:150px;">
+                <label class="form-label" for="teacher-stats-date-to" style="font-size:0.8rem;">إلى تاريخ</label>
+                <input type="date" id="teacher-stats-date-to" class="form-control" style="padding:0.4rem 0.65rem;">
+              </div>
+              <button type="button" id="teacher-stats-apply-date-range" class="btn btn-outline btn-sm">تطبيق على الإحصائيات</button>
+              <button type="button" id="teacher-stats-clear-date-range" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح النطاق</button>
+            </div>
             <div id="teacher-stats-updated-at" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem;"></div>
             <div id="teacher-stats-overview" class="profile-summary-grid" aria-live="polite"></div>
             <div id="teacher-stats-status-grid" class="profile-summary-grid teacher-stats-status-grid"></div>
@@ -874,7 +888,16 @@
                   <option value="today">اليوم</option>
                   <option value="week">آخر 7 أيام</option>
                   <option value="month">آخر 30 يوماً</option>
+                  <option value="custom">نطاق مخصص</option>
                 </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:140px;">
+                <label class="form-label" for="teacher-results-date-from" style="font-size:0.8rem;">من تاريخ</label>
+                <input type="date" id="teacher-results-date-from" class="form-control" style="padding:0.4rem 0.65rem;">
+              </div>
+              <div class="form-group" style="margin:0; min-width:140px;">
+                <label class="form-label" for="teacher-results-date-to" style="font-size:0.8rem;">إلى تاريخ</label>
+                <input type="date" id="teacher-results-date-to" class="form-control" style="padding:0.4rem 0.65rem;">
               </div>
               <div class="form-group" style="margin:0; min-width:165px;">
                 <label class="form-label" for="teacher-results-sort-order" style="font-size:0.8rem;">طريقة العرض</label>
@@ -964,6 +987,12 @@
 
                 <div id="detail-retake-status" style="margin-bottom:0.85rem;"></div>
                 <div id="detail-retake-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;"></div>
+              </div>
+
+              <div id="detail-attempts-panel" class="hidden" style="margin-bottom: 2rem; border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 12px; padding: 1.25rem; background: rgba(245, 158, 11, 0.04); text-align:right;">
+                <div style="font-weight:700; color:var(--accent); margin-bottom:0.35rem;">سجل محاولات الطالب لهذا الامتحان</div>
+                <div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.85rem;">المحاولات الحالية والمحفوظة (بما فيها المحاولات السابقة المؤرشفة).</div>
+                <div id="detail-attempts-list"></div>
               </div>
 
               <!-- حقل تعديل النتيجة النهائية الإجمالية يدوياً -->
@@ -1516,7 +1545,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.11"></script>
-  <script src="app.js?v=2026.05.31.11"></script>
+  <script src="questions.js?v=2026.05.31.12"></script>
+  <script src="app.js?v=2026.05.31.12"></script>
 </body>
 </html>

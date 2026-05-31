@@ -1355,3 +1355,26 @@ tr:hover td {
   border-radius: 999px;
   background: linear-gradient(90deg, var(--secondary), var(--accent));
 }
+
+
+.teacher-sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.teacher-sortable-th.is-sorted {
+  color: var(--secondary);
+}
+
+.teacher-sortable-th:hover {
+  color: var(--accent);
+}
+
+.detail-attempt-item.is-current {
+  box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.35);
+}
+
+.detail-attempt-item:hover {
+  border-color: var(--secondary) !important;
+}

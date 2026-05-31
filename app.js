@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.11";
+const ARABYA_APP_VERSION = "2026.05.31.12";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -132,8 +132,10 @@ document.addEventListener("DOMContentLoaded", () => {
               systemState.cheatViolations = session.cheatViolations || 0;
               systemState.isExamActive = true;
               systemState.isCheatingSuspended = false;
-                          navigateToView("exam-runner-view");
+              markExamAntiCheatStarted();
+              navigateToView("exam-runner-view");
               renderRunnerQuestion();
+              showMobileExamHintIfNeeded();
               const resumeQuestion = systemState.shuffledQuestions[systemState.currentQuestionIndex];
               startRunnerTimerWithTime(session.timeRemaining || getQuestionTimeSeconds(resumeQuestion, matchedExam));
               return;
@@ -698,6 +700,55 @@ function appendResultRetakeActions(res, actionsCell) {
     revokeBtn.addEventListener("click", () => revokeStudentExamRetake(res.recordId || ""));
     actionsCell.appendChild(revokeBtn);
   }
+}
+
+function getStudentExamAttempts(res) {
+  if (!res) return [];
+  const lookupKey = res.studentLookupKey || getStudentLookupKey({ id: res.id, code: res.accessCode, name: res.name });
+  const examId = res.examId || "";
+  if (!lookupKey || !examId) return [res];
+  const keys = getStudentLookupKeysForMatch({ studentKey: lookupKey, id: res.id, code: res.accessCode, name: res.name });
+  return (systemState.results || [])
+    .filter(r => r.examId === examId && keys.some(key => key && (r.studentLookupKey === key || getStudentLookupKeysForMatch({ id: r.id, code: r.accessCode, name: r.name }).includes(key))))
+    .sort((a, b) => {
+      const na = Number(a.attemptNumber) || 0;
+      const nb = Number(b.attemptNumber) || 0;
+      if (na && nb && na !== nb) return nb - na;
+      return compareResultsByRecency(a, b, buildResultIndexMap(systemState.results));
+    });
+}
+
+function renderStudentAttemptsPanel(currentRes) {
+  const panel = document.getElementById("detail-attempts-panel");
+  const listEl = document.getElementById("detail-attempts-list");
+  if (!panel || !listEl) return;
+
+  const attempts = getStudentExamAttempts(currentRes);
+  if (attempts.length <= 1) {
+    panel.classList.add("hidden");
+    listEl.innerHTML = "";
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  listEl.innerHTML = attempts.map(attempt => {
+    const isCurrent = attempt.recordId === currentRes.recordId;
+    const status = isSupersededResult(attempt) ? "محاولة سابقة" : getResultDisplayStatus(attempt) === "canceled" ? "ملغاة" : resultHasActiveRetakeGrant(attempt) ? "مسموح بإعادة الامتحان" : "المحاولة الحالية";
+    const scoreText = attempt.archivedScoreSnapshot || attempt.score || "—";
+    const tone = isSupersededResult(attempt) ? "var(--text-muted)" : attempt.status === "canceled" ? "var(--error)" : "var(--secondary)";
+    return `<button type="button" class="detail-attempt-item${isCurrent ? " is-current" : ""}" data-record-id="${escapeHtml(attempt.recordId || "")}" data-student-id="${escapeHtml(attempt.id || "")}" data-exam-id="${escapeHtml(attempt.examId || "")}" style="width:100%; text-align:right; border:1px solid var(--border-color); border-radius:10px; padding:0.85rem 1rem; margin-bottom:0.5rem; background:${isCurrent ? "rgba(20,184,166,0.08)" : "rgba(255,255,255,0.02)"}; color:inherit; cursor:pointer;">` +
+      `<div style="display:flex; justify-content:space-between; gap:0.75rem; align-items:flex-start; flex-wrap:wrap;">` +
+      `<div><div style="font-weight:700; color:${tone};">${escapeHtml(status)}${attempt.attemptNumber ? ` • محاولة ${attempt.attemptNumber}` : ""}</div>` +
+      `<div style="font-size:0.82rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(attempt.timestamp || "—")}</div></div>` +
+      `<div style="font-weight:800; color:var(--secondary);">${escapeHtml(scoreText)}</div>` +
+      `</div></button>`;
+  }).join("");
+
+  listEl.querySelectorAll(".detail-attempt-item").forEach(btn => {
+    btn.addEventListener("click", () => {
+      viewTeacherResultDetail(btn.dataset.recordId || "", btn.dataset.studentId || "", btn.dataset.examId || "");
+    });
+  });
 }
 
 function renderResultRetakeManagementPanel(res) {
@@ -1342,6 +1393,135 @@ function sortStudentsForDisplay(students, sortOrder, sourceList) {
     return list.sort((a, b) => compareStudentsByRecency(a, b, indexMap) * -1);
   }
   return list.sort((a, b) => compareStudentsByRecency(a, b, indexMap));
+}
+
+const RESULTS_TABLE_SORTABLE_COLUMNS = [
+  { key: "name", label: "اسم الطالب" },
+  { key: "id", label: "رقم ID" },
+  { key: "accessCode", label: "كود الاشتراك" },
+  { key: "examTitle", label: "الامتحان" },
+  { key: "score", label: "النتيجة" },
+  { key: "timestamp", label: "التاريخ والوقت" }
+];
+
+const STUDENTS_TABLE_SORTABLE_COLUMNS = [
+  { key: "name", label: "اسم الطالب" },
+  { key: "id", label: "رقم ID" },
+  { key: "code", label: "كود الاشتراك" },
+  { key: "email", label: "البريد" },
+  { key: "mobile", label: "الموبايل" },
+  { key: "timestamp", label: "تاريخ التسجيل" }
+];
+
+function normalizeColumnSortDirection(value) {
+  return value === "asc" ? "asc" : "desc";
+}
+
+function getColumnSortValue(item, key, indexMap) {
+  if (key === "timestamp") {
+    return getResultSortTime(item, indexMap?.get?.(item) ?? 0);
+  }
+  if (key === "score") {
+    const match = String(item.score || "").match(/(\d+(?:\.\d+)?)/);
+    return match ? parseFloat(match[1]) : -1;
+  }
+  return String(item[key] || "").toLocaleLowerCase("ar");
+}
+
+function compareResultsByColumn(a, b, key, dir, indexMap) {
+  const av = getColumnSortValue(a, key, indexMap);
+  const bv = getColumnSortValue(b, key, indexMap);
+  let cmp = 0;
+  if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+  else cmp = String(av).localeCompare(String(bv), "ar", { numeric: true, sensitivity: "base" });
+  return dir === "asc" ? cmp : -cmp;
+}
+
+function compareStudentsByColumn(a, b, key, dir, indexMap) {
+  if (key === "timestamp") {
+    const ta = getStudentSortTime(a, indexMap.get(a) ?? 0);
+    const tb = getStudentSortTime(b, indexMap.get(b) ?? 0);
+    const cmp = ta - tb;
+    return dir === "asc" ? cmp : -cmp;
+  }
+  const av = String(a[key] || "");
+  const bv = String(b[key] || "");
+  const cmp = av.localeCompare(bv, "ar", { numeric: true, sensitivity: "base" });
+  return dir === "asc" ? cmp : -cmp;
+}
+
+function applyResultsColumnSort(list, columnSort, sourceList) {
+  if (!columnSort || !columnSort.key) return list;
+  const indexMap = buildResultIndexMap(sourceList || list);
+  return [...list].sort((a, b) => compareResultsByColumn(a, b, columnSort.key, normalizeColumnSortDirection(columnSort.dir), indexMap));
+}
+
+function applyStudentsColumnSort(list, columnSort, sourceList) {
+  if (!columnSort || !columnSort.key) return list;
+  const base = Array.isArray(sourceList) ? sourceList : list;
+  const indexMap = buildResultIndexMap(base);
+  return [...list].sort((a, b) => compareStudentsByColumn(a, b, columnSort.key, normalizeColumnSortDirection(columnSort.dir), indexMap));
+}
+
+function persistResultsColumnSort(columnSort) {
+  try {
+    localStorage.setItem("arabya_results_column_sort", JSON.stringify(columnSort || null));
+  } catch (e) {}
+}
+
+function persistStudentsColumnSort(columnSort) {
+  try {
+    localStorage.setItem("arabya_students_column_sort", JSON.stringify(columnSort || null));
+  } catch (e) {}
+}
+
+function toggleResultsColumnSort(columnKey) {
+  const view = getResultsTableViewSettings();
+  const current = view.columnSort || {};
+  if (current.key === columnKey) {
+    view.columnSort = { key: columnKey, dir: current.dir === "asc" ? "desc" : "asc" };
+  } else {
+    view.columnSort = { key: columnKey, dir: columnKey === "timestamp" ? "desc" : "asc" };
+  }
+  view.page = 1;
+  persistResultsColumnSort(view.columnSort);
+  renderStudentResultsTable();
+}
+
+function toggleStudentsColumnSort(columnKey) {
+  const view = getStudentsTableViewSettings();
+  const current = view.columnSort || {};
+  if (current.key === columnKey) {
+    view.columnSort = { key: columnKey, dir: current.dir === "asc" ? "desc" : "asc" };
+  } else {
+    view.columnSort = { key: columnKey, dir: columnKey === "timestamp" ? "desc" : "asc" };
+  }
+  view.page = 1;
+  persistStudentsColumnSort(view.columnSort);
+  renderTeacherStudentsTable();
+}
+
+function renderSortableTableHeaders(tableSelector, columns, columnSort, toggleFn) {
+  const table = document.querySelector(tableSelector);
+  if (!table) return;
+  const theadRow = table.querySelector("thead tr");
+  if (!theadRow) return;
+  theadRow.innerHTML = columns.map(col => {
+    const active = columnSort && columnSort.key === col.key;
+    const dir = active ? normalizeColumnSortDirection(columnSort.dir) : "";
+    const indicator = active ? (dir === "asc" ? " ▲" : " ▼") : "";
+    return `<th scope="col" class="teacher-sortable-th${active ? " is-sorted" : ""}" data-column-sort="${col.key}" tabindex="0" role="columnheader" aria-sort="${active ? (dir === "asc" ? "ascending" : "descending") : "none"}">${col.label}${indicator}</th>`;
+  }).join("") + `<th scope="col">الإجراء</th>`;
+  theadRow.querySelectorAll("[data-column-sort]").forEach(th => {
+    const activate = () => toggleFn(th.dataset.columnSort);
+    th.addEventListener("click", activate);
+    th.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        activate();
+      }
+    });
+  });
 }
 
 function sortResultsForDisplay(results, sortOrder, sourceList) {
@@ -2878,11 +3058,73 @@ function getTeacherScopedResults() {
   });
 }
 
+function getStatsDateRangeSettings() {
+  if (!systemState.statsDateRange) {
+    let dateFrom = "";
+    let dateTo = "";
+    try {
+      const saved = JSON.parse(localStorage.getItem("arabya_stats_date_range") || "{}");
+      dateFrom = saved.dateFrom || "";
+      dateTo = saved.dateTo || "";
+    } catch (e) {}
+    systemState.statsDateRange = { dateFrom, dateTo };
+  }
+  return systemState.statsDateRange;
+}
+
+function persistStatsDateRangeSettings() {
+  const range = getStatsDateRangeSettings();
+  try {
+    localStorage.setItem("arabya_stats_date_range", JSON.stringify(range));
+  } catch (e) {}
+}
+
+function syncStatsDateRangeControlsUI() {
+  const range = getStatsDateRangeSettings();
+  const fromInput = document.getElementById("teacher-stats-date-from");
+  const toInput = document.getElementById("teacher-stats-date-to");
+  if (fromInput) fromInput.value = range.dateFrom || "";
+  if (toInput) toInput.value = range.dateTo || "";
+}
+
+function setupStatsDateRangeControls() {
+  syncStatsDateRangeControlsUI();
+  const applyBtn = document.getElementById("teacher-stats-apply-date-range");
+  const clearBtn = document.getElementById("teacher-stats-clear-date-range");
+  if (applyBtn && !applyBtn.dataset.bound) {
+    applyBtn.dataset.bound = "1";
+    applyBtn.addEventListener("click", () => {
+      const range = getStatsDateRangeSettings();
+      const fromInput = document.getElementById("teacher-stats-date-from");
+      const toInput = document.getElementById("teacher-stats-date-to");
+      range.dateFrom = fromInput ? fromInput.value : "";
+      range.dateTo = toInput ? toInput.value : "";
+      persistStatsDateRangeSettings();
+      renderTeacherStatsDashboard();
+    });
+  }
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      const range = getStatsDateRangeSettings();
+      range.dateFrom = "";
+      range.dateTo = "";
+      persistStatsDateRangeSettings();
+      syncStatsDateRangeControlsUI();
+      renderTeacherStatsDashboard();
+    });
+  }
+}
+
 function computeTeacherStatsSnapshot() {
   const exams = getTeacherScopedExams();
   const students = systemState.students || [];
   const allResults = getTeacherScopedResults();
-  const results = getActiveResultsList(allResults);
+  const statsRange = getStatsDateRangeSettings();
+  let results = getActiveResultsList(allResults);
+  if (statsRange.dateFrom || statsRange.dateTo) {
+    results = results.filter(res => resultMatchesCustomDateRange(res, statsRange.dateFrom, statsRange.dateTo));
+  }
   const statusCounts = { completed: 0, incomplete: 0, canceled: 0, superseded: 0 };
   const periodCounts = { today: 0, week: 0, month: 0 };
   const examCounts = new Map();
@@ -2958,6 +3200,8 @@ function applyTeacherResultsQuickView(options = {}) {
   view.statusFilter = options.statusFilter || "all";
   view.examFilter = options.examFilter || "";
   view.dateFilter = options.dateFilter || "all";
+  view.dateFrom = options.dateFrom || "";
+  view.dateTo = options.dateTo || "";
   view.page = 1;
   persistResultsTableFilters();
   syncResultsFilterControlsUI();
@@ -3128,6 +3372,7 @@ function setupTeacherStatsControls() {
 }
 
 function renderTeacherStatsDashboard() {
+  setupStatsDateRangeControls();
   const overview = document.getElementById("teacher-stats-overview");
   if (!overview) return;
 
@@ -4450,11 +4695,7 @@ function validateStudentAndStart() {
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
   const blockingResult = findBlockingExamResult(studentLookupKey, examId, systemState.currentStudent);
   if (blockingResult) {
-    if (blockingResult.status === "canceled") {
-      alert("تم إلغاء امتحانك سابقاً بسبب تجاوز محاولات الغش المسموحة. تواصل مع المعلم لإعادة السماح بالتقديم.");
-    } else {
-      alert("لقد أنهيت هذا الامتحان وتسليم إجاباتك مسبقاً. لا يمكن الدخول إليه مرة أخرى.");
-    }
+    alert(getExamBlockingMessage(blockingResult));
     return;
   }
 
@@ -4474,6 +4715,7 @@ function validateStudentAndStart() {
   systemState.isExamActive = true;
   systemState.isCheatingSuspended = false;
   systemState.cheatViolations = 0;
+  markExamAntiCheatStarted();
 
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === selectedExam.id && r.status === "incomplete"));
   saveActiveStudentSession();
@@ -4482,6 +4724,15 @@ function validateStudentAndStart() {
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
   startRunnerTimer();
+  showMobileExamHintIfNeeded();
+}
+
+function showMobileExamHintIfNeeded() {
+  if (!isMobileExamDevice()) return;
+  const hint = document.getElementById("runner-mobile-exam-hint");
+  if (!hint) return;
+  hint.classList.remove("hidden");
+  hint.innerHTML = `<span class="material-icons" style="vertical-align:middle; font-size:1rem;">smartphone</span> على الهاتف: ابقَ داخل صفحة الامتحان. التبديل لتطبيق آخر أو إخفاء الصفحة قد يُسجَّل كمخالفة بعد ${Math.round(getExamAntiCheatGraceMs() / 1000)} ثوانٍ من البدء.`;
 }
 
 function renderRunnerQuestion() {
@@ -5061,7 +5312,9 @@ function getResultsTableFilters() {
     searchQuery: getResultsSearchQuery(),
     statusFilter: view.statusFilter || "all",
     examFilter: view.examFilter || "",
-    dateFilter: view.dateFilter || "all"
+    dateFilter: view.dateFilter || "all",
+    dateFrom: view.dateFrom || "",
+    dateTo: view.dateTo || ""
   };
 }
 
@@ -5072,6 +5325,31 @@ function getResultDisplayStatus(res) {
   const scoreText = String(res?.score || "");
   if (/جاري|غير مكتمل|incomplete/i.test(scoreText)) return "incomplete";
   return "completed";
+}
+
+function parseDateInputValue(value, endOfDay = false) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10) - 1;
+    const day = parseInt(isoMatch[3], 10);
+    const dt = new Date(year, month, day, endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+    return Number.isNaN(dt.getTime()) ? null : dt;
+  }
+  return parseResultTimestamp(raw);
+}
+
+function resultMatchesCustomDateRange(res, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  const dt = parseResultTimestamp(res.timestamp);
+  if (!dt) return false;
+  const fromDt = parseDateInputValue(dateFrom, false);
+  const toDt = parseDateInputValue(dateTo, true);
+  if (fromDt && dt < fromDt) return false;
+  if (toDt && dt > toDt) return false;
+  return true;
 }
 
 function parseResultTimestamp(value) {
@@ -5154,7 +5432,9 @@ function filterResultsForTeacherTable(results) {
   if (filters.examFilter) {
     list = list.filter(res => resultMatchesExamFilter(res, filters.examFilter));
   }
-  if (filters.dateFilter !== "all") {
+  if (filters.dateFrom || filters.dateTo) {
+    list = list.filter(res => resultMatchesCustomDateRange(res, filters.dateFrom, filters.dateTo));
+  } else if (filters.dateFilter !== "all") {
     list = list.filter(res => resultMatchesDateFilter(res, filters.dateFilter));
   }
   return list;
@@ -5166,7 +5446,9 @@ function isResultsTableFiltersActive(filters) {
     active.searchQuery ||
     (active.statusFilter && active.statusFilter !== "all") ||
     active.examFilter ||
-    (active.dateFilter && active.dateFilter !== "all")
+    (active.dateFilter && active.dateFilter !== "all") ||
+    active.dateFrom ||
+    active.dateTo
   );
 }
 
@@ -5176,7 +5458,9 @@ function persistResultsTableFilters() {
     localStorage.setItem("arabya_results_filters", JSON.stringify({
       statusFilter: view.statusFilter || "all",
       examFilter: view.examFilter || "",
-      dateFilter: view.dateFilter || "all"
+      dateFilter: view.dateFilter || "all",
+      dateFrom: view.dateFrom || "",
+      dateTo: view.dateTo || ""
     }));
   } catch (e) {}
 }
@@ -5203,6 +5487,10 @@ function syncResultsFilterControlsUI() {
   if (examSelect) examSelect.value = view.examFilter || "";
   const dateSelect = document.getElementById("teacher-results-date-filter");
   if (dateSelect) dateSelect.value = view.dateFilter || "all";
+  const dateFromInput = document.getElementById("teacher-results-date-from");
+  const dateToInput = document.getElementById("teacher-results-date-to");
+  if (dateFromInput) dateFromInput.value = view.dateFrom || "";
+  if (dateToInput) dateToInput.value = view.dateTo || "";
 }
 
 
@@ -5221,8 +5509,10 @@ function setupResultsTableSortControl() {
   select.addEventListener("change", () => {
     const view = getResultsTableViewSettings();
     view.sortOrder = normalizeTableSortOrder(select.value);
+    view.columnSort = null;
     view.page = 1;
     try { localStorage.setItem("arabya_results_sort", view.sortOrder); } catch (e) {}
+    persistResultsColumnSort(null);
     renderStudentResultsTable();
   });
 }
@@ -5232,6 +5522,8 @@ function resetResultsTableFilters() {
   view.statusFilter = "all";
   view.examFilter = "";
   view.dateFilter = "all";
+  view.dateFrom = "";
+  view.dateTo = "";
   view.page = 1;
   const searchInput = document.getElementById("teacher-results-search-input");
   if (searchInput) searchInput.value = "";
@@ -5272,12 +5564,39 @@ function setupResultsTableFilterControls() {
   const dateSelect = document.getElementById("teacher-results-date-filter");
   if (dateSelect) {
     dateSelect.addEventListener("change", () => {
-      getResultsTableViewSettings().dateFilter = dateSelect.value || "all";
-      getResultsTableViewSettings().page = 1;
+      const view = getResultsTableViewSettings();
+      view.dateFilter = dateSelect.value || "all";
+      if (view.dateFilter !== "custom") {
+        view.dateFrom = "";
+        view.dateTo = "";
+      }
+      view.page = 1;
       persistResultsTableFilters();
+      syncResultsFilterControlsUI();
       renderStudentResultsTable();
     });
   }
+
+  const applyCustomDateRange = () => {
+    const view = getResultsTableViewSettings();
+    const fromInput = document.getElementById("teacher-results-date-from");
+    const toInput = document.getElementById("teacher-results-date-to");
+    view.dateFrom = fromInput ? fromInput.value : "";
+    view.dateTo = toInput ? toInput.value : "";
+    view.dateFilter = (view.dateFrom || view.dateTo) ? "custom" : (view.dateFilter === "custom" ? "all" : view.dateFilter);
+    view.page = 1;
+    persistResultsTableFilters();
+    syncResultsFilterControlsUI();
+    renderStudentResultsTable();
+  };
+
+  ["teacher-results-date-from", "teacher-results-date-to"].forEach(id => {
+    const input = document.getElementById(id);
+    if (input && !input.dataset.bound) {
+      input.dataset.bound = "1";
+      input.addEventListener("change", applyCustomDateRange);
+    }
+  });
 
   const clearBtn = document.getElementById("teacher-results-clear-filters");
   if (clearBtn) {
@@ -5380,8 +5699,10 @@ function setupStudentsTableSortControl() {
   select.addEventListener("change", () => {
     const view = getStudentsTableViewSettings();
     view.sortOrder = normalizeTableSortOrder(select.value);
+    view.columnSort = null;
     view.page = 1;
     try { localStorage.setItem("arabya_students_sort", view.sortOrder); } catch (e) {}
+    persistStudentsColumnSort(null);
     renderTeacherStudentsTable();
   });
 }
@@ -5501,10 +5822,21 @@ function getResultsTableViewSettings() {
       if (savedFilters.examFilter) examFilter = savedFilters.examFilter;
       if (savedFilters.dateFilter) dateFilter = savedFilters.dateFilter;
     } catch (e) {}
+    let dateFrom = "";
+    let dateTo = "";
+    let columnSort = null;
+    try {
+      const savedFilters = JSON.parse(localStorage.getItem("arabya_results_filters") || "{}");
+      if (savedFilters.dateFrom) dateFrom = savedFilters.dateFrom;
+      if (savedFilters.dateTo) dateTo = savedFilters.dateTo;
+    } catch (e) {}
     try {
       sortOrder = normalizeTableSortOrder(localStorage.getItem("arabya_results_sort") || "newest");
     } catch (e) {}
-    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter, sortOrder };
+    try {
+      columnSort = JSON.parse(localStorage.getItem("arabya_results_column_sort") || "null");
+    } catch (e) {}
+    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter, dateFrom, dateTo, sortOrder, columnSort };
   }
   return systemState.resultsTableView;
 }
@@ -5623,7 +5955,9 @@ function renderStudentResultsTable() {
   }
 
   const view = getResultsTableViewSettings();
-  const sorted = sortResultsForDisplay(systemState.results, view.sortOrder);
+  renderSortableTableHeaders("#teacher-tab-results .table-container table", RESULTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleResultsColumnSort);
+  let sorted = sortResultsForDisplay(systemState.results, view.sortOrder);
+  sorted = applyResultsColumnSort(sorted, view.columnSort, systemState.results);
   const filtered = filterResultsForTeacherTable(sorted);
   const totalItems = filtered.length;
   view.page = clampResultsTablePage(totalItems, view.pageSize, view.page);
@@ -5721,6 +6055,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-exam-date").innerText = res.timestamp;
   document.getElementById("detail-total-score-input").value = res.score;
   renderResultRetakeManagementPanel(res);
+  renderStudentAttemptsPanel(res);
 
   if (!res.studentAnswers) res.studentAnswers = {};
   if (!res.questionScores) res.questionScores = {};
@@ -6009,6 +6344,61 @@ async function clearTeacherResults() {
 // 9. آليات منع الغش وتأمين النوافذ
 // ==========================================
 
+function isMobileExamDevice() {
+  const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const narrow = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+  const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
+  return (coarse && touch) || (narrow && touch);
+}
+
+function getExamAntiCheatGraceMs() {
+  return isMobileExamDevice() ? 12000 : 4000;
+}
+
+function markExamAntiCheatStarted() {
+  systemState.examAntiCheatStartedAt = Date.now();
+}
+
+function shouldTriggerFocusAntiCheat(reason) {
+  if (!systemState.isExamActive || systemState.isCheatingSuspended) return false;
+  const startedAt = systemState.examAntiCheatStartedAt || 0;
+  if (Date.now() - startedAt < getExamAntiCheatGraceMs()) return false;
+  if (isMobileExamDevice() && reason === "blur") return false;
+  return true;
+}
+
+function getExamBlockingMessage(blockingResult) {
+  if (!blockingResult) return "";
+  if (blockingResult.status === "canceled") {
+    return "تم إلغاء امتحانك سابقاً بسبب مخالفة قواعد الامتحان.\n\nاطلب من المعلم «السماح بإعادة الامتحان» من تبويب النتائج، ثم حاول الدخول مرة أخرى.";
+  }
+  return "لقد أنهيت هذا الامتحان وتسليم إجاباتك مسبقاً.\n\nإذا احتجت محاولة جديدة، اطلب من المعلم «السماح بإعادة الامتحان».";
+}
+
+function getCheatPenaltyMessage(reason, violationNumber, maxViolations) {
+  const actionMap = {
+    blur: "الخروج من نافذة الامتحان",
+    visibility: "إخفاء تبويب الامتحان أو التبديل لتطبيق آخر",
+    screenshot: "محاولة التقاط لقطة شاشة",
+    copy: "محاولة النسخ",
+    cut: "محاولة القص",
+    paste: "محاولة اللصق",
+    "keyboard-shortcut": "استخدام اختصار لوحة مفاتيح محظور"
+  };
+  const actionText = actionMap[reason] || "مخالفة قواعد الامتحان";
+  const remaining = Math.max(0, maxViolations - violationNumber);
+  const mobileHint = isMobileExamDevice()
+    ? "<br><span style=\"font-size:0.9rem; color:var(--text-muted);\">على الهاتف: ابقَ داخل صفحة الامتحان ولا تفتح تطبيقات أخرى أثناء الحل.</span>"
+    : "";
+  if (violationNumber >= maxViolations) {
+    return `<span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان</span>` +
+      `تم رصد ${actionText}. تم إنهاء الاختبار وتسجيل حالة الإلغاء.${mobileHint}`;
+  }
+  return `<span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير (${violationNumber} من ${maxViolations})</span>` +
+    `تم رصد ${actionText}. تم إلغاء السؤال الحالي وتصفير درجته.${mobileHint}` +
+    `<span style="color:var(--error); font-weight:bold; font-size:0.95rem; display:block; margin-top:0.5rem;">متبقي ${remaining} تحذير${remaining === 1 ? "" : "ات"} قبل إلغاء الامتحان.</span>`;
+}
+
 function setupAntiCheatHandlers() {
   window.addEventListener("beforeunload", e => {
     if (systemState.isExamActive) {
@@ -6021,13 +6411,13 @@ function setupAntiCheatHandlers() {
   });
 
   window.addEventListener("blur", () => {
-    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
+    if (shouldTriggerFocusAntiCheat("blur")) {
       triggerRunnerCheatPenalty("blur");
     }
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && systemState.isExamActive && !systemState.isCheatingSuspended) {
+    if (document.hidden && shouldTriggerFocusAntiCheat("visibility")) {
       triggerRunnerCheatPenalty("visibility");
     }
   });
@@ -6116,6 +6506,12 @@ function releaseSecureExamMode() {
   }
 }
 
+function getMaxCheatAttemptsForExam(exam) {
+  const parsed = parseInt(exam?.maxCheatAttempts, 10);
+  if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  return 5;
+}
+
 function triggerRunnerCheatPenalty(reason) {
   systemState.isCheatingSuspended = true;
   if (systemState.timer.intervalId) {
@@ -6135,16 +6531,14 @@ function triggerRunnerCheatPenalty(reason) {
   const mainWrapper = document.getElementById("app-main-wrapper");
   const msg = document.getElementById("runner-cheat-msg");
   const exam = systemState.currentExam;
+  const maxViolations = getMaxCheatAttemptsForExam(exam);
   const shouldCancel = shouldCancelExamForCheating(exam, systemState.cheatViolations);
 
   mainWrapper.classList.add("blurred-content");
   overlay.classList.remove("hidden");
 
   if (shouldCancel) {
-    msg.innerHTML = `
-      <span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان!</span>
-      تم اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تم إنهاء اختبارك وتسجيل حالة الإلغاء.
-    `;
+    msg.innerHTML = getCheatPenaltyMessage(reason, systemState.cheatViolations, maxViolations);
 
     systemState.shuffledQuestions.forEach(q => {
       if (systemState.studentAnswers[q.id] === undefined) {
@@ -6164,10 +6558,7 @@ function triggerRunnerCheatPenalty(reason) {
       submitCheatedExam();
     }, 4500);
   } else {
-    msg.innerHTML = `
-      <span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير أمني</span>
-      تم اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تم إلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي.
-    `;
+    msg.innerHTML = getCheatPenaltyMessage(reason, systemState.cheatViolations, maxViolations);
 
     setTimeout(() => {
       overlay.classList.add("hidden");
@@ -6541,7 +6932,9 @@ function renderTeacherStudentsTable() {
   }
 
   const view = getStudentsTableViewSettings();
-  const sorted = sortStudentsForDisplay(systemState.students, view.sortOrder);
+  renderSortableTableHeaders("#teacher-tab-students .table-container table", STUDENTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleStudentsColumnSort);
+  let sorted = sortStudentsForDisplay(systemState.students, view.sortOrder);
+  sorted = applyStudentsColumnSort(sorted, view.columnSort, systemState.students);
   const filtered = filterStudentsForTeacherTable(sorted);
   const totalItems = filtered.length;
   view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
