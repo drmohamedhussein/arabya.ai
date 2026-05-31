@@ -23,8 +23,9 @@ var ARABYA_DEFAULT_DB = {
 };
 
 var ARABYA_RESULT_HEADERS = [
-  "معرف السجل", "التاريخ", "اسم الطالب", "ID", "كود الاشتراك",
-  "الامتحان", "معرف الامتحان", "الجامعة", "الكلية", "الفرقة", "النوع", "النتيجة", "التفاصيل"
+  "معرف السجل", "التاريخ والوقت", "اسم الطالب", "رقم ID", "كود الاشتراك",
+  "مفتاح الطالب", "البريد", "الموبايل", "الامتحان", "معرف الامتحان",
+  "الجامعة", "الكلية", "الفرقة", "النوع", "الحالة", "النتيجة", "التفاصيل"
 ];
 
 function doPost(e) {
@@ -70,13 +71,18 @@ function doGet(e) {
       if (sheetResults.length) {
         db.results = mergeArabyaCollection_(db.results || [], sheetResults, "results");
       }
+      var derivedStudents = hydrateStudentsFromResults_(db.results || []);
+      if (derivedStudents.length) {
+        db.students = mergeArabyaCollection_(db.students || [], derivedStudents, "students");
+      }
       db.updatedAt = new Date().toISOString();
       return jsonArabya_({
         status: "success",
         data: db,
         counts: countArabya_(db),
         sheetResultRows: sheetResults.length,
-        backupResultRows: backupResultRows
+        backupResultRows: backupResultRows,
+        derivedStudentCount: derivedStudents.length
       });
     }
     return jsonArabya_({ status: "active", service: "ARABYA.NET backend bridge" });
@@ -104,12 +110,16 @@ function appendArabyaResult_(data) {
     data.name || "",
     data.id || "",
     data.subscriptionCode || data.accessCode || "",
+    data.studentLookupKey || "",
+    data.email || "",
+    data.mobile || "",
     data.examTitle || "",
     data.examId || "",
     data.university || "",
     data.faculty || "",
     data.level || "",
     data.examType || "",
+    data.status || "",
     data.score || "",
     data.details || ""
   ]);
@@ -156,10 +166,10 @@ function readArabyaSheetResults_() {
 }
 
 function detectArabyaResultLayout_(sheet, numCols) {
-  if (numCols >= 13) return "v2";
   var header = sheet.getRange(1, 1, 1, Math.max(numCols, 1)).getValues()[0];
   var headerText = header.join("|");
-  if (/معرف الامتحان|examId/i.test(headerText)) return "v2";
+  if (/مفتاح الطالب|studentLookupKey/i.test(headerText) || numCols >= 16) return "v3";
+  if (numCols >= 13 || /معرف الامتحان|examId/i.test(headerText)) return "v2";
   return "v1";
 }
 
@@ -169,16 +179,34 @@ function rowToArabyaResultObject_(row, layout, sheetRow) {
   var name = String(row[2] || "").trim();
   var id = String(row[3] || "").trim();
   var accessCode = String(row[4] || "").trim();
-  var examTitle = String(row[5] || "").trim();
+  var studentLookupKey = "";
+  var email = "";
+  var mobile = "";
+  var examTitle = "";
   var examId = "";
   var university = "";
   var faculty = "";
   var level = "";
   var examType = "";
+  var status = "";
   var score = "";
   var details = "";
 
-  if (layout === "v2") {
+  if (layout === "v3") {
+    studentLookupKey = String(row[5] || "").trim();
+    email = String(row[6] || "").trim();
+    mobile = String(row[7] || "").trim();
+    examTitle = String(row[8] || "").trim();
+    examId = String(row[9] || "").trim();
+    university = String(row[10] || "").trim();
+    faculty = String(row[11] || "").trim();
+    level = String(row[12] || "").trim();
+    examType = String(row[13] || "").trim();
+    status = String(row[14] || "").trim();
+    score = String(row[15] || "").trim();
+    details = String(row[16] || "").trim();
+  } else if (layout === "v2") {
+    examTitle = String(row[5] || "").trim();
     examId = String(row[6] || "").trim();
     university = String(row[7] || "").trim();
     faculty = String(row[8] || "").trim();
@@ -187,6 +215,7 @@ function rowToArabyaResultObject_(row, layout, sheetRow) {
     score = String(row[11] || "").trim();
     details = String(row[12] || "").trim();
   } else {
+    examTitle = String(row[5] || "").trim();
     university = String(row[6] || "").trim();
     faculty = String(row[7] || "").trim();
     level = String(row[8] || "").trim();
@@ -205,15 +234,39 @@ function rowToArabyaResultObject_(row, layout, sheetRow) {
     name: name,
     id: id,
     accessCode: accessCode,
+    studentLookupKey: studentLookupKey,
+    email: email,
+    mobile: mobile,
     examTitle: examTitle,
     examId: examId,
     university: university,
     faculty: faculty,
     level: level,
     examType: examType,
+    status: status,
     score: score,
     details: details
   };
+}
+
+function hydrateStudentsFromResults_(results) {
+  var map = {};
+  (results || []).forEach(function(res) {
+    if (!res || (!res.name && !res.id && !res.accessCode)) return;
+    var key = res.studentLookupKey || [res.id || "", res.accessCode || "", res.name || ""].join(":");
+    if (!key) return;
+    var existing = map[key] || {};
+    map[key] = {
+      name: res.name || existing.name || "",
+      id: res.id || existing.id || "",
+      code: res.accessCode || existing.code || "",
+      email: res.email || existing.email || "",
+      mobile: res.mobile || existing.mobile || "",
+      studentKey: res.studentLookupKey || key,
+      timestamp: existing.timestamp || res.timestamp || ""
+    };
+  });
+  return Object.keys(map).map(function(k) { return map[k]; });
 }
 
 function formatArabyaTimestamp_(val) {
@@ -271,7 +324,7 @@ function mergeArabyaCollection_(current, incoming, collection) {
 
 function getArabyaRecordKey_(item, collection) {
   if (collection === "teachers") return String(item.username || item.quickCode || item.name || Utilities.getUuid());
-  if (collection === "students") return String(item.id || item.code || item.name || Utilities.getUuid());
+  if (collection === "students") return String(item.studentKey || item.id || item.code || item.name || Utilities.getUuid());
   if (collection === "exams") return String(item.id || item.title || Utilities.getUuid());
   if (collection === "results") {
     if (item.recordId) return String(item.recordId);
@@ -287,12 +340,16 @@ function normaliseArabyaResult_(data) {
     name: data.name || "",
     id: data.id || "",
     accessCode: data.subscriptionCode || data.accessCode || "",
+    studentLookupKey: data.studentLookupKey || "",
+    email: data.email || "",
+    mobile: data.mobile || "",
     examTitle: data.examTitle || "",
     examId: data.examId || "",
     university: data.university || "",
     faculty: data.faculty || "",
     level: data.level || "",
     examType: data.examType || "",
+    status: data.status || "",
     score: data.score || "",
     details: data.details || ""
   };

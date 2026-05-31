@@ -841,6 +841,22 @@ function mergeRemoteCollection_(current, incoming, keyFn) {
   return Object.keys(map).map(key => map[key]);
 }
 
+
+function hydrateStudentsFromResults(results) {
+  if (!Array.isArray(results)) return;
+  results.forEach(res => {
+    if (!res || (!res.name && !res.id && !res.accessCode && !res.code)) return;
+    upsertStudentRecord({
+      name: res.name,
+      id: res.id,
+      code: res.accessCode || res.code,
+      email: res.email,
+      mobile: res.mobile
+    }, res.studentLookupKey || "");
+  });
+  ensureStudentsDataShape();
+}
+
 function mergeRemoteDatabaseIntoLocal(remoteData) {
   if (!remoteData || typeof remoteData !== "object") return false;
   if (Array.isArray(remoteData.teachers)) {
@@ -853,8 +869,12 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""));
   }
   if (Array.isArray(remoteData.results)) {
-    systemState.results = mergeRemoteCollection_(systemState.results, remoteData.results, item => String(item.recordId || [item.id, item.examId, item.timestamp].join(":")));
+    systemState.results = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
+      if (item.recordId) return String(item.recordId);
+      return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
+    });
   }
+  hydrateStudentsFromResults(systemState.results);
   ensureResultRecordIds();
   ensureStudentsDataShape();
   ensureExamsDataShape();
@@ -968,7 +988,10 @@ window.pullTeacherResultsFromCloud = async function() {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
   const syncResult = await syncDatabaseFromCloud({ silent: false });
-  if (syncResult.ok) getResultsTableViewSettings().page = 1;
+  if (syncResult.ok) {
+    getResultsTableViewSettings().page = 1;
+    getStudentsTableViewSettings().page = 1;
+  }
   renderStudentResultsTable();
   renderTeacherStudentsTable();
   if (el) {
@@ -976,7 +999,7 @@ window.pullTeacherResultsFromCloud = async function() {
       const sheetNote = syncResult.sheetResultRows
         ? ` — ${syncResult.sheetResultRows} صفاً في ورقة «نتائج الطلاب»`
         : "";
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت مزامنة ${systemState.results.length} نتيجة من السحابة (بدون حد أقصى)${sheetNote}`;
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} نتيجة و ${systemState.students.length} طالب${sheetNote}`;
     } else {
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، ثم انسخ الكود الذي يحتوي readArabyaSheetResults_ من تبويب الربط وأعد النشر كإصدار جديد.`;
     }
@@ -4528,20 +4551,145 @@ window.uncancelStudentExam = function(recordId) {
   alert("تم السماح للطالب بإعادة أداء الامتحان.");
 };
 
+
+function getStudentsTableViewSettings() {
+  if (!systemState.studentsTableView) {
+    let pageSize = 50;
+    try {
+      const saved = parseInt(localStorage.getItem("arabya_students_page_size") || "50", 10);
+      if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
+    } catch (e) {}
+    systemState.studentsTableView = { page: 1, pageSize };
+  }
+  return systemState.studentsTableView;
+}
+
+function setStudentsTablePageSize(size) {
+  const view = getStudentsTableViewSettings();
+  view.pageSize = [25, 50, 100, 200, 500, 0].includes(size) ? size : 50;
+  view.page = 1;
+  try { localStorage.setItem("arabya_students_page_size", String(view.pageSize)); } catch (e) {}
+}
+
+function clampStudentsTablePage(totalItems, pageSize, page) {
+  if (!pageSize || pageSize <= 0) return 1;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  return Math.min(Math.max(1, page), totalPages);
+}
+
+function updateStudentsPaginationUI(totalItems, page, pageSize) {
+  const info = document.getElementById("teacher-students-page-info");
+  const pageNum = document.getElementById("teacher-students-page-number");
+  const prevBtn = document.getElementById("teacher-students-prev-page");
+  const nextBtn = document.getElementById("teacher-students-next-page");
+  const sizeSelect = document.getElementById("teacher-students-page-size");
+
+  if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
+    sizeSelect.value = String(pageSize);
+  }
+
+  if (totalItems === 0) {
+    if (info) info.textContent = "";
+    if (pageNum) pageNum.textContent = "";
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  if (!pageSize || pageSize <= 0) {
+    if (info) info.textContent = `إجمالي ${totalItems} طالب — عرض الكل`;
+    if (pageNum) pageNum.textContent = "";
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+  if (info) info.textContent = `عرض ${start}–${end} من ${totalItems} طالب`;
+  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (nextBtn) nextBtn.disabled = page >= totalPages;
+}
+
+function setupStudentsTablePaginationControls() {
+  const sizeSelect = document.getElementById("teacher-students-page-size");
+  const prevBtn = document.getElementById("teacher-students-prev-page");
+  const nextBtn = document.getElementById("teacher-students-next-page");
+
+  if (sizeSelect && !sizeSelect.dataset.bound) {
+    sizeSelect.dataset.bound = "1";
+    sizeSelect.value = String(getStudentsTableViewSettings().pageSize);
+    sizeSelect.addEventListener("change", () => {
+      setStudentsTablePageSize(parseInt(sizeSelect.value, 10));
+      renderTeacherStudentsTable();
+    });
+  }
+  if (prevBtn && !prevBtn.dataset.bound) {
+    prevBtn.dataset.bound = "1";
+    prevBtn.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderTeacherStudentsTable();
+      }
+    });
+  }
+  if (nextBtn && !nextBtn.dataset.bound) {
+    nextBtn.dataset.bound = "1";
+    nextBtn.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      view.page += 1;
+      renderTeacherStudentsTable();
+    });
+  }
+}
+
+window.pullTeacherStudentsFromCloud = async function() {
+  const el = document.getElementById("teacher-students-sync-status");
+  if (el) {
+    el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب الطلاب والنتائج من Google Sheets...`;
+  }
+  const ok = await pullTeacherResultsFromCloud();
+  if (el) {
+    if (ok) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.students.length} طالب و ${systemState.results.length} نتيجة`;
+    } else if (!document.getElementById("teacher-results-sync-status")?.textContent?.includes("cloud_done")) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Apps Script كإصدار جديد.`;
+    } else {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> ${systemState.students.length} طالب`;
+    }
+  }
+  renderTeacherStudentsTable();
+  return ok;
+};
+
 function renderTeacherStudentsTable() {
   const tbody = document.getElementById("teacher-students-table-body");
   if (!tbody) return;
   tbody.innerHTML = "";
+  setupStudentsTablePaginationControls();
 
   if (systemState.students.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem;">لا يوجد طلاب مسجلين حالياً.</td></tr>`;
+    const hasCloud = getArabyaWebAppUrls().length > 0;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
+    updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize);
     return;
   }
 
-  // عرض أحدث الطلاب المسجلين في الأعلى
   const reversed = [...systemState.students].reverse();
+  const view = getStudentsTableViewSettings();
+  const totalItems = reversed.length;
+  view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
 
-  reversed.forEach(s => {
+  let pageItems = reversed;
+  if (view.pageSize > 0) {
+    const start = (view.page - 1) * view.pageSize;
+    pageItems = reversed.slice(start, start + view.pageSize);
+  }
+
+  pageItems.forEach(s => {
     const studentKey = s.studentKey || getStudentLookupKey(s);
     const canceledExamIds = getStudentCanceledExamIds(studentKey);
     const canceledBadge = canceledExamIds.length
@@ -4562,6 +4710,8 @@ function renderTeacherStudentsTable() {
     `;
     tbody.appendChild(row);
   });
+
+  updateStudentsPaginationUI(totalItems, view.page, view.pageSize);
 }
 
 // إظهار بطاقة إضافة طالب جديد
