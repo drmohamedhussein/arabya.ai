@@ -37,6 +37,32 @@ function getStudentLookupKey(student) {
   return normalizedName ? `name:${normalizedName}` : "";
 }
 
+function validateStudentIdentityInput(students, id, code, options = {}) {
+  const normalizedId = normalizeStudentId(id);
+  const normalizedName = normalizeStudentName(options.name || "");
+  const inputCode = sanitizeStudentCodeInput(code);
+  const editingStudentKey = options.editingStudentKey || "";
+
+  if (!inputCode) return { ok: true };
+  if (!isFiveDigitStudentCode(inputCode)) return { ok: false };
+
+  if (isPrivateStudentCode(inputCode)) {
+    const owners = students.filter(student => sanitizeStudentCodeInput(student.code) === inputCode);
+    if (owners.length > 1) return { ok: false };
+    if (owners.length === 1) {
+      const owner = owners[0];
+      if (editingStudentKey && owner.studentKey === editingStudentKey) return { ok: true };
+      const ownerId = normalizeStudentId(owner.id);
+      if (normalizedId && ownerId && ownerId !== normalizedId) return { ok: false };
+      const ownerName = normalizeStudentName(owner.name);
+      if (normalizedName && ownerName && ownerName !== normalizedName) return { ok: false };
+      return { ok: true };
+    }
+  }
+
+  return { ok: true };
+}
+
 function buildRuntimeQuestionsForExam(exam) {
   const bank = Array.isArray(exam.questions) ? [...exam.questions] : [];
   const shouldShuffle = exam.shuffleQuestions !== false;
@@ -80,6 +106,8 @@ const dup = students.find(s => sanitizeStudentCodeInput(s.code) === "12345");
 assert.ok(dup);
 assert.strictEqual(isPrivateStudentCode("12345"), true);
 assert.strictEqual(isSharedStudentCode("00000"), true);
+assert.deepStrictEqual(validateStudentIdentityInput(students, "", "12345", { name: "Ali" }), { ok: true });
+assert.strictEqual(validateStudentIdentityInput(students, "", "12345", { name: "Mallory" }).ok, false);
 
 // Search: private code requires exact code
 const results = [

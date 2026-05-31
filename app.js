@@ -618,6 +618,35 @@ function getNextAttemptNumber(studentLookupKey, examId) {
   return attempts.length + 1;
 }
 
+function getStudentMatchKeySet(studentLookupKey, studentContext) {
+  const keys = new Set();
+  if (studentLookupKey) keys.add(studentLookupKey);
+  getStudentLookupKeysForMatch(studentContext || {}).forEach(key => {
+    if (key) keys.add(key);
+  });
+  return keys;
+}
+
+function resultMatchesStudentKeys(res, keys) {
+  if (!res || !keys || !keys.size) return false;
+  if (res.studentLookupKey && keys.has(res.studentLookupKey)) return true;
+  return getStudentLookupKeysForMatch({
+    studentKey: res.studentLookupKey || "",
+    id: res.id,
+    code: res.accessCode || res.code,
+    name: res.name
+  }).some(key => key && keys.has(key));
+}
+
+function getNextAttemptNumberForStudent(studentLookupKey, examId, studentContext = null) {
+  if (!studentLookupKey || !examId) return 1;
+  const keys = getStudentMatchKeySet(studentLookupKey, studentContext);
+  const attempts = (systemState.results || []).filter(res =>
+    res.examId === examId && resultMatchesStudentKeys(res, keys)
+  );
+  return attempts.length + 1;
+}
+
 function syncRetakeAffectedResultsToCloud(results, syncStatusEl) {
   const rows = Array.isArray(results) ? results.filter(Boolean) : [];
   if (!rows.length) return;
@@ -658,13 +687,14 @@ function getResultRetakeStatusText(res) {
   return "—";
 }
 
-function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId) {
+function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId, studentContext = null) {
   if (!studentLookupKey || !examId || !newRecordId) return [];
   const now = new Date().toISOString();
   const archived = [];
+  const keys = getStudentMatchKeySet(studentLookupKey, studentContext);
   systemState.results.forEach(res => {
     if (!res || res.recordId === newRecordId || isSupersededResult(res)) return;
-    if (res.studentLookupKey !== studentLookupKey || res.examId !== examId) return;
+    if (res.examId !== examId || !resultMatchesStudentKeys(res, keys)) return;
     if (res.status === "incomplete") return;
     res.superseded = true;
     res.supersededAt = now;
@@ -871,14 +901,12 @@ window.revokeStudentExamRetake = function(recordId) {
 
 function findBlockingExamResult(studentLookupKey, examId, studentContext) {
   if (!examId) return null;
-  const keys = studentContext
-    ? getStudentLookupKeysForMatch(studentContext)
-    : (studentLookupKey ? [studentLookupKey] : []);
-  if (!keys.length) return null;
-  if (keys.some(key => findActiveRetakeGrant(key, examId))) return null;
+  const keys = getStudentMatchKeySet(studentLookupKey, studentContext);
+  if (!keys.size) return null;
+  if ([...keys].some(key => findActiveRetakeGrant(key, examId))) return null;
   return systemState.results.find(r =>
-    keys.includes(r.studentLookupKey) &&
     r.examId === examId &&
+    resultMatchesStudentKeys(r, keys) &&
     !isSupersededResult(r) &&
     r.status !== "incomplete" &&
     r.allowRetake !== true &&
@@ -1212,6 +1240,7 @@ function getStudentLookupKeysForMatch(student) {
 
 function validateStudentIdentityInput(id, code, options = {}) {
   const normalizedId = normalizeStudentId(id);
+  const normalizedName = normalizeStudentName(options.name || "");
   const inputCode = sanitizeStudentCodeInput(code);
   const editingStudentKey = options.editingStudentKey || "";
 
@@ -1239,6 +1268,13 @@ function validateStudentIdentityInput(id, code, options = {}) {
         return {
           ok: false,
           message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً."
+        };
+      }
+      const ownerName = normalizeStudentName(owner.name);
+      if (normalizedName && ownerName && ownerName !== normalizedName) {
+        return {
+          ok: false,
+          message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الاسم المسجل مع هذا الكود أو تواصل مع المعلم لتعديل بياناتك."
         };
       }
       return { ok: true };
@@ -4669,7 +4705,7 @@ function validateStudentAndStart() {
     matchedStudent = findStudentByName(name);
   }
 
-  const identityCheck = validateStudentIdentityInput(id, rawCode);
+  const identityCheck = validateStudentIdentityInput(id, rawCode, { name });
   if (!identityCheck.ok) {
     alert(identityCheck.message);
     return;
@@ -5049,8 +5085,8 @@ function submitFinishedExam() {
     allowRetake: false
   };
 
-  resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
-  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
+  resultObj.attemptNumber = getNextAttemptNumberForStudent(studentLookupKey, systemState.currentExam.id, systemState.currentStudent);
+  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId, systemState.currentStudent);
   systemState.results.push(resultObj);
   saveSystemState(true);
   syncRetakeAffectedResultsToCloud(archivedAttempts);
@@ -6614,8 +6650,8 @@ function submitCheatedExam() {
     cheatViolations: systemState.cheatViolations
   };
 
-  resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
-  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
+  resultObj.attemptNumber = getNextAttemptNumberForStudent(studentLookupKey, systemState.currentExam.id, systemState.currentStudent);
+  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId, systemState.currentStudent);
   systemState.results.push(resultObj);
   systemState.currentExamRuntime = null;
   saveSystemState(true);
@@ -6656,6 +6692,12 @@ function handleStudentRegister() {
   }
   if (!isFiveDigitStudentCode(code)) {
     alert("كود الاشتراك يجب أن يكون مكوّناً من 5 أرقام.");
+    return;
+  }
+
+  const identityCheck = validateStudentIdentityInput(id, rawCode, { name: fullname });
+  if (!identityCheck.ok) {
+    alert(identityCheck.message);
     return;
   }
 

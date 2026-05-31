@@ -276,10 +276,16 @@ function normalizeArabyaStudentCode(code) {
   return digits;
 }
 
-function validateArabyaStudentIdentity(id, code, currentId) {
+function normalizeArabyaStudentName(name) {
+  return String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function validateArabyaStudentIdentity(id, code, options) {
+  var opts = (options && typeof options === "object") ? options : { editingStudentKey: options || "" };
   if (typeof window.arabyaValidateStudentIdentity === "function") {
     return window.arabyaValidateStudentIdentity(id, code, {
-      editingStudentKey: currentId || (window.systemState && window.systemState.editingStudentKey) || ""
+      name: opts.name || "",
+      editingStudentKey: opts.editingStudentKey || (window.systemState && window.systemState.editingStudentKey) || ""
     });
   }
 
@@ -289,6 +295,7 @@ function validateArabyaStudentIdentity(id, code, currentId) {
   var normalizedId = typeof window.normalizeStudentId === "function"
     ? window.normalizeStudentId(id)
     : String(id || "").trim().toUpperCase();
+  var normalizedName = normalizeArabyaStudentName(opts.name || "");
 
   var codeOwners = arabyaFindStudentsByCode(cleanCode);
   if (codeOwners.length > 1) {
@@ -302,6 +309,10 @@ function validateArabyaStudentIdentity(id, code, currentId) {
       : String(owner.id || "").trim().toUpperCase();
     if (normalizedId && ownerId && ownerId !== normalizedId) {
       return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً." };
+    }
+    var ownerName = normalizeArabyaStudentName(owner.name);
+    if (normalizedName && ownerName && ownerName !== normalizedName) {
+      return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الاسم المسجل مع هذا الكود أو تواصل مع المعلم لتعديل بياناتك." };
     }
     return { ok: true };
   }
@@ -341,12 +352,14 @@ function enforceArabyaUniqueStudentCodes() {
     if (startBtn) {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("student-id-input") || {}).value,
-        (document.getElementById("student-access-code") || {}).value
+        (document.getElementById("student-access-code") || {}).value,
+        { name: (document.getElementById("student-fullname-input") || {}).value }
       );
     } else if (registerBtn) {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("student-reg-id") || {}).value,
-        (document.getElementById("student-reg-code") || {}).value
+        (document.getElementById("student-reg-code") || {}).value,
+        { name: (document.getElementById("student-reg-fullname") || {}).value }
       );
     } else if (profileBtn) {
       var profileCode = ((document.getElementById("student-profile-code-input") || {}).value || (document.getElementById("student-access-code") || {}).value || "").trim();
@@ -357,7 +370,10 @@ function enforceArabyaUniqueStudentCodes() {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("new-student-id") || {}).value,
         (document.getElementById("new-student-code") || {}).value,
-        window.systemState ? (window.systemState.editingStudentKey || window.systemState.editingStudentId || "") : ""
+        {
+          name: (document.getElementById("new-student-name") || {}).value,
+          editingStudentKey: window.systemState ? (window.systemState.editingStudentKey || window.systemState.editingStudentId || "") : ""
+        }
       );
     }
 
