@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.16";
+const ARABYA_APP_VERSION = "2026.05.31.17";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -4833,6 +4833,7 @@ function renderRunnerQuestion() {
     counter.innerText = "عدد الحروف المكتوبة: 0";
 
     textarea.addEventListener("input", (e) => {
+      markExamInteractionGrace();
       systemState.studentAnswers[question.id] = e.target.value;
       counter.innerText = `عدد الحروف المكتوبة: ${e.target.value.length}`;
       saveActiveStudentSession();
@@ -4905,6 +4906,7 @@ function renderRunnerQuestion() {
 }
 
 function selectRunnerOption(index) {
+  markExamInteractionGrace();
   const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
   systemState.studentAnswers[currentQ.id] = index;
 
@@ -4987,6 +4989,7 @@ function updateRunnerTimerUI() {
 }
 
 function runnerNextQuestion(isAuto = false) {
+  if (!isAuto) markExamInteractionGrace();
   const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
   
   if (!isAuto && systemState.studentAnswers[currentQ.id] === undefined) {
@@ -6678,6 +6681,7 @@ function markExamAntiCheatStarted() {
 }
 
 function stopExamSecurityWatchdog() {
+  clearExamHiddenTabTimer();
   if (systemState.examSecurityWatchInterval) {
     clearInterval(systemState.examSecurityWatchInterval);
     systemState.examSecurityWatchInterval = null;
@@ -6712,10 +6716,45 @@ function hideExamSecurityShield() {
   if (shield) shield.classList.add("hidden");
 }
 
+function clearExamHiddenTabTimer() {
+  if (systemState.examHiddenTabTimer) {
+    clearTimeout(systemState.examHiddenTabTimer);
+    systemState.examHiddenTabTimer = null;
+  }
+}
+
+function markExamInteractionGrace() {
+  systemState.examInteractionGraceUntil = Date.now() + 2200;
+  clearExamHiddenTabTimer();
+  hideExamSecurityShield();
+}
+
+function scheduleExamHiddenTabViolation(reason) {
+  if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+  if (!document.hidden) {
+    clearExamHiddenTabTimer();
+    hideExamSecurityShield();
+    return;
+  }
+  showExamSecurityShield("تم إخفاء الامتحان — ارجع فوراً إلى تبويب ARABYA.NET.");
+  clearExamHiddenTabTimer();
+  const delayMs = getExamDeviceCategory() === "mobile" ? 1800 : 1400;
+  systemState.examHiddenTabTimer = setTimeout(() => {
+    if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+    if (!document.hidden) return;
+    recordAntiCheatViolation(reason);
+  }, delayMs);
+}
+
 function shouldTriggerFocusAntiCheat(reason) {
   if (!systemState.isExamActive || systemState.isCheatingSuspended) return false;
+  if (systemState.examInteractionGraceUntil && Date.now() < systemState.examInteractionGraceUntil) {
+    return false;
+  }
   const startedAt = systemState.examAntiCheatStartedAt || 0;
   if (Date.now() - startedAt < getExamAntiCheatGraceMs()) return false;
+  const visibilityReasons = new Set(["visibility", "visibility-watchdog", "pagehide", "freeze"]);
+  if (visibilityReasons.has(reason) && !document.hidden) return false;
   return true;
 }
 
@@ -6731,13 +6770,8 @@ function startExamSecurityWatchdog() {
   stopExamSecurityWatchdog();
   systemState.examSecurityWatchInterval = setInterval(() => {
     if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
-    if (document.hidden) {
-      showExamSecurityShield("تم رصد إخفاء تبويب الامتحان أو التبديل لتطبيق آخر.");
-      recordAntiCheatViolation("visibility-watchdog");
-    } else {
-      hideExamSecurityShield();
-    }
-  }, 900);
+    scheduleExamHiddenTabViolation("visibility-watchdog");
+  }, 1000);
 }
 
 function getExamBlockingMessage(blockingResult) {
@@ -6893,23 +6927,18 @@ function setupAntiCheatHandlers() {
   });
 
   window.addEventListener("pagehide", () => {
-    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
-      recordAntiCheatViolation("pagehide");
-    }
+    if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+    scheduleExamHiddenTabViolation("pagehide");
   });
 
   document.addEventListener("visibilitychange", () => {
     if (!systemState.isExamActive) return;
-    if (document.hidden) {
-      showExamSecurityShield("تم إخفاء الامتحان — ارجع فوراً إلى تبويب ARABYA.NET.");
-      recordAntiCheatViolation("visibility");
-    } else {
-      hideExamSecurityShield();
-    }
+    scheduleExamHiddenTabViolation("visibility");
   });
 
   document.addEventListener("freeze", () => {
-    recordAntiCheatViolation("freeze");
+    if (!systemState.isExamActive) return;
+    scheduleExamHiddenTabViolation("freeze");
   });
 
   document.addEventListener("contextmenu", e => {
@@ -6976,10 +7005,14 @@ function setupAntiCheatHandlers() {
 }
 
 function requestSecureExamMode() {
-  // لا نستخدم ملء الشاشة — غير متوافق مع كل الأجهزة؛ التأمين عبر التبويب والنسخ فقط.
+  clearExamHiddenTabTimer();
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  }
 }
 
 function releaseSecureExamMode() {
+  clearExamHiddenTabTimer();
   stopExamSecurityWatchdog();
   disableExamSecureMode();
   if (document.fullscreenElement && document.exitFullscreen) {
