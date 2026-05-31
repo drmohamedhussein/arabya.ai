@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.3";
+const ARABYA_APP_VERSION = "2026.05.30.4";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -301,6 +301,7 @@ function initDatabase() {
     try { systemState.results = JSON.parse(savedResults); } catch(e){}
   }
   ensureResultRecordIds();
+  hydratePresentedQuestionsForResults();
 
   // 4. تهيئة قاعدة بيانات الطلاب وأكوادهم
   const savedStudents = localStorage.getItem("arabya_students_db");
@@ -628,6 +629,62 @@ function buildRuntimeQuestionsForExam(exam) {
 }
 
 
+
+function normalizeQuestionMatchText(text) {
+  return String(text || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function extractQuestionTextsFromResultDetails(details) {
+  if (!details || typeof details !== "string") return [];
+  const texts = [];
+  const chunks = details.split(/\n-{3,}\n?/);
+  chunks.forEach(chunk => {
+    const lines = chunk.split("\n").map(line => line.trim()).filter(Boolean);
+    lines.forEach(line => {
+      const objectiveMatch = line.match(/^س\s*\(وزنها\s*\d+\s*نق(?:طة|اط)?\)\s*:\s*(.+?)\s*\|\s*إجابة/i);
+      if (objectiveMatch) {
+        texts.push(objectiveMatch[1].trim());
+        return;
+      }
+      const essayMatch = line.match(/^س\s*مقالي\s*\(وزنها\s*\d+\s*نق(?:طة|اط)?\)\s*:\s*(.+)$/i);
+      if (essayMatch) {
+        texts.push(essayMatch[1].trim());
+      }
+    });
+  });
+  return texts;
+}
+
+function matchPresentedQuestionsFromDetails(res, exam) {
+  if (!exam || !Array.isArray(exam.questions) || !res?.details) return [];
+  const texts = extractQuestionTextsFromResultDetails(res.details);
+  if (!texts.length) return [];
+
+  const usedIds = new Set();
+  const matched = [];
+  texts.forEach(text => {
+    const normalizedText = normalizeQuestionMatchText(text);
+    if (!normalizedText) return;
+    const question = exam.questions.find(item => {
+      if (usedIds.has(item.id)) return false;
+      const normalizedQuestion = normalizeQuestionMatchText(item.question);
+      return normalizedQuestion === normalizedText
+        || normalizedQuestion.includes(normalizedText)
+        || normalizedText.includes(normalizedQuestion);
+    });
+    if (question) {
+      usedIds.add(question.id);
+      matched.push(question);
+    }
+  });
+  return matched;
+}
+
 /** الأسئلة التي ظهرت للطالب فعلاً (وليس بنك الأسئلة كاملاً) */
 function getPresentedQuestionsForResult(res, exam) {
   if (Array.isArray(res?.presentedQuestions) && res.presentedQuestions.length > 0) {
@@ -659,12 +716,53 @@ function getPresentedQuestionsForResult(res, exam) {
       }));
   }
 
+  if (exam && res?.details) {
+    const fromDetails = matchPresentedQuestionsFromDetails(res, exam);
+    if (fromDetails.length > 0) {
+      return fromDetails;
+    }
+  }
+
+  const configuredCount = getConfiguredQuestionCount(exam);
   if (exam && Array.isArray(exam.questions)) {
+    if (configuredCount && configuredCount < exam.questions.length) {
+      return [];
+    }
     return exam.questions;
   }
 
   return [];
 }
+
+
+function hydratePresentedQuestionsForResults() {
+  if (!Array.isArray(systemState.results) || !systemState.results.length) return false;
+  let changed = false;
+  systemState.results.forEach(res => {
+    if (Array.isArray(res.presentedQuestions) && res.presentedQuestions.length > 0) return;
+    const exam = systemState.exams.find(item => item.id === res.examId);
+    const resolved = getPresentedQuestionsForResult(res, exam);
+    const bankSize = Array.isArray(exam?.questions) ? exam.questions.length : 0;
+    const configuredCount = getConfiguredQuestionCount(exam);
+    const shouldPersist = resolved.length > 0 && (
+      (configuredCount && resolved.length <= configuredCount)
+      || (bankSize && resolved.length < bankSize)
+    );
+    if (shouldPersist) {
+      res.presentedQuestions = JSON.parse(JSON.stringify(resolved));
+      changed = true;
+    }
+  });
+  if (changed) {
+    try {
+      localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+    } catch (e) {
+      console.error("hydratePresentedQuestionsForResults:", e);
+    }
+  }
+  return changed;
+}
+
 
 function calculateRuntimeExamMeta(questions) {
   const questionList = Array.isArray(questions) ? questions : [];
@@ -915,6 +1013,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
   }
   hydrateStudentsFromResults(systemState.results);
   ensureResultRecordIds();
+  hydratePresentedQuestionsForResults();
   ensureStudentsDataShape();
   ensureExamsDataShape();
   return true;
@@ -4083,7 +4182,13 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   if (!container) return;
   container.innerHTML = "";
 
-  (examForDisplay.questions || []).forEach((q, index) => {
+  const questionsToRender = examForDisplay.questions || [];
+  if (!questionsToRender.length) {
+    container.innerHTML = `<div style="padding:1rem; color:var(--warning); border:1px solid var(--warning); border-radius:8px;">تعذّر تحديد الأسئلة التي ظهرت لهذا الطالب من البيانات المحفوظة. إذا كانت النتيجة قديماً، جرّب مزامنة سحابية أو افتح النتيجة من نفس الجهاز الذي أُجري عليه الامتحان.</div>`;
+    return;
+  }
+
+  questionsToRender.forEach((q, index) => {
     const studentAns = res.studentAnswers[q.id];
     
     // تهيئة الدرجة إذا كانت فارغة للموضوعي
