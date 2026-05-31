@@ -873,6 +873,15 @@
                   <option value="month">آخر 30 يوماً</option>
                 </select>
               </div>
+              <div class="form-group" style="margin:0; min-width:165px;">
+                <label class="form-label" for="teacher-results-sort-order" style="font-size:0.8rem;">طريقة العرض</label>
+                <select id="teacher-results-sort-order" class="form-control" style="padding:0.45rem 0.75rem;" aria-label="طريقة عرض الجدول">
+                  <option value="newest">الأحدث أولاً</option>
+                  <option value="oldest">الأقدم أولاً</option>
+                  <option value="name_asc">الاسم (أ → ي)</option>
+                  <option value="name_desc">الاسم (ي → أ)</option>
+                </select>
+              </div>
               <button type="button" id="teacher-results-clear-filters" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح الفلاتر</button>
             </div>
 <div class="table-container">
@@ -1320,6 +1329,15 @@ function jsonArabya_(obj) {
                   <button type="button" class="btn btn-outline btn-sm" data-students-quick-filter="canceled">امتحان ملغى</button>
                 </div>
               </div>
+              <div class="form-group" style="margin:0; min-width:165px;">
+                <label class="form-label" for="teacher-students-sort-order" style="font-size:0.8rem;">طريقة العرض</label>
+                <select id="teacher-students-sort-order" class="form-control" style="padding:0.45rem 0.75rem;" aria-label="طريقة عرض الجدول">
+                  <option value="newest">الأحدث أولاً</option>
+                  <option value="oldest">الأقدم أولاً</option>
+                  <option value="name_asc">الاسم (أ → ي)</option>
+                  <option value="name_desc">الاسم (ي → أ)</option>
+                </select>
+              </div>
               <button type="button" id="teacher-students-clear-filters" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح الفلاتر</button>
             </div>
 <!-- فورم إضافة طالب مخفي كـ inline card -->
@@ -1477,7 +1495,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.6"></script>
-  <script src="app.js?v=2026.05.31.6"></script>
+  <script src="questions.js?v=2026.05.31.7"></script>
+  <script src="app.js?v=2026.05.31.7"></script>
 </body>
 </html>

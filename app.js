@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.6";
+const ARABYA_APP_VERSION = "2026.05.31.7";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -525,6 +525,10 @@ function ensureStudentsDataShape() {
       timestamp: student.timestamp || new Date().toLocaleDateString("ar-EG")
     };
     normalizedStudent.studentKey = normalizedStudent.studentKey || getStudentLookupKey(normalizedStudent) || createRecordId("student");
+    if (!Number.isFinite(normalizedStudent.savedAt)) {
+      const match = String(normalizedStudent.studentKey || "").match(/(?:student|record)_(\d{10,})_/i);
+      if (match) normalizedStudent.savedAt = parseInt(match[1], 10);
+    }
     return normalizedStudent;
   });
 }
@@ -961,11 +965,74 @@ function buildResultIndexMap(sourceList) {
   return indexMap;
 }
 
-function sortResultsByRecency(results, sourceList) {
+
+const TABLE_SORT_OPTIONS = [
+  { value: "newest", label: "الأحدث أولاً" },
+  { value: "oldest", label: "الأقدم أولاً" },
+  { value: "name_asc", label: "الاسم (أ → ي)" },
+  { value: "name_desc", label: "الاسم (ي → أ)" }
+];
+
+function normalizeTableSortOrder(value, fallback = "newest") {
+  const allowed = TABLE_SORT_OPTIONS.map(option => option.value);
+  return allowed.includes(value) ? value : fallback;
+}
+
+function getStudentSortTime(student, fallbackIndex = 0) {
+  const parsed = parseResultTimestamp(student?.timestamp);
+  if (parsed) return parsed.getTime();
+  const studentKey = String(student?.studentKey || "");
+  const match = studentKey.match(/(?:student|record)_(\d{10,})_/i);
+  if (match) return parseInt(match[1], 10);
+  if (Number.isFinite(student?.savedAt)) return student.savedAt;
+  return fallbackIndex;
+}
+
+function compareStudentsByRecency(a, b, indexMap) {
+  const ta = getStudentSortTime(a, indexMap.get(a) ?? 0);
+  const tb = getStudentSortTime(b, indexMap.get(b) ?? 0);
+  if (tb !== ta) return tb - ta;
+  return (indexMap.get(b) ?? 0) - (indexMap.get(a) ?? 0);
+}
+
+function sortStudentsForDisplay(students, sortOrder, sourceList) {
+  const list = Array.isArray(students) ? [...students] : [];
+  const order = normalizeTableSortOrder(sortOrder);
+  const base = Array.isArray(sourceList) ? sourceList : (systemState.students || []);
+  const indexMap = buildResultIndexMap(base);
+
+  if (order === "name_asc") {
+    return list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ar"));
+  }
+  if (order === "name_desc") {
+    return list.sort((a, b) => String(b.name || "").localeCompare(String(a.name || ""), "ar"));
+  }
+  if (order === "oldest") {
+    return list.sort((a, b) => compareStudentsByRecency(a, b, indexMap) * -1);
+  }
+  return list.sort((a, b) => compareStudentsByRecency(a, b, indexMap));
+}
+
+function sortResultsForDisplay(results, sortOrder, sourceList) {
   const list = Array.isArray(results) ? [...results] : [];
+  const order = normalizeTableSortOrder(sortOrder);
   const base = Array.isArray(sourceList) ? sourceList : (systemState.results || []);
   const indexMap = buildResultIndexMap(base);
+
+  if (order === "name_asc") {
+    return list.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "ar"));
+  }
+  if (order === "name_desc") {
+    return list.sort((a, b) => String(b.name || "").localeCompare(String(a.name || ""), "ar"));
+  }
+  if (order === "oldest") {
+    return list.sort((a, b) => compareResultsByRecency(a, b, indexMap) * -1);
+  }
   return list.sort((a, b) => compareResultsByRecency(a, b, indexMap));
+}
+
+function sortResultsByRecency(results, sourceList) {
+  return sortResultsForDisplay(results, "newest", sourceList);
 }
 
 function refreshTeacherDashboardViews(options = {}) {
@@ -3781,12 +3848,14 @@ function getExportDateStamp() {
 
 function getResultsForExport() {
   if (!Array.isArray(systemState.results) || !systemState.results.length) return [];
-  return filterResultsForTeacherTable(sortResultsByRecency(systemState.results));
+  const sortOrder = getResultsTableViewSettings().sortOrder || "newest";
+  return filterResultsForTeacherTable(sortResultsForDisplay(systemState.results, sortOrder));
 }
 
 function getStudentsForExport() {
   if (!Array.isArray(systemState.students) || !systemState.students.length) return [];
-  return filterStudentsForTeacherTable([...systemState.students].reverse());
+  const sortOrder = getStudentsTableViewSettings().sortOrder || "newest";
+  return filterStudentsForTeacherTable(sortStudentsForDisplay(systemState.students, sortOrder));
 }
 
 function resultExistsInDatabase(res) {
@@ -4763,6 +4832,28 @@ function syncResultsFilterControlsUI() {
   if (dateSelect) dateSelect.value = view.dateFilter || "all";
 }
 
+
+function syncResultsSortControlUI() {
+  const select = document.getElementById("teacher-results-sort-order");
+  if (!select) return;
+  select.value = normalizeTableSortOrder(getResultsTableViewSettings().sortOrder || "newest");
+}
+
+function setupResultsTableSortControl() {
+  const select = document.getElementById("teacher-results-sort-order");
+  if (!select) return;
+  syncResultsSortControlUI();
+  if (select.dataset.bound) return;
+  select.dataset.bound = "1";
+  select.addEventListener("change", () => {
+    const view = getResultsTableViewSettings();
+    view.sortOrder = normalizeTableSortOrder(select.value);
+    view.page = 1;
+    try { localStorage.setItem("arabya_results_sort", view.sortOrder); } catch (e) {}
+    renderStudentResultsTable();
+  });
+}
+
 function resetResultsTableFilters() {
   const view = getResultsTableViewSettings();
   view.statusFilter = "all";
@@ -4781,6 +4872,7 @@ function setupResultsTableFilterControls() {
   if (!container) return;
   populateResultsExamFilterSelect();
   syncResultsFilterControlsUI();
+  setupResultsTableSortControl();
   if (container.dataset.bound) return;
   container.dataset.bound = "1";
 
@@ -4899,6 +4991,28 @@ function syncStudentsFilterControlsUI() {
   });
 }
 
+
+function syncStudentsSortControlUI() {
+  const select = document.getElementById("teacher-students-sort-order");
+  if (!select) return;
+  select.value = normalizeTableSortOrder(getStudentsTableViewSettings().sortOrder || "newest");
+}
+
+function setupStudentsTableSortControl() {
+  const select = document.getElementById("teacher-students-sort-order");
+  if (!select) return;
+  syncStudentsSortControlUI();
+  if (select.dataset.bound) return;
+  select.dataset.bound = "1";
+  select.addEventListener("change", () => {
+    const view = getStudentsTableViewSettings();
+    view.sortOrder = normalizeTableSortOrder(select.value);
+    view.page = 1;
+    try { localStorage.setItem("arabya_students_sort", view.sortOrder); } catch (e) {}
+    renderTeacherStudentsTable();
+  });
+}
+
 function resetStudentsTableFilters() {
   const view = getStudentsTableViewSettings();
   view.quickFilter = "all";
@@ -4914,6 +5028,7 @@ function setupStudentsTableFilterControls() {
   const container = document.getElementById("teacher-students-quick-filters");
   if (!container) return;
   syncStudentsFilterControlsUI();
+  setupStudentsTableSortControl();
   if (container.dataset.bound) return;
   container.dataset.bound = "1";
 
@@ -5006,13 +5121,17 @@ function getResultsTableViewSettings() {
       const saved = parseInt(localStorage.getItem("arabya_results_page_size") || "50", 10);
       if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
     } catch (e) {}
+    let sortOrder = "newest";
     try {
       const savedFilters = JSON.parse(localStorage.getItem("arabya_results_filters") || "{}");
       if (savedFilters.statusFilter) statusFilter = savedFilters.statusFilter;
       if (savedFilters.examFilter) examFilter = savedFilters.examFilter;
       if (savedFilters.dateFilter) dateFilter = savedFilters.dateFilter;
     } catch (e) {}
-    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter };
+    try {
+      sortOrder = normalizeTableSortOrder(localStorage.getItem("arabya_results_sort") || "newest");
+    } catch (e) {}
+    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter, sortOrder };
   }
   return systemState.resultsTableView;
 }
@@ -5117,6 +5236,7 @@ function renderStudentResultsTable() {
   setupResultsTablePaginationControls();
   setupResultsTableSearchControl();
   setupResultsTableFilterControls();
+  setupResultsTableSortControl();
 
   const filters = getResultsTableFilters();
   const filtersActive = isResultsTableFiltersActive(filters);
@@ -5129,9 +5249,9 @@ function renderStudentResultsTable() {
     return;
   }
 
-  const sorted = sortResultsByRecency(systemState.results);
-  const filtered = filterResultsForTeacherTable(sorted);
   const view = getResultsTableViewSettings();
+  const sorted = sortResultsForDisplay(systemState.results, view.sortOrder);
+  const filtered = filterResultsForTeacherTable(sorted);
   const totalItems = filtered.length;
   view.page = clampResultsTablePage(totalItems, view.pageSize, view.page);
 
@@ -5922,11 +6042,15 @@ function getStudentsTableViewSettings() {
       const saved = parseInt(localStorage.getItem("arabya_students_page_size") || "50", 10);
       if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
     } catch (e) {}
+    let sortOrder = "newest";
     try {
       const savedFilters = JSON.parse(localStorage.getItem("arabya_students_filters") || "{}");
       if (savedFilters.quickFilter) quickFilter = savedFilters.quickFilter;
     } catch (e) {}
-    systemState.studentsTableView = { page: 1, pageSize, quickFilter };
+    try {
+      sortOrder = normalizeTableSortOrder(localStorage.getItem("arabya_students_sort") || "newest");
+    } catch (e) {}
+    systemState.studentsTableView = { page: 1, pageSize, quickFilter, sortOrder };
   }
   return systemState.studentsTableView;
 }
@@ -6050,6 +6174,7 @@ function renderTeacherStudentsTable() {
   setupStudentsTablePaginationControls();
   setupStudentsTableSearchControl();
   setupStudentsTableFilterControls();
+  setupStudentsTableSortControl();
 
   const filters = getStudentsTableFilters();
   const filtersActive = isStudentsTableFiltersActive(filters);
@@ -6062,9 +6187,9 @@ function renderTeacherStudentsTable() {
     return;
   }
 
-  const reversed = [...systemState.students].reverse();
-  const filtered = filterStudentsForTeacherTable(reversed);
   const view = getStudentsTableViewSettings();
+  const sorted = sortStudentsForDisplay(systemState.students, view.sortOrder);
+  const filtered = filterStudentsForTeacherTable(sorted);
   const totalItems = filtered.length;
   view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
 
