@@ -627,6 +627,45 @@ function buildRuntimeQuestionsForExam(exam) {
   return runtime;
 }
 
+
+/** الأسئلة التي ظهرت للطالب فعلاً (وليس بنك الأسئلة كاملاً) */
+function getPresentedQuestionsForResult(res, exam) {
+  if (Array.isArray(res?.presentedQuestions) && res.presentedQuestions.length > 0) {
+    return res.presentedQuestions;
+  }
+
+  const answerKeys = new Set([
+    ...Object.keys(res?.studentAnswers || {}),
+    ...Object.keys(res?.questionScores || {})
+  ].filter(key => key !== "undefined" && key !== "null"));
+
+  if (exam && Array.isArray(exam.questions) && answerKeys.size > 0) {
+    const filtered = exam.questions.filter(q => answerKeys.has(String(q.id)));
+    if (filtered.length > 0) {
+      return filtered;
+    }
+  }
+
+  if (answerKeys.size > 0) {
+    return [...answerKeys]
+      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+      .map((qId, idx) => ({
+        id: parseInt(qId, 10),
+        type: "multiple",
+        question: `سؤال ${idx + 1}`,
+        options: ["لا يوجد"],
+        correctAnswer: 0,
+        points: (res.questionScores || {})[qId] ?? 10
+      }));
+  }
+
+  if (exam && Array.isArray(exam.questions)) {
+    return exam.questions;
+  }
+
+  return [];
+}
+
 function calculateRuntimeExamMeta(questions) {
   const questionList = Array.isArray(questions) ? questions : [];
   const maxScore = questionList.reduce((sum, question) => {
@@ -4009,22 +4048,19 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   }
 
   const exam = systemState.exams.find(e => e.id === (res.examId || examId));
-  // إذا حُذف الامتحان، نبني بيانات سؤال وهمية من التفاصيل المحفوظة
-  const examForDisplay = exam || {
-    title: res.examTitle || "امتحان محذوف",
-    totalScore: 100,
-    questions: Object.keys(res.questionScores || {}).map((qId, idx) => ({
-      id: parseInt(qId),
-      type: "multiple",
-      question: `سؤال ${idx + 1}`,
-      options: ["لا يوجد"],
-      correctAnswer: 0,
-      points: res.questionScores[qId] || 10
-    }))
+  const presentedQuestions = getPresentedQuestionsForResult(res, exam);
+  const presentedMeta = calculateRuntimeExamMeta(presentedQuestions);
+  const examForDisplay = {
+    ...(exam || {
+      title: res.examTitle || "امتحان محذوف",
+      totalScore: res.maxScore || 100
+    }),
+    questions: presentedQuestions,
+    totalScore: presentedMeta.maxScore || res.maxScore || exam?.totalScore || 100
   };
 
   systemState.currentGradingResult = res;
-  systemState.currentGradingExam = examForDisplay; // نستخدم examForDisplay دائماً
+  systemState.currentGradingExam = examForDisplay
 
   const panel = document.getElementById("teacher-result-detail-panel");
   if (panel) {
@@ -4228,6 +4264,11 @@ window.saveResultDetailsManual = function() {
 
   res.studentAnswers = newAnswers;
   res.questionScores = newScores;
+
+  if (!Array.isArray(res.presentedQuestions) || !res.presentedQuestions.length) {
+    res.presentedQuestions = JSON.parse(JSON.stringify(exam.questions));
+  }
+  res.maxScore = calculateRuntimeExamMeta(exam.questions).maxScore;
 
   exam.questions.forEach(q => {
     const ans = newAnswers[q.id];
