@@ -257,7 +257,9 @@ function arabyaGetExams() {
 }
 
 function normalizeArabyaStudentCode(code) {
-  return String(code || "").trim().toLowerCase();
+  var digits = String(code || "").replace(/\D/g, "").slice(0, 5);
+  if (digits && /^0+$/.test(digits)) return "00000";
+  return digits;
 }
 
 function arabyaFindStudentsByCode(code) {
@@ -268,28 +270,52 @@ function arabyaFindStudentsByCode(code) {
   });
 }
 
+function normalizeArabyaStudentCode(code) {
+  var digits = String(code || "").replace(/\D/g, "").slice(0, 5);
+  if (digits && /^0+$/.test(digits)) return "00000";
+  return digits;
+}
+
 function validateArabyaStudentIdentity(id, code, currentId) {
-  var cleanCode = String(code || "").trim();
+  if (typeof window.arabyaValidateStudentIdentity === "function") {
+    return window.arabyaValidateStudentIdentity(id, code, {
+      editingStudentKey: currentId || (window.systemState && window.systemState.editingStudentKey) || ""
+    });
+  }
+
+  var cleanCode = normalizeArabyaStudentCode(code);
   if (!cleanCode) return { ok: true };
+
+  var normalizedId = typeof window.normalizeStudentId === "function"
+    ? window.normalizeStudentId(id)
+    : String(id || "").trim().toUpperCase();
 
   var codeOwners = arabyaFindStudentsByCode(cleanCode);
   if (codeOwners.length > 1) {
     return { ok: false, message: "هذا الكود مكرر داخل قاعدة الطلاب، ولا يمكن استخدامه حتى يقوم المعلم بتخصيص كود مختلف لكل طالب." };
   }
 
-  var effectiveId = String(currentId || id || "");
-  var otherOwner = codeOwners.find(function(student) {
-    return String(student.id || "") !== effectiveId;
-  });
-  if (otherOwner) {
-    return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك وحدك أو تواصل مع المعلم." };
+  if (codeOwners.length === 1) {
+    var owner = codeOwners[0];
+    var ownerId = typeof window.normalizeStudentId === "function"
+      ? window.normalizeStudentId(owner.id)
+      : String(owner.id || "").trim().toUpperCase();
+    if (normalizedId && ownerId && ownerId !== normalizedId) {
+      return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً." };
+    }
+    return { ok: true };
   }
 
-  var sameIdStudent = arabyaGetStudents().find(function(student) {
-    return String(student.id || "") === String(id || "");
-  });
-  if (sameIdStudent && normalizeArabyaStudentCode(sameIdStudent.code) && normalizeArabyaStudentCode(sameIdStudent.code) !== normalizeArabyaStudentCode(cleanCode)) {
-    return { ok: false, message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. لا يمكن الدخول إلا بالكود الأصلي الخاص بهذا الطالب." };
+  if (normalizedId) {
+    var sameIdStudent = arabyaGetStudents().find(function(student) {
+      var studentId = typeof window.normalizeStudentId === "function"
+        ? window.normalizeStudentId(student.id)
+        : String(student.id || "").trim().toUpperCase();
+      return studentId && studentId === normalizedId;
+    });
+    if (sameIdStudent && normalizeArabyaStudentCode(sameIdStudent.code) && normalizeArabyaStudentCode(sameIdStudent.code) !== cleanCode) {
+      return { ok: false, message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. استخدم الكود الأصلي لهذا ID أو اترك ID فارغاً واكتب كودك فقط." };
+    }
   }
 
   return { ok: true };
@@ -331,7 +357,7 @@ function enforceArabyaUniqueStudentCodes() {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("new-student-id") || {}).value,
         (document.getElementById("new-student-code") || {}).value,
-        window.systemState ? window.systemState.editingStudentId : ""
+        window.systemState ? (window.systemState.editingStudentKey || window.systemState.editingStudentId || "") : ""
       );
     }
 

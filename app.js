@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.10";
+const ARABYA_APP_VERSION = "2026.05.31.11";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -818,11 +818,15 @@ window.revokeStudentExamRetake = function(recordId) {
   alert("تم إلغاء السماح بإعادة التقديم.");
 };
 
-function findBlockingExamResult(studentLookupKey, examId) {
-  if (!studentLookupKey || !examId) return null;
-  if (findActiveRetakeGrant(studentLookupKey, examId)) return null;
+function findBlockingExamResult(studentLookupKey, examId, studentContext) {
+  if (!examId) return null;
+  const keys = studentContext
+    ? getStudentLookupKeysForMatch(studentContext)
+    : (studentLookupKey ? [studentLookupKey] : []);
+  if (!keys.length) return null;
+  if (keys.some(key => findActiveRetakeGrant(key, examId))) return null;
   return systemState.results.find(r =>
-    r.studentLookupKey === studentLookupKey &&
+    keys.includes(r.studentLookupKey) &&
     r.examId === examId &&
     !isSupersededResult(r) &&
     r.status !== "incomplete" &&
@@ -1141,6 +1145,91 @@ function upsertStudentRecord(source, fallbackKey = "") {
   systemState.students.push(newStudent);
   return newStudent;
 }
+
+
+function getStudentLookupKeysForMatch(student) {
+  const keys = new Set();
+  if (!student) return [];
+  const primary = student.studentKey || getStudentLookupKey(student);
+  if (primary) keys.add(primary);
+  const code = sanitizeStudentCodeInput(student.code || student.accessCode || "");
+  if (isPrivateStudentCode(code)) keys.add(`code:${code}`);
+  const id = normalizeStudentId(student.id || "");
+  if (id) keys.add(`id:${id}`);
+  return [...keys];
+}
+
+function validateStudentIdentityInput(id, code, options = {}) {
+  const normalizedId = normalizeStudentId(id);
+  const inputCode = sanitizeStudentCodeInput(code);
+  const editingStudentKey = options.editingStudentKey || "";
+
+  if (!inputCode) return { ok: true };
+
+  if (!isFiveDigitStudentCode(inputCode)) {
+    return { ok: false, message: "كود الاشتراك يجب أن يكون مكوّناً من 5 أرقام." };
+  }
+
+  if (isPrivateStudentCode(inputCode)) {
+    const owners = systemState.students.filter(student => sanitizeStudentCodeInput(student.code) === inputCode);
+    if (owners.length > 1) {
+      return {
+        ok: false,
+        message: "هذا الكود مكرر داخل قاعدة الطلاب، ولا يمكن استخدامه حتى يقوم المعلم بتخصيص كود مختلف لكل طالب."
+      };
+    }
+    if (owners.length === 1) {
+      const owner = owners[0];
+      if (editingStudentKey && owner.studentKey === editingStudentKey) {
+        return { ok: true };
+      }
+      const ownerId = normalizeStudentId(owner.id);
+      if (normalizedId && ownerId && ownerId !== normalizedId) {
+        return {
+          ok: false,
+          message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً."
+        };
+      }
+      return { ok: true };
+    }
+    if (normalizedId) {
+      const idOwner = findStudentById(normalizedId);
+      if (idOwner && sanitizeStudentCodeInput(idOwner.code) && sanitizeStudentCodeInput(idOwner.code) !== inputCode) {
+        return {
+          ok: false,
+          message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. استخدم الكود الأصلي لهذا ID أو اترك ID فارغاً واكتب كودك فقط."
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  if (isSharedStudentCode(inputCode)) {
+    if (!normalizedId) {
+      return {
+        ok: false,
+        message: "مع كود 00000 المشترك يجب إدخال رقم ID المطابق لسجلك في النظام."
+      };
+    }
+    const idOwner = findStudentById(normalizedId);
+    if (idOwner && sanitizeStudentCodeInput(idOwner.code) && sanitizeStudentCodeInput(idOwner.code) !== inputCode) {
+      return {
+        ok: false,
+        message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. استخدم الكود الأصلي الخاص بهذا الطالب."
+      };
+    }
+    return { ok: true };
+  }
+
+  return { ok: true };
+}
+
+window.arabyaValidateStudentIdentity = validateStudentIdentityInput;
+window.normalizeStudentId = normalizeStudentId;
+window.sanitizeStudentCodeInput = sanitizeStudentCodeInput;
+window.isPrivateStudentCode = isPrivateStudentCode;
+window.isSharedStudentCode = isSharedStudentCode;
+window.isFiveDigitStudentCode = isFiveDigitStudentCode;
 
 // ===== أداة التشخيص السريع - اكتب arabya_diagnose() في الكونسول =====
 window.arabya_diagnose = function() {
@@ -4335,24 +4424,10 @@ function validateStudentAndStart() {
     matchedStudent = findStudentByName(name);
   }
 
-  if (isPrivateStudentCode(inputCode)) {
-    const duplicateCode = systemState.students.find(student => sanitizeStudentCodeInput(student.code) === inputCode && student !== matchedStudent);
-    if (duplicateCode) {
-      alert("كود الاشتراك الخاص مستخدم بالفعل لطالب آخر. اختر كوداً مختلفاً.");
-      return;
-    }
-  }
-
-  if (normalizedId) {
-    const duplicateId = systemState.students.find(student => normalizeStudentId(student.id) === normalizedId && student !== matchedStudent);
-    if (duplicateId) {
-      if (isPrivateStudentCode(inputCode) && sanitizeStudentCodeInput(duplicateId.code) === inputCode) {
-        matchedStudent = duplicateId;
-      } else {
-        alert("رقم ID مسجل بالفعل لطالب آخر. استخدم رقم معرف مختلف أو سجل بالكود الصحيح.");
-        return;
-      }
-    }
+  const identityCheck = validateStudentIdentityInput(id, rawCode);
+  if (!identityCheck.ok) {
+    alert(identityCheck.message);
+    return;
   }
 
   const studentRecord = upsertStudentRecord({
@@ -4373,7 +4448,7 @@ function validateStudentAndStart() {
   };
 
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
-  const blockingResult = findBlockingExamResult(studentLookupKey, examId);
+  const blockingResult = findBlockingExamResult(studentLookupKey, examId, systemState.currentStudent);
   if (blockingResult) {
     if (blockingResult.status === "canceled") {
       alert("تم إلغاء امتحانك سابقاً بسبب تجاوز محاولات الغش المسموحة. تواصل مع المعلم لإعادة السماح بالتقديم.");
