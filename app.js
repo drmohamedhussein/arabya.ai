@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.5";
+const ARABYA_APP_VERSION = "2026.05.31.6";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -1872,10 +1872,15 @@ window.restoreDatabaseFromCloud = async function() {
   const btnRestore = document.getElementById("btn-cloud-restore");
   const originalText = btnRestore ? btnRestore.innerHTML : "";
   if (btnRestore) { btnRestore.disabled = true; btnRestore.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري جلب البيانات...`; }
-  const ok = await syncDatabaseFromCloud({ silent: false });
+  const syncResult = await syncDatabaseFromCloud({ silent: false });
   if (btnRestore) { btnRestore.disabled = false; btnRestore.innerHTML = originalText; }
-  if (ok) { alert("تم استعادة قاعدة البيانات بنجاح من جوجل شيت! سيتم إعادة تحميل الصفحة."); location.reload(); }
-  else alert("فشل استعادة قاعدة البيانات. تأكد من رفع نسخة احتياطية أولاً ونشر Apps Script للجميع (Anyone).");
+  if (syncResult && syncResult.ok) {
+    finalizeDatabaseImportMessage();
+    alert(`تم استعادة قاعدة البيانات: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان. سيتم إعادة تحميل الصفحة.`);
+    location.reload();
+  } else {
+    alert("فشل استعادة قاعدة البيانات. تأكد من رفع نسخة احتياطية أولاً ونشر Apps Script للجميع (Anyone).");
+  }
 };
 // نسخ كود الربط السحابي (Apps Script)
 window.copyGoogleSheetsSyncScript = function() {
@@ -3750,6 +3755,72 @@ function parseGoogleFormHTML(html) {
 }
 
 // ==========================================
+
+function escapeCsvField(value) {
+  return String(value == null ? "" : value).replace(/"/g, '""');
+}
+
+function buildCsvLine(fields) {
+  return fields.map(field => `"${escapeCsvField(field)}"`).join(",") + "\n";
+}
+
+function downloadBlobFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function getExportDateStamp() {
+  return new Date().toLocaleDateString("ar-EG").replace(/\//g, "-");
+}
+
+function getResultsForExport() {
+  if (!Array.isArray(systemState.results) || !systemState.results.length) return [];
+  return filterResultsForTeacherTable(sortResultsByRecency(systemState.results));
+}
+
+function getStudentsForExport() {
+  if (!Array.isArray(systemState.students) || !systemState.students.length) return [];
+  return filterStudentsForTeacherTable([...systemState.students].reverse());
+}
+
+function resultExistsInDatabase(res) {
+  if (!res) return true;
+  if (res.recordId) {
+    return systemState.results.some(r => r.recordId === res.recordId);
+  }
+  return systemState.results.some(r =>
+    r.id === res.id &&
+    r.examId === res.examId &&
+    String(r.timestamp || "") === String(res.timestamp || "")
+  );
+}
+
+function normalizeImportedResult(res) {
+  if (!res || typeof res !== "object") return null;
+  if (!res.id && !res.name) return null;
+  const normalized = { ...res };
+  if (!normalized.recordId) normalized.recordId = createRecordId("result");
+  if (!Number.isFinite(normalized.savedAt)) {
+    const match = String(normalized.recordId).match(/(?:result|incomplete|record)_(\d{10,})_/i);
+    if (match) normalized.savedAt = parseInt(match[1], 10);
+  }
+  return normalized;
+}
+
+function finalizeDatabaseImportMessage(counts) {
+  ensureResultRecordIds();
+  ensureStudentsDataShape();
+  ensureExamsDataShape();
+  hydratePresentedQuestionsForResults();
+  saveSystemState(false);
+}
+
 // 6. استيراد وتصدير نتائج الطلاب (JSON/CSV)
 // ==========================================
 
@@ -3758,14 +3829,22 @@ function exportResultsToJSON() {
     alert("لا توجد نتائج لتصديرها!");
     return;
   }
-  const blob = new Blob([JSON.stringify(systemState.results, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `نتائج_الطلاب_arabya_${new Date().toLocaleDateString()}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const exportRows = getResultsForExport();
+  if (!exportRows.length) {
+    alert("لا توجد نتائج مطابقة للفلاتر الحالية للتصدير!");
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    appVersion: ARABYA_APP_VERSION,
+    filtered: isResultsTableFiltersActive(),
+    count: exportRows.length,
+    results: exportRows
+  };
+  downloadBlobFile(
+    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    `نتائج_الطلاب_arabya_${getExportDateStamp()}.json`
+  );
 }
 
 function importResultsFromJSON(event) {
@@ -3776,23 +3855,22 @@ function importResultsFromJSON(event) {
   reader.onload = function(e) {
     try {
       const parsed = JSON.parse(e.target.result);
-      if (Array.isArray(parsed)) {
-        let addedCount = 0;
-        parsed.forEach(res => {
-          const isDuplicate = systemState.results.some(r => r.id === res.id && r.examId === res.examId && r.timestamp === res.timestamp);
-          if (!isDuplicate) {
-            systemState.results.push(res);
-            addedCount++;
-          }
-        });
-
-        saveSystemState(true);
-        renderStudentResultsTable();
-        alert(`تم استيراد عدد ${addedCount} سجلات نتائج جديدة بنجاح!`);
-      } else {
-        alert("تنسيق الملف غير صحيح!");
+      const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.results) ? parsed.results : null);
+      if (!rows) {
+        alert("تنسيق الملف غير صحيح! يجب أن يكون مصفوفة نتائج أو كائن يحتوي results.");
+        return;
       }
-    } catch(err) {
+      let addedCount = 0;
+      rows.forEach(raw => {
+        const res = normalizeImportedResult(raw);
+        if (!res || resultExistsInDatabase(res)) return;
+        systemState.results.push(res);
+        addedCount++;
+      });
+      finalizeDatabaseImportMessage();
+      refreshTeacherDashboardViews({ all: true });
+      alert(`تم استيراد ${addedCount} سجل نتائج جديد من ${rows.length} صف في الملف.`);
+    } catch (err) {
       alert("خطأ في قراءة ملف النتائج!");
     }
   };
@@ -5398,27 +5476,35 @@ function exportTeacherResultsToCSV() {
     return;
   }
 
-  const exportRows = filterResultsForTeacherTable(sortResultsByRecency(systemState.results));
+  const exportRows = getResultsForExport();
   if (!exportRows.length) {
     alert("لا توجد نتائج مطابقة للفلاتر الحالية للتصدير!");
     return;
   }
 
   let csvContent = "\ufeffsep=,\n";
-  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,النتيجة,التاريخ والوقت\n";
+  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,النتيجة,التاريخ والوقت\n";
 
   exportRows.forEach(res => {
-    csvContent += `"${res.name}","${res.id}","${res.accessCode || 'لا يوجد'}","${res.university || 'عام'}","${res.faculty || 'عام'}","${res.level || 'عام'}","${res.examTitle}","${res.examType || 'أعمال سنة'}","${res.score}","${res.timestamp}"\n`;
+    csvContent += buildCsvLine([
+      res.name || "",
+      res.id || "",
+      res.accessCode || "لا يوجد",
+      res.university || "عام",
+      res.faculty || "عام",
+      res.level || "عام",
+      res.examTitle || "",
+      res.examType || "أعمال سنة",
+      getResultDisplayStatus(res),
+      res.score || "",
+      res.timestamp || ""
+    ]);
   });
 
-  const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `نتائج_arabya_الأكاديمية_${new Date().toLocaleDateString()}.csv`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  downloadBlobFile(
+    new Blob([csvContent], { type: "text/csv;charset=utf-8;" }),
+    `نتائج_arabya_${getExportDateStamp()}.csv`
+  );
 }
 
 async function clearTeacherResults() {
@@ -6181,20 +6267,60 @@ window.deleteStudentByTeacher = async function(studentKey) {
   alert(synced ? `تم حذف الطالب "${student.name}" ومزامنة التغيير مع Google Sheets.` : `تم حذف الطالب "${student.name}" محلياً.`);
 };
 
-// تصدير الطلاب كملف JSON
+// تصدير الطلاب كملف JSON (الصفوف المفلترة)
 window.exportStudentsToJSON = function() {
   if (systemState.students.length === 0) {
     alert("لا يوجد طلاب لتصديرهم!");
     return;
   }
-  const blob = new Blob([JSON.stringify(systemState.students, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `طلاب_منصة_arabya_${new Date().toLocaleDateString()}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  const exportRows = getStudentsForExport();
+  if (!exportRows.length) {
+    alert("لا يوجد طلاب يطابقون الفلاتر الحالية للتصدير!");
+    return;
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    appVersion: ARABYA_APP_VERSION,
+    filtered: isStudentsTableFiltersActive(),
+    count: exportRows.length,
+    students: exportRows
+  };
+  downloadBlobFile(
+    new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }),
+    `طلاب_arabya_${getExportDateStamp()}.json`
+  );
+};
+
+window.exportStudentsToCSV = function() {
+  if (systemState.students.length === 0) {
+    alert("لا يوجد طلاب لتصديرهم!");
+    return;
+  }
+  const exportRows = getStudentsForExport();
+  if (!exportRows.length) {
+    alert("لا يوجد طلاب يطابقون الفلاتر الحالية للتصدير!");
+    return;
+  }
+
+  let csvContent = "\ufeffsep=,\n";
+  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,البريد,الموبايل,تاريخ التسجيل,عدد النتائج\n";
+
+  exportRows.forEach(stu => {
+    csvContent += buildCsvLine([
+      stu.name || "",
+      stu.id || "",
+      stu.code || "",
+      stu.email || "",
+      stu.mobile || "",
+      stu.timestamp || "",
+      countStudentResults(stu)
+    ]);
+  });
+
+  downloadBlobFile(
+    new Blob([csvContent], { type: "text/csv;charset=utf-8;" }),
+    `طلاب_arabya_${getExportDateStamp()}.csv`
+  );
 };
 
 // استيراد الطلاب من ملف JSON
@@ -6206,30 +6332,30 @@ window.importStudentsFromJSON = function(event) {
   reader.onload = function(e) {
     try {
       const parsed = JSON.parse(e.target.result);
-      if (Array.isArray(parsed)) {
-        let addedCount = 0;
-        parsed.forEach(stu => {
-          if (stu.id && stu.name && stu.code) {
-            const isDuplicate = systemState.students.some(s => s.id === stu.id);
-            if (!isDuplicate) {
-              systemState.students.push({
-                name: stu.name,
-                id: stu.id,
-                code: stu.code,
-                timestamp: stu.timestamp || new Date().toLocaleDateString("ar-EG")
-              });
-              addedCount++;
-            }
-          }
-        });
-
-        saveStudentsToLocalStorage();
-        renderTeacherStudentsTable();
-        alert(`تم استيراد عدد ${addedCount} حسابات طلاب بنجاح!`);
-      } else {
-        alert("تنسيق ملف الطلاب غير صحيح!");
+      const rows = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.students) ? parsed.students : null);
+      if (!rows) {
+        alert("تنسيق ملف الطلاب غير صحيح! يجب أن يكون مصفوفة طلاب أو كائن يحتوي students.");
+        return;
       }
-    } catch(err) {
+      let addedCount = 0;
+      let updatedCount = 0;
+      rows.forEach(stu => {
+        if (!stu || !stu.id || !stu.name) return;
+        const existing = findStudentById(stu.id) || (stu.studentKey ? findStudentByKey(stu.studentKey) : null);
+        upsertStudentRecord({
+          name: stu.name,
+          id: stu.id,
+          code: stu.code || stu.accessCode || "",
+          email: stu.email || "",
+          mobile: stu.mobile || ""
+        }, stu.studentKey || "");
+        if (existing) updatedCount++;
+        else addedCount++;
+      });
+      finalizeDatabaseImportMessage();
+      refreshTeacherDashboardViews({ all: true });
+      alert(`تم استيراد ${addedCount} طالب جديد وتحديث ${updatedCount} سجل من ${rows.length} صف.`);
+    } catch (err) {
       alert("خطأ في قراءة ملف الطلاب المرفوع!");
     }
   };
@@ -6344,22 +6470,23 @@ function fallbackCopyTextToClipboard(text) {
 
 // تصدير قاعدة البيانات كاملة كملف JSON
 window.exportCompleteDatabase = function() {
+  ensureResultRecordIds();
+  ensureStudentsDataShape();
+  ensureExamsDataShape();
   const dbBackup = {
+    exportedAt: new Date().toISOString(),
+    appVersion: ARABYA_APP_VERSION,
     teachers: systemState.teachers,
     students: systemState.students,
     exams: systemState.exams,
     results: systemState.results
   };
 
-  const blob = new Blob([JSON.stringify(dbBackup, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  link.setAttribute("download", `نسخة_احتياطية_كاملة_arabya_${new Date().toLocaleDateString("ar-EG")}.json`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  alert("تم تصدير نسخة احتياطية كاملة من قاعدة البيانات بنجاح!");
+  downloadBlobFile(
+    new Blob([JSON.stringify(dbBackup, null, 2)], { type: "application/json" }),
+    `نسخة_احتياطية_كاملة_arabya_${getExportDateStamp()}.json`
+  );
+  alert(`تم تصدير نسخة احتياطية كاملة: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان.`);
 };
 
 // استعادة قاعدة البيانات بالكامل من ملف JSON
@@ -6389,8 +6516,9 @@ window.importCompleteDatabase = function(event) {
             systemState.results = data.results;
             localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
           }
-          
-          alert("تم استعادة قاعدة البيانات بنجاح! سيتم إعادة تحميل الصفحة لتطبيق التغييرات.");
+
+          finalizeDatabaseImportMessage();
+          alert(`تم استعادة قاعدة البيانات: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان. سيتم إعادة تحميل الصفحة.`);
           location.reload();
         }
       } else {

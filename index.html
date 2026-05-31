@@ -1279,8 +1279,11 @@ function jsonArabya_(obj) {
                 <button id="teacher-add-student-btn" class="btn btn-primary btn-sm" onclick="showAddStudentModal()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">person_add</span> إضافة طالب جديد
                 </button>
+                <button id="teacher-export-students-csv-btn" class="btn btn-outline btn-sm" onclick="exportStudentsToCSV()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download</span> تصدير Excel (CSV)
+                </button>
                 <button id="teacher-export-students-btn" class="btn btn-outline btn-sm" onclick="exportStudentsToJSON()">
-                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download</span> تصدير الطلاب (JSON)
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download_for_offline</span> تصدير الطلاب (JSON)
                 </button>
                 <button id="teacher-import-students-btn" class="btn btn-outline btn-sm" style="border-color: var(--secondary); color:var(--secondary);" onclick="document.getElementById('teacher-students-file-input').click()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">upload_file</span> استيراد طلاب (JSON)
@@ -1474,7 +1477,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.5"></script>
-  <script src="app.js?v=2026.05.31.5"></script>
+  <script src="questions.js?v=2026.05.31.6"></script>
+  <script src="app.js?v=2026.05.31.6"></script>
 </body>
 </html>
