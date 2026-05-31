@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.4";
+const ARABYA_APP_VERSION = "2026.05.31.5";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -952,6 +952,20 @@ function compareResultsByRecency(a, b, indexMap) {
   const tb = getResultSortTime(b, indexMap.get(b) ?? 0);
   if (tb !== ta) return tb - ta;
   return (indexMap.get(b) ?? 0) - (indexMap.get(a) ?? 0);
+}
+
+
+function buildResultIndexMap(sourceList) {
+  const indexMap = new Map();
+  (sourceList || []).forEach((res, index) => indexMap.set(res, index));
+  return indexMap;
+}
+
+function sortResultsByRecency(results, sourceList) {
+  const list = Array.isArray(results) ? [...results] : [];
+  const base = Array.isArray(sourceList) ? sourceList : (systemState.results || []);
+  const indexMap = buildResultIndexMap(base);
+  return list.sort((a, b) => compareResultsByRecency(a, b, indexMap));
 }
 
 function refreshTeacherDashboardViews(options = {}) {
@@ -2463,11 +2477,7 @@ function computeTeacherStatsSnapshot() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
-  const resultIndexMap = new Map();
-  results.forEach((res, index) => resultIndexMap.set(res, index));
-  const recentResults = [...results]
-    .sort((a, b) => compareResultsByRecency(a, b, resultIndexMap))
-    .slice(0, 8);
+  const recentResults = sortResultsByRecency(results, systemState.results).slice(0, 8);
 
   const urls = typeof getArabyaWebAppUrls === "function" ? getArabyaWebAppUrls() : [];
   return {
@@ -5041,7 +5051,7 @@ function renderStudentResultsTable() {
     return;
   }
 
-  const sorted = [...systemState.results].reverse();
+  const sorted = sortResultsByRecency(systemState.results);
   const filtered = filterResultsForTeacherTable(sorted);
   const view = getResultsTableViewSettings();
   const totalItems = filtered.length;
@@ -5388,7 +5398,7 @@ function exportTeacherResultsToCSV() {
     return;
   }
 
-  const exportRows = filterResultsForTeacherTable([...systemState.results].reverse());
+  const exportRows = filterResultsForTeacherTable(sortResultsByRecency(systemState.results));
   if (!exportRows.length) {
     alert("لا توجد نتائج مطابقة للفلاتر الحالية للتصدير!");
     return;
