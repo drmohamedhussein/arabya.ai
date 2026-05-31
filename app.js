@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.7";
+const ARABYA_APP_VERSION = "2026.05.30.8";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -4100,6 +4100,72 @@ window.viewResultDetailQuery = function(recordId, studentId, examId) {
 };
 
 
+
+function normalizeResultsSearchText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function getResultsSearchQuery() {
+  const input = document.getElementById("teacher-results-search-input");
+  return input ? input.value.trim() : "";
+}
+
+function resultMatchesSearchQuery(res, query) {
+  const normalizedQuery = normalizeResultsSearchText(query);
+  if (!normalizedQuery) return true;
+  const fields = [
+    res.name,
+    res.id,
+    res.accessCode,
+    res.examTitle,
+    res.score,
+    res.level,
+    res.examType,
+    res.status,
+    res.timestamp
+  ];
+  if (fields.some(field => normalizeResultsSearchText(field).includes(normalizedQuery))) {
+    return true;
+  }
+  const queryId = normalizeStudentId(query);
+  if (queryId && normalizeStudentId(res.id).includes(queryId)) return true;
+  const queryCode = sanitizeStudentCodeInput(query);
+  if (queryCode && sanitizeStudentCodeInput(res.accessCode || "") === queryCode) return true;
+  return false;
+}
+
+function filterResultsForSearch(results, query) {
+  const list = Array.isArray(results) ? results : [];
+  if (!getResultsSearchQuery() && !query) return list;
+  const activeQuery = query != null ? String(query).trim() : getResultsSearchQuery();
+  if (!activeQuery) return list;
+  return list.filter(res => resultMatchesSearchQuery(res, activeQuery));
+}
+
+function setupResultsTableSearchControl() {
+  const input = document.getElementById("teacher-results-search-input");
+  const clearBtn = document.getElementById("teacher-results-search-clear");
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = "1";
+  let timer = null;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      getResultsTableViewSettings().page = 1;
+      renderStudentResultsTable();
+    }, 180);
+  });
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      input.value = "";
+      getResultsTableViewSettings().page = 1;
+      renderStudentResultsTable();
+      input.focus();
+    });
+  }
+}
+
 function getResultsTableViewSettings() {
   if (!systemState.resultsTableView) {
     let pageSize = 50;
@@ -4125,27 +4191,38 @@ function clampResultsTablePage(totalItems, pageSize, page) {
   return Math.min(Math.max(1, page), totalPages);
 }
 
-function updateResultsPaginationUI(totalItems, page, pageSize) {
+function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, searchQuery = "") {
   const info = document.getElementById("teacher-results-page-info");
   const pageNum = document.getElementById("teacher-results-page-number");
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
   const sizeSelect = document.getElementById("teacher-results-page-size");
+  const isFiltered = !!searchQuery && totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
 
   if (totalItems === 0) {
-    if (info) info.textContent = "";
+    if (info) {
+      info.textContent = searchQuery
+        ? `وُجد 0 من ${totalAll} سجلاً`
+        : "";
+    }
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
     return;
   }
 
+  const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} سجل — ` : "";
+
   if (!pageSize || pageSize <= 0) {
-    if (info) info.textContent = `إجمالي ${totalItems} سجلاً — عرض الكل`;
+    if (info) {
+      info.textContent = isFiltered
+        ? `${countPrefix}عرض الكل`
+        : `إجمالي ${totalItems} سجلاً — عرض الكل`;
+    }
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
@@ -4155,7 +4232,7 @@ function updateResultsPaginationUI(totalItems, page, pageSize) {
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `عرض ${start}–${end} من ${totalItems} سجلاً`;
+  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} سجلاً`;
   if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
@@ -4199,23 +4276,34 @@ function renderStudentResultsTable() {
   if (!tbody) return;
   tbody.innerHTML = "";
   setupResultsTablePaginationControls();
+  setupResultsTableSearchControl();
 
-  if (systemState.results.length === 0) {
+  const searchQuery = getResultsSearchQuery();
+  const totalAll = systemState.results.length;
+
+  if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
-    updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize);
+    updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, searchQuery);
     return;
   }
 
   const sorted = [...systemState.results].reverse();
+  const filtered = filterResultsForSearch(sorted, searchQuery);
   const view = getResultsTableViewSettings();
-  const totalItems = sorted.length;
+  const totalItems = filtered.length;
   view.page = clampResultsTablePage(totalItems, view.pageSize, view.page);
 
-  let pageItems = sorted;
+  if (totalItems === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد نتائج تطابق «${escapeHtml(searchQuery)}» من ${totalAll} سجل.</td></tr>`;
+    updateResultsPaginationUI(0, 1, view.pageSize, totalAll, searchQuery);
+    return;
+  }
+
+  let pageItems = filtered;
   if (view.pageSize > 0) {
     const start = (view.page - 1) * view.pageSize;
-    pageItems = sorted.slice(start, start + view.pageSize);
+    pageItems = filtered.slice(start, start + view.pageSize);
   }
 
   pageItems.forEach(res => {
@@ -4252,7 +4340,7 @@ function renderStudentResultsTable() {
     tbody.appendChild(row);
   });
 
-  updateResultsPaginationUI(totalItems, view.page, view.pageSize);
+  updateResultsPaginationUI(totalItems, view.page, view.pageSize, totalAll, searchQuery);
 }
 
 window.viewTeacherResultDetail = function(recordId, studentId, examId) {

@@ -795,6 +795,18 @@
             </div>
             <div id="teacher-results-sync-status" style="margin:0.75rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;"></div>
 
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-label" for="teacher-results-search-input">بحث في النتائج</label>
+              <div style="display:flex; gap:0.5rem; align-items:stretch;">
+                <div class="input-wrapper" style="position:relative; flex:1;">
+                  <input type="search" id="teacher-results-search-input" class="form-control" placeholder="ابحث بالاسم، ID، كود الاشتراك، الامتحان، أو النتيجة..." autocomplete="off" aria-describedby="teacher-results-search-hint" style="padding-left:2.5rem;">
+                  <span class="material-icons input-icon" aria-hidden="true" style="pointer-events:none;">search</span>
+                </div>
+                <button type="button" id="teacher-results-search-clear" class="btn btn-outline btn-sm" aria-label="مسح البحث">مسح</button>
+              </div>
+              <small id="teacher-results-search-hint" style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">البحث فوري — يفلتر الجدول أثناء الكتابة</small>
+            </div>
+
             <div class="table-container">
               <table>
                 <thead>
