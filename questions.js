@@ -400,9 +400,11 @@ function repairArabyaTeacherPanelPlacementOnly() {
     if (panel && panel.parentElement !== host) host.appendChild(panel);
   });
 }
-window.repairArabyaTeacherPanelPlacementOnly = repairArabyaTeacherPanelPlacementOnly;
 
 function hydrateArabyaTeacherPanels() {
+  if (typeof window.renderTeacherStatsDashboard === "function") {
+    try { window.renderTeacherStatsDashboard(); } catch (e) {}
+  }
   if (typeof window.loadTeacherDashboardData === "function") {
     try { window.loadTeacherDashboardData(); } catch (e) {}
   }
