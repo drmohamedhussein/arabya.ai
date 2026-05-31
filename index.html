@@ -805,9 +805,37 @@
                 <button type="button" id="teacher-results-search-clear" class="btn btn-outline btn-sm" aria-label="مسح البحث">مسح</button>
               </div>
               <small id="teacher-results-search-hint" style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">البحث فوري — يفلتر الجدول أثناء الكتابة</small>
+            
             </div>
 
-            <div class="table-container">
+            <div id="teacher-results-quick-filters" style="display:flex; flex-wrap:wrap; gap:0.85rem; align-items:flex-end; margin-bottom:1rem; padding:0.9rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+              <div>
+                <span style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.4rem;">فلتر الحالة</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
+                  <button type="button" class="btn btn-primary btn-sm" data-results-status-filter="all">الكل</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="completed">مكتمل</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="incomplete">جاري</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="canceled">ملغى</button>
+                </div>
+              </div>
+              <div class="form-group" style="margin:0; min-width:190px; flex:1;">
+                <label class="form-label" for="teacher-results-exam-filter" style="font-size:0.8rem;">الامتحان</label>
+                <select id="teacher-results-exam-filter" class="form-control" style="padding:0.45rem 0.75rem;">
+                  <option value="">كل الامتحانات</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0; min-width:150px;">
+                <label class="form-label" for="teacher-results-date-filter" style="font-size:0.8rem;">التاريخ</label>
+                <select id="teacher-results-date-filter" class="form-control" style="padding:0.45rem 0.75rem;">
+                  <option value="all">كل الأوقات</option>
+                  <option value="today">اليوم</option>
+                  <option value="week">آخر 7 أيام</option>
+                  <option value="month">آخر 30 يوماً</option>
+                </select>
+              </div>
+              <button type="button" id="teacher-results-clear-filters" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح الفلاتر</button>
+            </div>
+<div class="table-container">
               <table>
                 <thead>
                   <tr>
@@ -1235,9 +1263,23 @@ function jsonArabya_(obj) {
                 <button type="button" id="teacher-students-search-clear" class="btn btn-outline btn-sm" aria-label="مسح البحث">مسح</button>
               </div>
               <small id="teacher-students-search-hint" style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">البحث فوري — يفلتر الجدول أثناء الكتابة</small>
+            
             </div>
 
-            <!-- فورم إضافة طالب مخفي كـ inline card -->
+            <div id="teacher-students-quick-filters" style="display:flex; flex-wrap:wrap; gap:0.85rem; align-items:flex-end; margin-bottom:1rem; padding:0.9rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+              <div>
+                <span style="font-size:0.8rem; color:var(--text-muted); display:block; margin-bottom:0.4rem;">فلتر سريع</span>
+                <div style="display:flex; flex-wrap:wrap; gap:0.35rem;">
+                  <button type="button" class="btn btn-primary btn-sm" data-students-quick-filter="all">الكل</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-students-quick-filter="has_results">لديهم نتائج</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-students-quick-filter="no_results">بدون نتائج</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-students-quick-filter="multi_exams">أكثر من امتحان</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-students-quick-filter="canceled">امتحان ملغى</button>
+                </div>
+              </div>
+              <button type="button" id="teacher-students-clear-filters" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح الفلاتر</button>
+            </div>
+<!-- فورم إضافة طالب مخفي كـ inline card -->
             <div id="add-student-form-card" class="exam-builder-card hidden" style="margin-bottom: 1.5rem;">
               <h4 style="color:var(--secondary); margin-bottom: 1rem; font-weight:700;">تسجيل حساب طالب جديد في النظام</h4>
               <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:1rem; flex-wrap:wrap;">

@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.9";
+const ARABYA_APP_VERSION = "2026.05.31.1";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -2565,6 +2565,7 @@ function renderExamsList() {
         <div class="exam-actions-row">
           <button class="btn btn-primary btn-sm" onclick="editExamQuestions('${exam.id}')">تعديل الامتحان والأسئلة</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="testExamSync('${exam.id}')">اختبار المزامنة</button>
+          <button class="btn btn-outline btn-sm" style="border-color:var(--accent); color:var(--accent);" onclick="setTeacherResultsExamFilter('${exam.id}')">عرض النتائج</button>
           <button class="btn btn-outline btn-sm" onclick="copyExamLink('${examUrl}')">نسخ الرابط</button>
           <button class="btn btn-outline btn-sm" onclick="generateGoogleFormScript('${exam.id}')">تصدير لجوجل فورم</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteExam('${exam.id}')">حذف</button>
@@ -4101,6 +4102,308 @@ window.viewResultDetailQuery = function(recordId, studentId, examId) {
 
 
 
+
+function getResultsTableFilters() {
+  const view = getResultsTableViewSettings();
+  return {
+    searchQuery: getResultsSearchQuery(),
+    statusFilter: view.statusFilter || "all",
+    examFilter: view.examFilter || "",
+    dateFilter: view.dateFilter || "all"
+  };
+}
+
+function getResultDisplayStatus(res) {
+  if (res?.status === "canceled") return "canceled";
+  if (res?.status === "incomplete") return "incomplete";
+  const scoreText = String(res?.score || "");
+  if (/جاري|غير مكتمل|incomplete/i.test(scoreText)) return "incomplete";
+  return "completed";
+}
+
+function parseResultTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return null;
+}
+
+function resultMatchesStatusFilter(res, statusFilter) {
+  if (!statusFilter || statusFilter === "all") return true;
+  return getResultDisplayStatus(res) === statusFilter;
+}
+
+function resultMatchesExamFilter(res, examFilter) {
+  if (!examFilter) return true;
+  return String(res.examId || "") === examFilter || String(res.examTitle || "") === examFilter;
+}
+
+function resultMatchesDateFilter(res, dateFilter) {
+  if (!dateFilter || dateFilter === "all") return true;
+  const dt = parseResultTimestamp(res.timestamp);
+  if (!dt) return true;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (dateFilter === "today") return dt >= startOfToday;
+  if (dateFilter === "week") {
+    const weekAgo = new Date(startOfToday);
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    return dt >= weekAgo;
+  }
+  if (dateFilter === "month") {
+    const monthAgo = new Date(startOfToday);
+    monthAgo.setDate(monthAgo.getDate() - 30);
+    return dt >= monthAgo;
+  }
+  return true;
+}
+
+function getResultsExamFilterOptions() {
+  const map = new Map();
+  (systemState.results || []).forEach(res => {
+    const key = res.examId || res.examTitle;
+    if (!key) return;
+    map.set(String(key), res.examTitle || res.examId || String(key));
+  });
+  const activeUsername = systemState.activeTeacher ? systemState.activeTeacher.username : "";
+  (systemState.exams || []).forEach(exam => {
+    if (activeUsername && exam.teacher && exam.teacher !== activeUsername) return;
+    if (exam.id) map.set(String(exam.id), exam.title || exam.id);
+  });
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ar"));
+}
+
+function filterResultsForTeacherTable(results) {
+  const filters = getResultsTableFilters();
+  let list = Array.isArray(results) ? [...results] : [];
+  list = filterResultsForSearch(list, filters.searchQuery);
+  if (filters.statusFilter !== "all") {
+    list = list.filter(res => resultMatchesStatusFilter(res, filters.statusFilter));
+  }
+  if (filters.examFilter) {
+    list = list.filter(res => resultMatchesExamFilter(res, filters.examFilter));
+  }
+  if (filters.dateFilter !== "all") {
+    list = list.filter(res => resultMatchesDateFilter(res, filters.dateFilter));
+  }
+  return list;
+}
+
+function isResultsTableFiltersActive(filters) {
+  const active = filters || getResultsTableFilters();
+  return !!(
+    active.searchQuery ||
+    (active.statusFilter && active.statusFilter !== "all") ||
+    active.examFilter ||
+    (active.dateFilter && active.dateFilter !== "all")
+  );
+}
+
+function persistResultsTableFilters() {
+  const view = getResultsTableViewSettings();
+  try {
+    localStorage.setItem("arabya_results_filters", JSON.stringify({
+      statusFilter: view.statusFilter || "all",
+      examFilter: view.examFilter || "",
+      dateFilter: view.dateFilter || "all"
+    }));
+  } catch (e) {}
+}
+
+function populateResultsExamFilterSelect() {
+  const select = document.getElementById("teacher-results-exam-filter");
+  if (!select) return;
+  const current = getResultsTableViewSettings().examFilter || "";
+  const options = getResultsExamFilterOptions();
+  select.innerHTML = '<option value="">كل الامتحانات</option>' +
+    options.map(opt => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`).join("");
+  if ([...select.options].some(opt => opt.value === current)) {
+    select.value = current;
+  }
+}
+
+function syncResultsFilterControlsUI() {
+  const view = getResultsTableViewSettings();
+  document.querySelectorAll("[data-results-status-filter]").forEach(btn => {
+    const isActive = (btn.dataset.resultsStatusFilter || "all") === (view.statusFilter || "all");
+    btn.className = isActive ? "btn btn-primary btn-sm" : "btn btn-outline btn-sm";
+  });
+  const examSelect = document.getElementById("teacher-results-exam-filter");
+  if (examSelect) examSelect.value = view.examFilter || "";
+  const dateSelect = document.getElementById("teacher-results-date-filter");
+  if (dateSelect) dateSelect.value = view.dateFilter || "all";
+}
+
+function resetResultsTableFilters() {
+  const view = getResultsTableViewSettings();
+  view.statusFilter = "all";
+  view.examFilter = "";
+  view.dateFilter = "all";
+  view.page = 1;
+  const searchInput = document.getElementById("teacher-results-search-input");
+  if (searchInput) searchInput.value = "";
+  persistResultsTableFilters();
+  syncResultsFilterControlsUI();
+  renderStudentResultsTable();
+}
+
+function setupResultsTableFilterControls() {
+  const container = document.getElementById("teacher-results-quick-filters");
+  if (!container) return;
+  populateResultsExamFilterSelect();
+  syncResultsFilterControlsUI();
+  if (container.dataset.bound) return;
+  container.dataset.bound = "1";
+
+  container.querySelectorAll("[data-results-status-filter]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      getResultsTableViewSettings().statusFilter = btn.dataset.resultsStatusFilter || "all";
+      getResultsTableViewSettings().page = 1;
+      persistResultsTableFilters();
+      syncResultsFilterControlsUI();
+      renderStudentResultsTable();
+    });
+  });
+
+  const examSelect = document.getElementById("teacher-results-exam-filter");
+  if (examSelect) {
+    examSelect.addEventListener("change", () => {
+      getResultsTableViewSettings().examFilter = examSelect.value;
+      getResultsTableViewSettings().page = 1;
+      persistResultsTableFilters();
+      renderStudentResultsTable();
+    });
+  }
+
+  const dateSelect = document.getElementById("teacher-results-date-filter");
+  if (dateSelect) {
+    dateSelect.addEventListener("change", () => {
+      getResultsTableViewSettings().dateFilter = dateSelect.value || "all";
+      getResultsTableViewSettings().page = 1;
+      persistResultsTableFilters();
+      renderStudentResultsTable();
+    });
+  }
+
+  const clearBtn = document.getElementById("teacher-results-clear-filters");
+  if (clearBtn) {
+    clearBtn.addEventListener("click", resetResultsTableFilters);
+  }
+}
+
+window.setTeacherResultsExamFilter = function(examIdOrTitle) {
+  if (!examIdOrTitle) return;
+  getResultsTableViewSettings().examFilter = String(examIdOrTitle);
+  getResultsTableViewSettings().page = 1;
+  persistResultsTableFilters();
+  const resultsTabBtn = document.querySelector('[data-teacher-tab="teacher-tab-results"]');
+  if (resultsTabBtn) resultsTabBtn.click();
+  else navigateToView("teacher-dashboard-view");
+  setTimeout(() => {
+    syncResultsFilterControlsUI();
+    renderStudentResultsTable();
+  }, 50);
+};
+
+function countStudentResults(student) {
+  const studentKey = student.studentKey || getStudentLookupKey(student);
+  return (systemState.results || []).filter(res => {
+    const resultKey = res.studentLookupKey || getStudentLookupKey({
+      id: res.id,
+      code: res.accessCode,
+      name: res.name
+    });
+    if (studentKey && resultKey && studentKey === resultKey) return true;
+    return normalizeStudentId(student.id) && normalizeStudentId(res.id) === normalizeStudentId(student.id);
+  }).length;
+}
+
+function studentMatchesQuickFilter(student, quickFilter) {
+  if (!quickFilter || quickFilter === "all") return true;
+  const studentKey = student.studentKey || getStudentLookupKey(student);
+  const resultCount = countStudentResults(student);
+  const canceled = getStudentCanceledExamIds(studentKey).length > 0;
+  if (quickFilter === "has_results") return resultCount > 0;
+  if (quickFilter === "no_results") return resultCount === 0;
+  if (quickFilter === "multi_exams") return resultCount > 1;
+  if (quickFilter === "canceled") return canceled;
+  return true;
+}
+
+function getStudentsTableFilters() {
+  const view = getStudentsTableViewSettings();
+  return {
+    searchQuery: getStudentsSearchQuery(),
+    quickFilter: view.quickFilter || "all"
+  };
+}
+
+function filterStudentsForTeacherTable(students) {
+  const filters = getStudentsTableFilters();
+  let list = Array.isArray(students) ? [...students] : [];
+  list = filterStudentsForSearch(list, filters.searchQuery);
+  if (filters.quickFilter !== "all") {
+    list = list.filter(student => studentMatchesQuickFilter(student, filters.quickFilter));
+  }
+  return list;
+}
+
+function isStudentsTableFiltersActive(filters) {
+  const active = filters || getStudentsTableFilters();
+  return !!(active.searchQuery || (active.quickFilter && active.quickFilter !== "all"));
+}
+
+function persistStudentsTableFilters() {
+  const view = getStudentsTableViewSettings();
+  try {
+    localStorage.setItem("arabya_students_filters", JSON.stringify({
+      quickFilter: view.quickFilter || "all"
+    }));
+  } catch (e) {}
+}
+
+function syncStudentsFilterControlsUI() {
+  const view = getStudentsTableViewSettings();
+  document.querySelectorAll("[data-students-quick-filter]").forEach(btn => {
+    const isActive = (btn.dataset.studentsQuickFilter || "all") === (view.quickFilter || "all");
+    btn.className = isActive ? "btn btn-primary btn-sm" : "btn btn-outline btn-sm";
+  });
+}
+
+function resetStudentsTableFilters() {
+  const view = getStudentsTableViewSettings();
+  view.quickFilter = "all";
+  view.page = 1;
+  const searchInput = document.getElementById("teacher-students-search-input");
+  if (searchInput) searchInput.value = "";
+  persistStudentsTableFilters();
+  syncStudentsFilterControlsUI();
+  renderTeacherStudentsTable();
+}
+
+function setupStudentsTableFilterControls() {
+  const container = document.getElementById("teacher-students-quick-filters");
+  if (!container) return;
+  syncStudentsFilterControlsUI();
+  if (container.dataset.bound) return;
+  container.dataset.bound = "1";
+
+  container.querySelectorAll("[data-students-quick-filter]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      getStudentsTableViewSettings().quickFilter = btn.dataset.studentsQuickFilter || "all";
+      getStudentsTableViewSettings().page = 1;
+      persistStudentsTableFilters();
+      syncStudentsFilterControlsUI();
+      renderTeacherStudentsTable();
+    });
+  });
+
+  const clearBtn = document.getElementById("teacher-students-clear-filters");
+  if (clearBtn) clearBtn.addEventListener("click", resetStudentsTableFilters);
+}
+
 function normalizeResultsSearchText(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -4169,11 +4472,20 @@ function setupResultsTableSearchControl() {
 function getResultsTableViewSettings() {
   if (!systemState.resultsTableView) {
     let pageSize = 50;
+    let statusFilter = "all";
+    let examFilter = "";
+    let dateFilter = "all";
     try {
       const saved = parseInt(localStorage.getItem("arabya_results_page_size") || "50", 10);
       if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
     } catch (e) {}
-    systemState.resultsTableView = { page: 1, pageSize };
+    try {
+      const savedFilters = JSON.parse(localStorage.getItem("arabya_results_filters") || "{}");
+      if (savedFilters.statusFilter) statusFilter = savedFilters.statusFilter;
+      if (savedFilters.examFilter) examFilter = savedFilters.examFilter;
+      if (savedFilters.dateFilter) dateFilter = savedFilters.dateFilter;
+    } catch (e) {}
+    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter };
   }
   return systemState.resultsTableView;
 }
@@ -4191,13 +4503,13 @@ function clampResultsTablePage(totalItems, pageSize, page) {
   return Math.min(Math.max(1, page), totalPages);
 }
 
-function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, searchQuery = "") {
+function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, filtersActive = false) {
   const info = document.getElementById("teacher-results-page-info");
   const pageNum = document.getElementById("teacher-results-page-number");
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
   const sizeSelect = document.getElementById("teacher-results-page-size");
-  const isFiltered = !!searchQuery && totalAll !== totalItems;
+  const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
@@ -4205,7 +4517,7 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
 
   if (totalItems === 0) {
     if (info) {
-      info.textContent = searchQuery
+      info.textContent = isFiltered
         ? `وُجد 0 من ${totalAll} سجلاً`
         : "";
     }
@@ -4277,26 +4589,31 @@ function renderStudentResultsTable() {
   tbody.innerHTML = "";
   setupResultsTablePaginationControls();
   setupResultsTableSearchControl();
+  setupResultsTableFilterControls();
 
-  const searchQuery = getResultsSearchQuery();
+  const filters = getResultsTableFilters();
+  const filtersActive = isResultsTableFiltersActive(filters);
   const totalAll = systemState.results.length;
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
-    updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, searchQuery);
+    updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, filtersActive);
     return;
   }
 
   const sorted = [...systemState.results].reverse();
-  const filtered = filterResultsForSearch(sorted, searchQuery);
+  const filtered = filterResultsForTeacherTable(sorted);
   const view = getResultsTableViewSettings();
   const totalItems = filtered.length;
   view.page = clampResultsTablePage(totalItems, view.pageSize, view.page);
 
   if (totalItems === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد نتائج تطابق «${escapeHtml(searchQuery)}» من ${totalAll} سجل.</td></tr>`;
-    updateResultsPaginationUI(0, 1, view.pageSize, totalAll, searchQuery);
+    const emptyMsg = filters.searchQuery
+      ? `لا توجد نتائج تطابق «${escapeHtml(filters.searchQuery)}»`
+      : "لا توجد نتائج تطابق الفلاتر المحددة";
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} سجل.</td></tr>`;
+    updateResultsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
 
@@ -4308,6 +4625,9 @@ function renderStudentResultsTable() {
 
   pageItems.forEach(res => {
     const row = document.createElement("tr");
+    const displayStatus = getResultDisplayStatus(res);
+    if (displayStatus === "canceled") row.style.borderRight = "3px solid var(--error)";
+    else if (displayStatus === "incomplete") row.style.borderRight = "3px solid var(--warning)";
     const statusBadge = formatResultStatusBadge(res);
     row.innerHTML = `
       <td>${statusBadge}${escapeHtml(res.name || "")}</td>
@@ -4340,7 +4660,7 @@ function renderStudentResultsTable() {
     tbody.appendChild(row);
   });
 
-  updateResultsPaginationUI(totalItems, view.page, view.pageSize, totalAll, searchQuery);
+  updateResultsPaginationUI(totalItems, view.page, view.pageSize, totalAll, filtersActive);
 }
 
 window.viewTeacherResultDetail = function(recordId, studentId, examId) {
@@ -4629,10 +4949,16 @@ function exportTeacherResultsToCSV() {
     return;
   }
 
+  const exportRows = filterResultsForTeacherTable([...systemState.results].reverse());
+  if (!exportRows.length) {
+    alert("لا توجد نتائج مطابقة للفلاتر الحالية للتصدير!");
+    return;
+  }
+
   let csvContent = "\ufeffsep=,\n";
   csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,النتيجة,التاريخ والوقت\n";
 
-  systemState.results.forEach(res => {
+  exportRows.forEach(res => {
     csvContent += `"${res.name}","${res.id}","${res.accessCode || 'لا يوجد'}","${res.university || 'عام'}","${res.faculty || 'عام'}","${res.level || 'عام'}","${res.examTitle}","${res.examType || 'أعمال سنة'}","${res.score}","${res.timestamp}"\n`;
   });
 
@@ -5055,11 +5381,16 @@ function setupStudentsTableSearchControl() {
 function getStudentsTableViewSettings() {
   if (!systemState.studentsTableView) {
     let pageSize = 50;
+    let quickFilter = "all";
     try {
       const saved = parseInt(localStorage.getItem("arabya_students_page_size") || "50", 10);
       if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
     } catch (e) {}
-    systemState.studentsTableView = { page: 1, pageSize };
+    try {
+      const savedFilters = JSON.parse(localStorage.getItem("arabya_students_filters") || "{}");
+      if (savedFilters.quickFilter) quickFilter = savedFilters.quickFilter;
+    } catch (e) {}
+    systemState.studentsTableView = { page: 1, pageSize, quickFilter };
   }
   return systemState.studentsTableView;
 }
@@ -5077,13 +5408,13 @@ function clampStudentsTablePage(totalItems, pageSize, page) {
   return Math.min(Math.max(1, page), totalPages);
 }
 
-function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, searchQuery = "") {
+function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, filtersActive = false) {
   const info = document.getElementById("teacher-students-page-info");
   const pageNum = document.getElementById("teacher-students-page-number");
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
   const sizeSelect = document.getElementById("teacher-students-page-size");
-  const isFiltered = !!searchQuery && totalAll !== totalItems;
+  const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
@@ -5091,7 +5422,7 @@ function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = total
 
   if (totalItems === 0) {
     if (info) {
-      info.textContent = searchQuery
+      info.textContent = isFiltered
         ? `وُجد 0 من ${totalAll} طالب`
         : "";
     }
@@ -5182,26 +5513,31 @@ function renderTeacherStudentsTable() {
   tbody.innerHTML = "";
   setupStudentsTablePaginationControls();
   setupStudentsTableSearchControl();
+  setupStudentsTableFilterControls();
 
-  const searchQuery = getStudentsSearchQuery();
+  const filters = getStudentsTableFilters();
+  const filtersActive = isStudentsTableFiltersActive(filters);
   const totalAll = systemState.students.length;
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
-    updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, searchQuery);
+    updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, filtersActive);
     return;
   }
 
   const reversed = [...systemState.students].reverse();
-  const filtered = filterStudentsForSearch(reversed, searchQuery);
+  const filtered = filterStudentsForTeacherTable(reversed);
   const view = getStudentsTableViewSettings();
   const totalItems = filtered.length;
   view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
 
   if (totalItems === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب يطابقون «${escapeHtml(searchQuery)}» من ${totalAll} طالب.</td></tr>`;
-    updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, searchQuery);
+    const emptyMsg = filters.searchQuery
+      ? `لا يوجد طلاب يطابقون «${escapeHtml(filters.searchQuery)}»`
+      : "لا يوجد طلاب يطابقون الفلاتر المحددة";
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} طالب.</td></tr>`;
+    updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
 
@@ -5248,7 +5584,7 @@ function renderTeacherStudentsTable() {
     tbody.appendChild(row);
   });
 
-  updateStudentsPaginationUI(totalItems, view.page, view.pageSize, totalAll, searchQuery);
+  updateStudentsPaginationUI(totalItems, view.page, view.pageSize, totalAll, filtersActive);
 }
 
 // إظهار بطاقة إضافة طالب جديد
