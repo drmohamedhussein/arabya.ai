@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.3";
+const ARABYA_APP_VERSION = "2026.05.31.4";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -401,6 +401,13 @@ function ensureResultRecordIds() {
     if (!res.recordId) {
       res.recordId = createRecordId("result");
       changed = true;
+    }
+    if (!Number.isFinite(res.savedAt)) {
+      const match = String(res.recordId || "").match(/(?:result|incomplete|record)_(\d{10,})_/i);
+      if (match) {
+        res.savedAt = parseInt(match[1], 10);
+        changed = true;
+      }
     }
   });
   if (changed) {
@@ -920,6 +927,59 @@ window.arabya_diagnose = function() {
 };
 
 
+
+function normalizeTimestampText(value) {
+  const arabicIndic = "٠١٢٣٤٥٦٧٨٩";
+  const easternArabic = "۰۱۲۳۴۵۶۷۸۹";
+  return String(value || "")
+    .replace(/[٠-٩]/g, ch => String(arabicIndic.indexOf(ch)))
+    .replace(/[۰-۹]/g, ch => String(easternArabic.indexOf(ch)))
+    .trim();
+}
+
+function getResultSortTime(res, fallbackIndex = 0) {
+  const parsed = parseResultTimestamp(res?.timestamp);
+  if (parsed) return parsed.getTime();
+  const recordId = String(res?.recordId || "");
+  const match = recordId.match(/(?:result|incomplete|record)_(\d{10,})_/i);
+  if (match) return parseInt(match[1], 10);
+  if (Number.isFinite(res?.savedAt)) return res.savedAt;
+  return fallbackIndex;
+}
+
+function compareResultsByRecency(a, b, indexMap) {
+  const ta = getResultSortTime(a, indexMap.get(a) ?? 0);
+  const tb = getResultSortTime(b, indexMap.get(b) ?? 0);
+  if (tb !== ta) return tb - ta;
+  return (indexMap.get(b) ?? 0) - (indexMap.get(a) ?? 0);
+}
+
+function refreshTeacherDashboardViews(options = {}) {
+  const refreshAll = !!options.all;
+  if (typeof reloadSystemStateFromLocalStorage === "function") {
+    reloadSystemStateFromLocalStorage();
+  }
+  const statsTab = document.getElementById("teacher-tab-stats");
+  const resultsTab = document.getElementById("teacher-tab-results");
+  const studentsTab = document.getElementById("teacher-tab-students");
+  const examsTab = document.getElementById("teacher-tab-exams");
+
+  if (refreshAll || (statsTab && !statsTab.classList.contains("hidden"))) {
+    if (typeof renderTeacherStatsDashboard === "function") renderTeacherStatsDashboard();
+  }
+  if (refreshAll || (resultsTab && !resultsTab.classList.contains("hidden"))) {
+    if (typeof renderStudentResultsTable === "function") renderStudentResultsTable();
+  }
+  if (refreshAll || (studentsTab && !studentsTab.classList.contains("hidden"))) {
+    if (typeof renderTeacherStudentsTable === "function") renderTeacherStudentsTable();
+  }
+  if (refreshAll || (examsTab && !examsTab.classList.contains("hidden"))) {
+    if (typeof renderExamsList === "function") renderExamsList();
+  }
+}
+
+window.refreshTeacherDashboardViews = refreshTeacherDashboardViews;
+
 function reloadSystemStateFromLocalStorage() {
   try {
     const teachers = localStorage.getItem("arabya_teachers_db");
@@ -1314,11 +1374,7 @@ window.pullTeacherResultsFromCloud = async function() {
     getResultsTableViewSettings().page = 1;
     getStudentsTableViewSettings().page = 1;
   }
-  renderStudentResultsTable();
-  renderTeacherStudentsTable();
-  if (typeof renderTeacherStatsDashboard === "function") {
-    renderTeacherStatsDashboard();
-  }
+  refreshTeacherDashboardViews({ all: true });
   if (el) {
     if (syncResult.ok) {
       const sheetNote = formatSheetSyncNote(syncResult);
@@ -1345,9 +1401,7 @@ async function syncDatabaseFromCloud(options = {}) {
         mergeRemoteDatabaseIntoLocal(response.data);
         saveSystemState(false);
         if (!silent) {
-          renderStudentResultsTable();
-          renderTeacherStudentsTable();
-          renderExamsList();
+          refreshTeacherDashboardViews({ all: true });
         }
         return {
           ok: true,
@@ -1369,10 +1423,7 @@ function setupArabyaLiveDataRefresh() {
   const refreshTeacherViews = () => {
     if (systemState.activeView !== "teacher-dashboard-view") return;
     reloadSystemStateFromLocalStorage();
-    const resultsTab = document.getElementById("teacher-tab-results");
-    const studentsTab = document.getElementById("teacher-tab-students");
-    if (resultsTab && !resultsTab.classList.contains("hidden")) renderStudentResultsTable();
-    if (studentsTab && !studentsTab.classList.contains("hidden")) renderTeacherStudentsTable();
+    refreshTeacherDashboardViews();
   };
   window.addEventListener("storage", (e) => {
     if (e.key && e.key.startsWith("arabya_")) refreshTeacherViews();
@@ -2183,7 +2234,7 @@ function setupUIEventListeners() {
           syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
         }
       } else if (tabId === "students") {
-        syncDatabaseFromCloud({ silent: true }).finally(() => renderTeacherStudentsTable());
+        syncDatabaseFromCloud({ silent: true }).finally(() => refreshTeacherDashboardViews({ all: true }));
       } else if (tabId === "exams") {
         renderExamsList();
       } else if (tabId === "integration" || tabId === "profile") {
@@ -2412,13 +2463,10 @@ function computeTeacherStatsSnapshot() {
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
+  const resultIndexMap = new Map();
+  results.forEach((res, index) => resultIndexMap.set(res, index));
   const recentResults = [...results]
-    .sort((a, b) => {
-      const da = parseResultTimestamp(a.timestamp);
-      const db = parseResultTimestamp(b.timestamp);
-      if (da && db) return db - da;
-      return String(b.timestamp || "").localeCompare(String(a.timestamp || ""), "ar");
-    })
+    .sort((a, b) => compareResultsByRecency(a, b, resultIndexMap))
     .slice(0, 8);
 
   const urls = typeof getArabyaWebAppUrls === "function" ? getArabyaWebAppUrls() : [];
@@ -2537,7 +2585,7 @@ async function refreshTeacherStatsDashboard(options = {}) {
     if (typeof reloadSystemStateFromLocalStorage === "function") {
       reloadSystemStateFromLocalStorage();
     }
-    renderTeacherStatsDashboard();
+    refreshTeacherDashboardViews({ all: true });
     if (options.silent) return true;
     updateTeacherStatsSyncStatus(
       `<span class="material-icons" style="vertical-align:middle; color:var(--success);">check_circle</span> تم تحديث الإحصائيات من البيانات المحلية (${systemState.results.length} نتيجة · ${systemState.students.length} طالب)`,
@@ -2582,7 +2630,7 @@ async function syncTeacherStatsFromCloud() {
     if (typeof reloadSystemStateFromLocalStorage === "function") {
       reloadSystemStateFromLocalStorage();
     }
-    renderTeacherStatsDashboard();
+    refreshTeacherDashboardViews({ all: true });
     if (ok) {
       updateTeacherStatsSyncStatus(
         `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} نتيجة · ${systemState.students.length} طالب`,
@@ -2779,11 +2827,8 @@ function loadTeacherDashboardData() {
   renderTeacherStudentsTable();
 
   syncDatabaseFromCloud({ silent: true }).then(synced => {
-    if (synced) {
-      renderTeacherStatsDashboard();
-      renderStudentResultsTable();
-      renderTeacherStudentsTable();
-      renderExamsList();
+    if (synced && synced.ok) {
+      refreshTeacherDashboardViews({ all: true });
     }
   });
 }
@@ -4207,6 +4252,7 @@ function submitFinishedExam() {
   const detailsFormatted = detailsLog.join("\n");
   const resultObj = {
     recordId: createRecordId("result"),
+    savedAt: Date.now(),
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
     accessCode: systemState.currentStudent.accessCode || "",
@@ -4502,8 +4548,22 @@ function getResultDisplayStatus(res) {
 
 function parseResultTimestamp(value) {
   if (!value) return null;
-  const parsed = new Date(value);
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = normalizeTimestampText(raw);
+  let parsed = new Date(normalized);
   if (!Number.isNaN(parsed.getTime())) return parsed;
+  parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  const dateMatch = normalized.match(/(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (dateMatch) {
+    const day = parseInt(dateMatch[1], 10);
+    const month = parseInt(dateMatch[2], 10) - 1;
+    let year = parseInt(dateMatch[3], 10);
+    if (year < 100) year += 2000;
+    const dt = new Date(year, month, day);
+    if (!Number.isNaN(dt.getTime())) return dt;
+  }
   return null;
 }
 
@@ -5555,6 +5615,7 @@ function submitCheatedExam() {
 
   const resultObj = {
     recordId: createRecordId("result"),
+    savedAt: Date.now(),
     name: systemState.currentStudent.name,
     id: systemState.currentStudent.id,
     accessCode: systemState.currentStudent.accessCode || "",
@@ -5882,7 +5943,7 @@ window.pullTeacherStudentsFromCloud = async function() {
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> ${systemState.students.length} طالب`;
     }
   }
-  renderTeacherStudentsTable();
+  refreshTeacherDashboardViews({ all: true });
   return ok;
 };
 
@@ -6369,6 +6430,7 @@ function updateLiveIncompleteResult() {
   if (!res) {
     res = {
       recordId: createRecordId("incomplete"),
+      savedAt: Date.now(),
       name: systemState.currentStudent.name,
       id,
       accessCode: systemState.currentStudent.accessCode || "",
