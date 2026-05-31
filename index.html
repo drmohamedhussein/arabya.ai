@@ -856,7 +856,8 @@
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="completed">مكتمل</button>
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="incomplete">جاري</button>
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="canceled">ملغى</button>
-                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="retake_allowed">مسموح بإعادة التقديم</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="retake_allowed">مسموح بإعادة الامتحان</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="superseded">محاولات سابقة</button>
                 </div>
               </div>
               <div class="form-group" style="margin:0; min-width:190px; flex:1;">
@@ -951,9 +952,15 @@
                 <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:0.75rem;">
                   <div>
                     <div style="font-weight:700; color:var(--secondary); margin-bottom:0.35rem;">إدارة إعادة الامتحان</div>
-                    <div style="font-size:0.85rem; color:var(--text-muted);">اسمح للطالب بإعادة التقديم بعد الإكمال أو الإلغاء، أو ألغِ السماح في أي وقت.</div>
+                    <div style="font-size:0.85rem; color:var(--text-muted);">اسمح للطالب بمحاولة جديدة — المحاولة الأولى تبقى محفوظة ولا تُحذف.</div>
                   </div>
                 </div>
+                <div style="font-size:0.82rem; color:var(--text-muted); line-height:1.7; margin-bottom:0.85rem; padding:0.75rem; border-radius:8px; background:rgba(255,255,255,0.02); border:1px dashed rgba(255,255,255,0.08);">
+                  <strong style="color:var(--secondary);">الفرق بين الخيارات:</strong>
+                  <div style="margin-top:0.35rem;"><strong>السماح بإعادة الامتحان</strong> — يتيح للطالب محاولة جديدة. المحاولة الأولى <u>لا تُحذف</u>؛ تبقى في السجل وتُوسَم «محاولة سابقة» بعد إكمال المحاولة الجديدة فقط.</div>
+                  <div style="margin-top:0.35rem;"><strong>تعديل الدرجة/الإجابات بالأسفل</strong> — تصحيح أو إعادة تقييم <u>نفس المحاولة</u> دون امتحان جديد.</div>
+                </div>
+
                 <div id="detail-retake-status" style="margin-bottom:0.85rem;"></div>
                 <div id="detail-retake-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;"></div>
               </div>
@@ -1508,7 +1515,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.9"></script>
-  <script src="app.js?v=2026.05.31.9"></script>
+  <script src="questions.js?v=2026.05.31.10"></script>
+  <script src="app.js?v=2026.05.31.10"></script>
 </body>
 </html>

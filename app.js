@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.9";
+const ARABYA_APP_VERSION = "2026.05.31.10";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -590,6 +590,40 @@ function isSupersededResult(res) {
   return !!(res && res.superseded);
 }
 
+function getActiveResultsList(results) {
+  return (Array.isArray(results) ? results : []).filter(res => !isSupersededResult(res));
+}
+
+function getRetakeGrantButtonLabel(res) {
+  if (!res) return "السماح بإعادة الامتحان";
+  if (res.status === "canceled") return "السماح بإعادة الامتحان بعد الإلغاء";
+  return "السماح بإعادة الامتحان";
+}
+
+function getRetakeGrantConfirmMessage(res) {
+  const examTitle = res?.examTitle || "الامتحان";
+  if (res?.status === "canceled") {
+    return `هل تريد السماح للطالب "${res.name}" بإعادة أداء "${examTitle}" بعد الإلغاء؟\n\nلن تُحذف المحاولة الأولى — تبقى محفوظة في السجل حتى ينهي الطالب المحاولة الجديدة.`;
+  }
+  return `هل تريد السماح للطالب "${res.name}" بإعادة أداء "${examTitle}"؟\n\nلن تُحذف المحاولة الأولى (الدرجة: ${res.score || "—"}) — ستُؤرشف كـ «محاولة سابقة» فقط بعد إكمال الطالب للمحاولة الجديدة.`;
+}
+
+function getNextAttemptNumber(studentLookupKey, examId) {
+  if (!studentLookupKey || !examId) return 1;
+  const attempts = (systemState.results || []).filter(res =>
+    res.studentLookupKey === studentLookupKey && res.examId === examId
+  );
+  return attempts.length + 1;
+}
+
+function syncRetakeAffectedResultsToCloud(results, syncStatusEl) {
+  const rows = Array.isArray(results) ? results.filter(Boolean) : [];
+  if (!rows.length) return;
+  rows.forEach(res => sendUpdatedResultToCloud(res, syncStatusEl));
+  pushCloudBackupNow().catch(() => {});
+}
+
+
 function findActiveRetakeGrant(studentLookupKey, examId) {
   if (!studentLookupKey || !examId) return null;
   return systemState.results.find(r =>
@@ -612,16 +646,20 @@ function resultHasActiveRetakeGrant(res) {
 
 function getResultRetakeStatusText(res) {
   if (!res) return "—";
-  if (isSupersededResult(res)) return "محاولة سابقة (استُبدلت بمحاولة أحدث)";
-  if (resultHasActiveRetakeGrant(res)) return "مسموح بإعادة التقديم";
-  if (res.status === "canceled") return "ملغى — بانتظار قرار المعلم";
-  if (res.status === "completed") return "مكتمل — لا يُسمح بإعادة التقديم";
+  if (isSupersededResult(res)) {
+    const scoreHint = res.archivedScoreSnapshot || res.score || "—";
+    return `محاولة سابقة محفوظة (الدرجة: ${scoreHint})`;
+  }
+  if (resultHasActiveRetakeGrant(res)) return "مسموح بإعادة الامتحان — المحاولة الأولى محفوظة";
+  if (res.status === "canceled") return "ملغى — بانتظار السماح بإعادة الامتحان";
+  if (res.status === "completed") return "مكتمل — المحاولة محفوظة";
   return "—";
 }
 
 function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId) {
-  if (!studentLookupKey || !examId || !newRecordId) return;
+  if (!studentLookupKey || !examId || !newRecordId) return [];
   const now = new Date().toISOString();
+  const archived = [];
   systemState.results.forEach(res => {
     if (!res || res.recordId === newRecordId || isSupersededResult(res)) return;
     if (res.studentLookupKey !== studentLookupKey || res.examId !== examId) return;
@@ -630,7 +668,11 @@ function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId) {
     res.supersededAt = now;
     res.supersededByRecordId = newRecordId;
     res.allowRetake = false;
+    res.archivedScoreSnapshot = res.score || "";
+    res.archivedStatusSnapshot = res.status || "completed";
+    archived.push(res);
   });
+  return archived;
 }
 
 function appendResultRetakeActions(res, actionsCell) {
@@ -641,7 +683,8 @@ function appendResultRetakeActions(res, actionsCell) {
     allowBtn.type = "button";
     allowBtn.className = "btn btn-outline btn-sm";
     allowBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary);";
-    allowBtn.textContent = res.status === "canceled" ? "السماح بإعادة التقديم" : "إعادة الامتحان";
+    allowBtn.textContent = getRetakeGrantButtonLabel(res);
+    allowBtn.title = "المحاولة الأولى تبقى محفوظة — تُؤرشف فقط بعد إكمال محاولة جديدة";
     allowBtn.addEventListener("click", () => allowStudentExamRetake(res.recordId || ""));
     actionsCell.appendChild(allowBtn);
   }
@@ -686,7 +729,8 @@ function renderResultRetakeManagementPanel(res) {
     allowBtn.type = "button";
     allowBtn.className = "btn btn-outline btn-sm";
     allowBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary);";
-    allowBtn.textContent = res.status === "canceled" ? "السماح بإعادة التقديم" : "السماح بإعادة الامتحان";
+    allowBtn.textContent = getRetakeGrantButtonLabel(res);
+    allowBtn.title = "المحاولة الأولى تبقى محفوظة — تُؤرشف فقط بعد إكمال محاولة جديدة";
     allowBtn.addEventListener("click", () => allowStudentExamRetake(res.recordId || ""));
     actionsEl.appendChild(allowBtn);
   }
@@ -732,10 +776,7 @@ window.allowStudentExamRetake = function(recordId) {
     alert("لا يمكن منح إعادة التقديم لهذا السجل حالياً.");
     return;
   }
-  const promptText = res.status === "canceled"
-    ? `هل تريد السماح للطالب "${res.name}" بإعادة أداء الامتحان بعد الإلغاء؟`
-    : `هل تريد السماح للطالب "${res.name}" بإعادة أداء امتحان "${res.examTitle || "الامتحان"}"؟`;
-  if (!confirm(promptText)) return;
+  if (!confirm(getRetakeGrantConfirmMessage(res))) return;
 
   res.allowRetake = true;
   res.retakeGrantedAt = new Date().toISOString();
@@ -749,7 +790,7 @@ window.allowStudentExamRetake = function(recordId) {
   }
   const syncEl = document.getElementById("grading-sync-status");
   sendUpdatedResultToCloud(res, syncEl);
-  alert(`تم السماح للطالب "${res.name}" بإعادة أداء الامتحان.`);
+  alert(`تم السماح للطالب "${res.name}" بإعادة أداء الامتحان.\n\nالمحاولة الأولى ما زالت محفوظة — لن تُؤرشف إلا بعد إكمال الطالب لمحاولة جديدة.`);
 };
 
 window.revokeStudentExamRetake = function(recordId) {
@@ -2751,10 +2792,15 @@ function getTeacherScopedResults() {
 function computeTeacherStatsSnapshot() {
   const exams = getTeacherScopedExams();
   const students = systemState.students || [];
-  const results = getTeacherScopedResults();
-  const statusCounts = { completed: 0, incomplete: 0, canceled: 0 };
+  const allResults = getTeacherScopedResults();
+  const results = getActiveResultsList(allResults);
+  const statusCounts = { completed: 0, incomplete: 0, canceled: 0, superseded: 0 };
   const periodCounts = { today: 0, week: 0, month: 0 };
   const examCounts = new Map();
+
+  allResults.forEach(res => {
+    if (isSupersededResult(res)) statusCounts.superseded += 1;
+  });
 
   results.forEach(res => {
     const status = getResultDisplayStatus(res);
@@ -2798,6 +2844,7 @@ function computeTeacherStatsSnapshot() {
     examsCount: exams.length,
     studentsCount: students.length,
     resultsCount: results.length,
+    archivedResultsCount: allResults.length - results.length,
     statusCounts,
     periodCounts,
     studentsWithResults,
@@ -4676,9 +4723,11 @@ function submitFinishedExam() {
     allowRetake: false
   };
 
-  markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
+  resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
+  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   saveSystemState(true);
+  syncRetakeAffectedResultsToCloud(archivedAttempts);
   sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
   systemState.currentExamRuntime = null;
   showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
@@ -4942,6 +4991,7 @@ function getResultsTableFilters() {
 }
 
 function getResultDisplayStatus(res) {
+  if (isSupersededResult(res)) return "superseded";
   if (res?.status === "canceled") return "canceled";
   if (res?.status === "incomplete") return "incomplete";
   const scoreText = String(res?.score || "");
@@ -6098,10 +6148,12 @@ function submitCheatedExam() {
     cheatViolations: systemState.cheatViolations
   };
 
-  markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
+  resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
+  const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   systemState.currentExamRuntime = null;
   saveSystemState(true);
+  syncRetakeAffectedResultsToCloud(archivedAttempts);
 
   sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
 
