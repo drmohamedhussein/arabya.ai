@@ -284,6 +284,10 @@
           </div>
         </div>
 
+        <div id="runner-security-shield" class="runner-security-shield hidden" role="alert" aria-live="assertive">
+          <span class="material-icons" aria-hidden="true">gpp_bad</span>
+          <span id="runner-security-shield-msg">تم إخفاء شاشة الامتحان — ارجع فوراً إلى تبويب الامتحان.</span>
+        </div>
         <div id="runner-mobile-exam-hint" class="hidden" style="margin:0 0 1rem; padding:0.75rem 1rem; border-radius:10px; border:1px solid rgba(245,158,11,0.35); background:rgba(245,158,11,0.08); color:var(--accent); font-size:0.9rem; line-height:1.6; text-align:right;" role="status" aria-live="polite"></div>
 
         <!-- شريط تقدم الاختبار الخطي -->
@@ -969,6 +973,7 @@
                 <div><strong>كود الاشتراك:</strong> <span id="detail-stu-code" style="color:var(--accent); font-weight:700;">---</span></div>
                 <div><strong>اسم الامتحان:</strong> <span id="detail-exam-title">---</span></div>
                 <div><strong>تاريخ التقدم:</strong> <span id="detail-exam-date">---</span></div>
+                <div id="detail-device-info" style="grid-column: 1 / -1; font-size:0.85rem; color:var(--text-muted);"></div>
               </div>
 
 
@@ -1545,7 +1550,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.12"></script>
-  <script src="app.js?v=2026.05.31.12"></script>
+  <script src="questions.js?v=2026.05.31.13"></script>
+  <script src="app.js?v=2026.05.31.13"></script>
 </body>
 </html>

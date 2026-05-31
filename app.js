@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.12";
+const ARABYA_APP_VERSION = "2026.05.31.13";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -4617,7 +4617,7 @@ function populateExamSelectionList() {
   }
 }
 
-function validateStudentAndStart() {
+async function validateStudentAndStart() {
   const name = document.getElementById("student-fullname-input").value.trim();
   const id = document.getElementById("student-id-input").value.trim();
   const rawCode = document.getElementById("student-access-code").value.trim();
@@ -4705,6 +4705,38 @@ function validateStudentAndStart() {
     if (!retakeConfirm) return;
   }
 
+  const startBtn = document.getElementById("student-start-exam-btn");
+  const prevBtnText = startBtn ? startBtn.innerHTML : "";
+  if (startBtn) {
+    startBtn.disabled = true;
+    startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">hourglass_top</span> جاري التحقق من الجهاز...`;
+  }
+
+  let deviceProfile = null;
+  try {
+    const deviceCheck = await enforceExamDeviceBinding(studentLookupKey, systemState.currentStudent.name, examId);
+    if (!deviceCheck.ok) {
+      alert(deviceCheck.message);
+      return;
+    }
+    deviceProfile = deviceCheck.profile;
+    mergeDeviceProfileIntoStudent(studentRecord, deviceProfile);
+    systemState.currentStudent.deviceId = deviceProfile.deviceId;
+    systemState.currentStudent.lastKnownIp = deviceProfile.clientIp || "";
+    systemState.examDeviceProfile = deviceProfile;
+    saveStudentsToLocalStorage();
+    saveSystemState(false);
+  } catch (deviceErr) {
+    console.error("[ARABYA] device binding failed:", deviceErr);
+    alert("تعذر التحقق من بصمة الجهاز. تحقق من الاتصال بالإنترنت ثم أعد المحاولة.");
+    return;
+  } finally {
+    if (startBtn) {
+      startBtn.disabled = false;
+      startBtn.innerHTML = prevBtnText || `الانتقال لبدء الامتحان`;
+    }
+  }
+
   systemState.currentExam = selectedExam;
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
@@ -4724,15 +4756,22 @@ function validateStudentAndStart() {
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
   startRunnerTimer();
-  showMobileExamHintIfNeeded();
+  requestSecureExamMode();
+  showExamSecurityNotice();
 }
 
-function showMobileExamHintIfNeeded() {
-  if (!isMobileExamDevice()) return;
+function showExamSecurityNotice() {
   const hint = document.getElementById("runner-mobile-exam-hint");
   if (!hint) return;
   hint.classList.remove("hidden");
-  hint.innerHTML = `<span class="material-icons" style="vertical-align:middle; font-size:1rem;">smartphone</span> على الهاتف: ابقَ داخل صفحة الامتحان. التبديل لتطبيق آخر أو إخفاء الصفحة قد يُسجَّل كمخالفة بعد ${Math.round(getExamAntiCheatGraceMs() / 1000)} ثوانٍ من البدء.`;
+  const cat = getExamDeviceCategory();
+  const graceSec = Math.round(getExamAntiCheatGraceMs() / 1000);
+  const deviceLabel = cat === "mobile" ? "الهاتف" : cat === "tablet" ? "التابلت" : "الكمبيوتر";
+  hint.innerHTML =
+    `<span class="material-icons" style="vertical-align:middle; font-size:1rem;">security</span> ` +
+    `وضع تأمين الامتحان مفعّل على ${deviceLabel}: لا تغادر التبويب ولا تفتح ChatGPT أو تطبيقات أخرى. ` +
+    `أي تبديل تبويب أو إخفاء للصفحة يُسجَّل كمخالفة بعد ${graceSec} ثانية. ` +
+    `يُمنع استخدام نفس الجهاز لطالبين مختلفين في نفس الامتحان.`;
 }
 
 function renderRunnerQuestion() {
@@ -5046,6 +5085,7 @@ function submitFinishedExam() {
     maxScore: examTotalScore,
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions)),
     status: "completed",
+    ...buildResultDeviceFields(systemState.examDeviceProfile),
     allowRetake: false
   };
 
@@ -5140,7 +5180,8 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     score: scoreString,
     details: details,
     maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
-    ...buildResultCloudRetakeFields(resultObj)
+    ...buildResultCloudRetakeFields(resultObj),
+    ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile)
   };
   const slimPayload = buildSlimResultCloudPayload(payload);
 
@@ -6053,6 +6094,12 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-stu-code").innerText = res.accessCode || "لا يوجد";
   document.getElementById("detail-exam-title").innerText = res.examTitle || examForDisplay.title;
   document.getElementById("detail-exam-date").innerText = res.timestamp;
+  const deviceInfoEl = document.getElementById("detail-device-info");
+  if (deviceInfoEl) {
+    const ip = res.clientIp || "—";
+    const dev = res.deviceId ? `${String(res.deviceId).slice(0, 12)}…` : "—";
+    deviceInfoEl.innerHTML = `<div><strong>بصمة الجهاز:</strong> <code>${escapeHtml(dev)}</code></div><div style="margin-top:0.35rem;"><strong>IP عند التقديم:</strong> <code>${escapeHtml(ip)}</code></div>`;
+  }
   document.getElementById("detail-total-score-input").value = res.score;
   renderResultRetakeManagementPanel(res);
   renderStudentAttemptsPanel(res);
@@ -6340,31 +6387,337 @@ async function clearTeacherResults() {
   alert(synced ? "تم مسح السجلات ومزامنة التغيير مع Google Sheets." : "تم مسح السجلات محلياً.");
 }
 
+
+// ==========================================
+// 8b. بصمة الجهاز ومنع مشاركة الجهاز بين الطلاب
+// ==========================================
+// ملاحظة: المتصفح لا يسمح بالوصول إلى MAC Address — نستخدم بصمة جهاز + IP.
+
+const EXAM_DEVICE_REGISTRY_KEY = "arabya_exam_device_registry";
+
+function loadExamDeviceRegistry() {
+  try {
+    const raw = localStorage.getItem(EXAM_DEVICE_REGISTRY_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (parsed && Array.isArray(parsed.bindings)) return parsed;
+  } catch (e) {}
+  return { bindings: [] };
+}
+
+function saveExamDeviceRegistry(registry) {
+  try {
+    localStorage.setItem(EXAM_DEVICE_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (e) {
+    console.warn("[ARABYA] تعذر حفظ سجل أجهزة الامتحان:", e);
+  }
+}
+
+function pruneExamDeviceRegistry(registry) {
+  const now = Date.now();
+  const maxAgeMs = 1000 * 60 * 60 * 24 * 120;
+  registry.bindings = (registry.bindings || []).filter(entry => {
+    const at = Date.parse(entry.boundAt || "") || entry.savedAt || 0;
+    return !at || now - at < maxAgeMs;
+  });
+  return registry;
+}
+
+async function sha256Hex(text) {
+  const data = new TextEncoder().encode(String(text || ""));
+  if (window.crypto && window.crypto.subtle) {
+    const hash = await window.crypto.subtle.digest("SHA-256", data);
+    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  let h = 0;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return `fallback_${Math.abs(h)}_${s.length}`;
+}
+
+function getCanvasFingerprintToken() {
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 280;
+    canvas.height = 60;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return "";
+    ctx.textBaseline = "top";
+    ctx.font = "16px 'Segoe UI', Tahoma, Arial";
+    ctx.fillStyle = "#0f766e";
+    ctx.fillRect(0, 0, 280, 60);
+    ctx.fillStyle = "#111827";
+    ctx.fillText("ARABYA.NET exam device fingerprint", 12, 12);
+    ctx.strokeStyle = "#f59e0b";
+    ctx.strokeRect(2, 2, 276, 56);
+    return canvas.toDataURL();
+  } catch (e) {
+    return "";
+  }
+}
+
+function getWebglFingerprintToken() {
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    if (!gl) return "";
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const vendor = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+    const renderer = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    return `${vendor || ""}|${renderer || ""}`;
+  } catch (e) {
+    return "";
+  }
+}
+
+async function fetchClientIpAddress() {
+  const controllers = [
+    "https://api.ipify.org?format=json",
+    "https://api64.ipify.org?format=json"
+  ];
+  for (const url of controllers) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3500);
+      const res = await fetch(url, { signal: controller.signal, cache: "no-store" });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = await res.json();
+      const ip = String(data.ip || "").trim();
+      if (ip) return ip;
+    } catch (e) {}
+  }
+  return "";
+}
+
+async function collectExamDeviceProfile() {
+  const nav = navigator || {};
+  const screenInfo = window.screen || {};
+  const parts = [
+    nav.userAgent || "",
+    nav.language || "",
+    nav.platform || "",
+    nav.hardwareConcurrency || "",
+    nav.deviceMemory || "",
+    nav.maxTouchPoints || "",
+    screenInfo.width || "",
+    screenInfo.height || "",
+    screenInfo.colorDepth || "",
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    getCanvasFingerprintToken(),
+    getWebglFingerprintToken()
+  ];
+  const fingerprintSeed = parts.join("||");
+  const deviceFingerprint = await sha256Hex(fingerprintSeed);
+  const clientIp = await fetchClientIpAddress();
+  const deviceId = await sha256Hex(`${deviceFingerprint}|${clientIp || "no-ip"}`);
+  return {
+    deviceId,
+    deviceFingerprint,
+    clientIp: clientIp || "",
+    userAgent: (nav.userAgent || "").slice(0, 240),
+    platform: nav.platform || "",
+    screen: `${screenInfo.width || 0}x${screenInfo.height || 0}`,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    collectedAt: new Date().toISOString()
+  };
+}
+
+function mergeDeviceProfileIntoStudent(student, profile) {
+  if (!student || !profile) return student;
+  student.deviceId = profile.deviceId;
+  student.deviceFingerprint = profile.deviceFingerprint;
+  student.lastKnownIp = profile.clientIp || student.lastKnownIp || "";
+  student.lastDeviceSeenAt = profile.collectedAt || new Date().toISOString();
+  student.deviceMeta = {
+    platform: profile.platform || "",
+    screen: profile.screen || "",
+    timezone: profile.timezone || "",
+    userAgent: profile.userAgent || ""
+  };
+  return student;
+}
+
+function findDeviceBindingConflict(deviceId, examId, studentLookupKey) {
+  if (!deviceId || !studentLookupKey) return null;
+  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  const bindings = registry.bindings || [];
+  const globalConflict = bindings.find(entry =>
+    entry.deviceId === deviceId &&
+    entry.studentLookupKey &&
+    entry.studentLookupKey !== studentLookupKey
+  );
+  if (globalConflict) return globalConflict;
+  if (!examId) return null;
+  return bindings.find(entry =>
+    entry.deviceId === deviceId &&
+    entry.examId === examId &&
+    entry.studentLookupKey &&
+    entry.studentLookupKey !== studentLookupKey
+  ) || null;
+}
+
+function registerExamDeviceBinding(deviceProfile, studentLookupKey, studentName, examId) {
+  if (!deviceProfile?.deviceId || !studentLookupKey || !examId) return;
+  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  registry.bindings = (registry.bindings || []).filter(entry =>
+    !(entry.deviceId === deviceProfile.deviceId && entry.examId === examId && entry.studentLookupKey !== studentLookupKey)
+  );
+  const existingIdx = registry.bindings.findIndex(entry =>
+    entry.deviceId === deviceProfile.deviceId &&
+    entry.examId === examId &&
+    entry.studentLookupKey === studentLookupKey
+  );
+  const row = {
+    deviceId: deviceProfile.deviceId,
+    deviceFingerprint: deviceProfile.deviceFingerprint,
+    clientIp: deviceProfile.clientIp || "",
+    studentLookupKey,
+    studentName: studentName || "",
+    examId,
+    boundAt: new Date().toISOString(),
+    savedAt: Date.now()
+  };
+  if (existingIdx >= 0) registry.bindings[existingIdx] = { ...registry.bindings[existingIdx], ...row };
+  else registry.bindings.push(row);
+  saveExamDeviceRegistry(registry);
+}
+
+async function enforceExamDeviceBinding(studentLookupKey, studentName, examId) {
+  const profile = await collectExamDeviceProfile();
+  const conflict = findDeviceBindingConflict(profile.deviceId, examId, studentLookupKey);
+  if (conflict) {
+    return {
+      ok: false,
+      message:
+        "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
+        `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
+        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط.",
+      profile
+    };
+  }
+  registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
+  return { ok: true, profile };
+}
+
+function buildResultDeviceFields(profile) {
+  if (!profile) return {};
+  return {
+    deviceId: profile.deviceId || "",
+    deviceFingerprint: profile.deviceFingerprint || "",
+    clientIp: profile.clientIp || "",
+    deviceMeta: {
+      platform: profile.platform || "",
+      screen: profile.screen || "",
+      timezone: profile.timezone || "",
+      userAgent: profile.userAgent || ""
+    }
+  };
+}
+
+window.arabyaCollectExamDeviceProfile = collectExamDeviceProfile;
+
 // ==========================================
 // 9. آليات منع الغش وتأمين النوافذ
 // ==========================================
 
-function isMobileExamDevice() {
-  const coarse = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
-  const narrow = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+function getExamDeviceCategory() {
+  const ua = (navigator.userAgent || "").toLowerCase();
   const touch = ("ontouchstart" in window) || (navigator.maxTouchPoints > 0);
-  return (coarse && touch) || (narrow && touch);
+  const narrow = window.matchMedia && window.matchMedia("(max-width: 768px)").matches;
+  const tablet = window.matchMedia && window.matchMedia("(min-width: 769px) and (max-width: 1024px)").matches;
+  if (narrow && touch) return "mobile";
+  if (tablet || (touch && /ipad|tablet|android/i.test(ua))) return "tablet";
+  return "desktop";
+}
+
+function isMobileExamDevice() {
+  return getExamDeviceCategory() === "mobile";
+}
+
+function isTabletExamDevice() {
+  return getExamDeviceCategory() === "tablet";
 }
 
 function getExamAntiCheatGraceMs() {
-  return isMobileExamDevice() ? 12000 : 4000;
+  const cat = getExamDeviceCategory();
+  if (cat === "mobile") return 2500;
+  if (cat === "tablet") return 2000;
+  return 1500;
 }
 
 function markExamAntiCheatStarted() {
   systemState.examAntiCheatStartedAt = Date.now();
+  startExamSecurityWatchdog();
+  enableExamSecureMode();
+}
+
+function stopExamSecurityWatchdog() {
+  if (systemState.examSecurityWatchInterval) {
+    clearInterval(systemState.examSecurityWatchInterval);
+    systemState.examSecurityWatchInterval = null;
+  }
+  disableExamSecureMode();
+}
+
+function enableExamSecureMode() {
+  document.body.classList.add("exam-secure-mode");
+  const runner = document.getElementById("exam-runner-view");
+  if (runner) runner.classList.add("exam-secure-active");
+}
+
+function disableExamSecureMode() {
+  document.body.classList.remove("exam-secure-mode");
+  const runner = document.getElementById("exam-runner-view");
+  if (runner) runner.classList.remove("exam-secure-active");
+  const shield = document.getElementById("runner-security-shield");
+  if (shield) shield.classList.add("hidden");
+}
+
+function showExamSecurityShield(message) {
+  const shield = document.getElementById("runner-security-shield");
+  if (!shield) return;
+  shield.classList.remove("hidden");
+  const textEl = document.getElementById("runner-security-shield-msg");
+  if (textEl) textEl.textContent = message || "تم إخفاء شاشة الامتحان — العودة للتبويب مطلوبة.";
+}
+
+function hideExamSecurityShield() {
+  const shield = document.getElementById("runner-security-shield");
+  if (shield) shield.classList.add("hidden");
 }
 
 function shouldTriggerFocusAntiCheat(reason) {
   if (!systemState.isExamActive || systemState.isCheatingSuspended) return false;
   const startedAt = systemState.examAntiCheatStartedAt || 0;
   if (Date.now() - startedAt < getExamAntiCheatGraceMs()) return false;
-  if (isMobileExamDevice() && reason === "blur") return false;
   return true;
+}
+
+function recordAntiCheatViolation(reason) {
+  if (!shouldTriggerFocusAntiCheat(reason)) return;
+  const last = systemState.lastAntiCheatTriggerAt || 0;
+  if (Date.now() - last < 900) return;
+  systemState.lastAntiCheatTriggerAt = Date.now();
+  triggerRunnerCheatPenalty(reason);
+}
+
+function startExamSecurityWatchdog() {
+  stopExamSecurityWatchdog();
+  systemState.examSecurityWatchInterval = setInterval(() => {
+    if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+    if (document.hidden) {
+      showExamSecurityShield("تم رصد إخفاء تبويب الامتحان أو التبديل لتطبيق آخر.");
+      recordAntiCheatViolation("visibility-watchdog");
+    } else {
+      hideExamSecurityShield();
+    }
+    if (!document.hasFocus()) {
+      recordAntiCheatViolation("focus-watchdog");
+    }
+  }, 450);
 }
 
 function getExamBlockingMessage(blockingResult) {
@@ -6378,7 +6731,11 @@ function getExamBlockingMessage(blockingResult) {
 function getCheatPenaltyMessage(reason, violationNumber, maxViolations) {
   const actionMap = {
     blur: "الخروج من نافذة الامتحان",
-    visibility: "إخفاء تبويب الامتحان أو التبديل لتطبيق آخر",
+    visibility: "إخفاء تبويب الامتحان أو فتح تبويب/تطبيق آخر (مثل ChatGPT)",
+    "visibility-watchdog": "إبقاء تبويب الامتحان مخفياً أو التبديل لتطبيق آخر",
+    "focus-watchdog": "فقدان تركيز نافذة الامتحان",
+    pagehide: "محاولة مغادرة صفحة الامتحان",
+    freeze: "تعليق صفحة الامتحان أثناء التبديل",
     screenshot: "محاولة التقاط لقطة شاشة",
     copy: "محاولة النسخ",
     cut: "محاولة القص",
@@ -6387,15 +6744,19 @@ function getCheatPenaltyMessage(reason, violationNumber, maxViolations) {
   };
   const actionText = actionMap[reason] || "مخالفة قواعد الامتحان";
   const remaining = Math.max(0, maxViolations - violationNumber);
-  const mobileHint = isMobileExamDevice()
-    ? "<br><span style=\"font-size:0.9rem; color:var(--text-muted);\">على الهاتف: ابقَ داخل صفحة الامتحان ولا تفتح تطبيقات أخرى أثناء الحل.</span>"
-    : "";
+  const deviceHint = getExamDeviceCategory() === "mobile"
+    ? "على الهاتف: لا تخرج من المتصفح ولا تفتح تطبيقات أخرى أثناء الحل."
+    : getExamDeviceCategory() === "tablet"
+      ? "على التابلت: ابقَ داخل تبويب الامتحان فقط."
+      : "على الكمبيوتر: لا تفتح نوافذ أو تبويبات أخرى أثناء الامتحان.";
   if (violationNumber >= maxViolations) {
     return `<span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان</span>` +
-      `تم رصد ${actionText}. تم إنهاء الاختبار وتسجيل حالة الإلغاء.${mobileHint}`;
+      `تم رصد ${actionText}. تم إنهاء الاختبار وتسجيل حالة الإلغاء.<br>` +
+      `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>`;
   }
   return `<span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير (${violationNumber} من ${maxViolations})</span>` +
-    `تم رصد ${actionText}. تم إلغاء السؤال الحالي وتصفير درجته.${mobileHint}` +
+    `تم رصد ${actionText}. تم إلغاء السؤال الحالي وتصفير درجته.<br>` +
+    `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>` +
     `<span style="color:var(--error); font-weight:bold; font-size:0.95rem; display:block; margin-top:0.5rem;">متبقي ${remaining} تحذير${remaining === 1 ? "" : "ات"} قبل إلغاء الامتحان.</span>`;
 }
 
@@ -6405,102 +6766,121 @@ function setupAntiCheatHandlers() {
       saveActiveStudentSession();
       updateLiveIncompleteResult();
       e.preventDefault();
-      e.returnValue = "امتحانك نشط الآن. الخروج قد يؤدي إلى تسجيل محاولة غش أو فقدان التقدم.";
+      e.returnValue = "امتحانك نشط الآن. مغادرة الصفحة تُسجَّل كمخالفة أمنية.";
       return e.returnValue;
     }
   });
 
-  window.addEventListener("blur", () => {
-    if (shouldTriggerFocusAntiCheat("blur")) {
-      triggerRunnerCheatPenalty("blur");
+  window.addEventListener("pagehide", () => {
+    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
+      recordAntiCheatViolation("pagehide");
     }
+  });
+
+  window.addEventListener("blur", () => {
+    recordAntiCheatViolation("blur");
   });
 
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden && shouldTriggerFocusAntiCheat("visibility")) {
-      triggerRunnerCheatPenalty("visibility");
+    if (document.hidden) {
+      showExamSecurityShield("تم إخفاء الامتحان — ارجع فوراً إلى تبويب ARABYA.NET.");
+      recordAntiCheatViolation("visibility");
+    } else {
+      hideExamSecurityShield();
     }
+  });
+
+  window.addEventListener("focusout", () => {
+    recordAntiCheatViolation("blur");
+  });
+
+  document.addEventListener("freeze", () => {
+    recordAntiCheatViolation("freeze");
   });
 
   document.addEventListener("contextmenu", e => {
-    if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (systemState.isExamActive) e.preventDefault();
   });
+
   document.addEventListener("copy", e => {
-    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
-      e.preventDefault();
-      triggerRunnerCheatPenalty("copy");
-    } else if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (!systemState.isExamActive) return;
+    e.preventDefault();
+    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("copy");
   });
+
   document.addEventListener("cut", e => {
-    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
-      e.preventDefault();
-      triggerRunnerCheatPenalty("cut");
-    } else if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (!systemState.isExamActive) return;
+    e.preventDefault();
+    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("cut");
   });
+
   document.addEventListener("paste", e => {
-    if (systemState.isExamActive && !systemState.isCheatingSuspended) {
-      e.preventDefault();
-      triggerRunnerCheatPenalty("paste");
-    } else if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (!systemState.isExamActive) return;
+    e.preventDefault();
+    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("paste");
   });
+
   document.addEventListener("selectstart", e => {
-    if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (systemState.isExamActive) e.preventDefault();
   });
+
   document.addEventListener("dragstart", e => {
-    if (systemState.isExamActive) {
-      e.preventDefault();
-    }
+    if (systemState.isExamActive) e.preventDefault();
   });
 
   document.addEventListener("keydown", e => {
+    if (!systemState.isExamActive) return;
     const commandKey = e.ctrlKey || e.metaKey;
     if (
-      e.key === "F12" || 
-      (commandKey && e.shiftKey && (e.key === "I" || e.key === "i" || e.key === "J" || e.key === "j" || e.key === "C" || e.key === "c" || e.key === "K" || e.key === "k" || e.key === "E" || e.key === "e")) ||
-      (commandKey && (e.key === "U" || e.key === "u" || e.key === "S" || e.key === "s"))
+      e.key === "F12" ||
+      (commandKey && e.shiftKey && /[icjcek]/i.test(e.key)) ||
+      (commandKey && /[us]/i.test(e.key))
     ) {
       e.preventDefault();
-      alert("حظر: غير مصرح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
+      alert("حظر: غير مسموح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
       return false;
     }
-
-    if (systemState.isExamActive && !systemState.isCheatingSuspended && commandKey && (e.key === "C" || e.key === "c" || e.key === "V" || e.key === "v" || e.key === "X" || e.key === "x" || e.key === "A" || e.key === "a")) {
+    if (!systemState.isCheatingSuspended && commandKey && /[cvxa]/i.test(e.key)) {
       e.preventDefault();
-      triggerRunnerCheatPenalty("keyboard-shortcut");
+      recordAntiCheatViolation("keyboard-shortcut");
       return false;
     }
-
-    if (commandKey && (e.key === "p" || e.key === "P")) {
+    if (commandKey && /p/i.test(e.key)) {
       e.preventDefault();
       alert("حظر: غير مسموح بالطباعة لحماية سرية الأسئلة!");
       return false;
     }
-
     if (e.key === "PrintScreen" || e.keyCode === 44) {
       e.preventDefault();
-      if (systemState.isExamActive && !systemState.isCheatingSuspended) {
-        triggerRunnerCheatPenalty("screenshot");
-      }
+      if (!systemState.isCheatingSuspended) recordAntiCheatViolation("screenshot");
       return false;
+    }
+    if (e.key === "Meta" || e.key === "OS") {
+      e.preventDefault();
+      recordAntiCheatViolation("keyboard-shortcut");
+    }
+  });
+
+  document.addEventListener("keyup", e => {
+    if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+    if (e.key === "PrintScreen" || e.keyCode === 44) {
+      recordAntiCheatViolation("screenshot");
     }
   });
 }
 
 function requestSecureExamMode() {
-  // ملء الشاشة معطّل — غير متناسق على الهواتف.
+  const cat = getExamDeviceCategory();
+  if (cat === "desktop" || cat === "tablet") {
+    const root = document.documentElement;
+    if (root.requestFullscreen && !document.fullscreenElement) {
+      root.requestFullscreen().catch(() => {});
+    }
+  }
 }
 
 function releaseSecureExamMode() {
+  stopExamSecurityWatchdog();
   if (document.fullscreenElement && document.exitFullscreen) {
     document.exitFullscreen().catch(() => {});
   }
@@ -6568,7 +6948,6 @@ function triggerRunnerCheatPenalty(reason) {
     }, 4000);
   }
 }
-
 function submitCheatedExam() {
   // تنظيف الجلسة الحية وحذف السجل غير المكتمل
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
@@ -6611,7 +6990,8 @@ function submitCheatedExam() {
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions || [])),
     status: "canceled",
     allowRetake: false,
-    cheatViolations: systemState.cheatViolations
+    cheatViolations: systemState.cheatViolations,
+    ...buildResultDeviceFields(systemState.examDeviceProfile)
   };
 
   resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);

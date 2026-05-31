@@ -1378,3 +1378,32 @@ tr:hover td {
 .detail-attempt-item:hover {
   border-color: var(--secondary) !important;
 }
+
+
+.exam-secure-mode #exam-runner-view.exam-secure-active {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.exam-secure-mode #exam-runner-view.exam-secure-active .essay-textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.runner-security-shield {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.runner-security-shield .material-icons {
+  color: var(--error);
+}
