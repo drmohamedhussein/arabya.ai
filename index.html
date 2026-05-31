@@ -856,6 +856,7 @@
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="completed">مكتمل</button>
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="incomplete">جاري</button>
                   <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="canceled">ملغى</button>
+                  <button type="button" class="btn btn-outline btn-sm" data-results-status-filter="retake_allowed">مسموح بإعادة التقديم</button>
                 </div>
               </div>
               <div class="form-group" style="margin:0; min-width:190px; flex:1;">
@@ -943,6 +944,18 @@
                 <div><strong>كود الاشتراك:</strong> <span id="detail-stu-code" style="color:var(--accent); font-weight:700;">---</span></div>
                 <div><strong>اسم الامتحان:</strong> <span id="detail-exam-title">---</span></div>
                 <div><strong>تاريخ التقدم:</strong> <span id="detail-exam-date">---</span></div>
+              </div>
+
+
+              <div id="detail-retake-management" style="margin-bottom: 2rem; border: 1px solid rgba(20, 184, 166, 0.25); border-radius: 12px; padding: 1.25rem; background: rgba(20, 184, 166, 0.04); text-align:right;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap; margin-bottom:0.75rem;">
+                  <div>
+                    <div style="font-weight:700; color:var(--secondary); margin-bottom:0.35rem;">إدارة إعادة الامتحان</div>
+                    <div style="font-size:0.85rem; color:var(--text-muted);">اسمح للطالب بإعادة التقديم بعد الإكمال أو الإلغاء، أو ألغِ السماح في أي وقت.</div>
+                  </div>
+                </div>
+                <div id="detail-retake-status" style="margin-bottom:0.85rem;"></div>
+                <div id="detail-retake-actions" style="display:flex; gap:0.5rem; flex-wrap:wrap;"></div>
               </div>
 
               <!-- حقل تعديل النتيجة النهائية الإجمالية يدوياً -->
@@ -1495,7 +1508,7 @@ function jsonArabya_(obj) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.8"></script>
-  <script src="app.js?v=2026.05.31.8"></script>
+  <script src="questions.js?v=2026.05.31.9"></script>
+  <script src="app.js?v=2026.05.31.9"></script>
 </body>
 </html>

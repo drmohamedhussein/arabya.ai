@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.8";
+const ARABYA_APP_VERSION = "2026.05.31.9";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -585,11 +585,205 @@ function shouldCancelExamForCheating(exam, violations) {
   return violations >= maxAttempts;
 }
 
-function findBlockingExamResult(studentLookupKey, examId) {
+
+function isSupersededResult(res) {
+  return !!(res && res.superseded);
+}
+
+function findActiveRetakeGrant(studentLookupKey, examId) {
   if (!studentLookupKey || !examId) return null;
   return systemState.results.find(r =>
     r.studentLookupKey === studentLookupKey &&
     r.examId === examId &&
+    r.allowRetake === true &&
+    !r.superseded &&
+    r.status !== "incomplete"
+  ) || null;
+}
+
+function resultCanGrantRetake(res) {
+  if (!res || isSupersededResult(res) || res.status === "incomplete") return false;
+  return res.allowRetake !== true;
+}
+
+function resultHasActiveRetakeGrant(res) {
+  return !!(res && res.allowRetake === true && !isSupersededResult(res) && res.status !== "incomplete");
+}
+
+function getResultRetakeStatusText(res) {
+  if (!res) return "—";
+  if (isSupersededResult(res)) return "محاولة سابقة (استُبدلت بمحاولة أحدث)";
+  if (resultHasActiveRetakeGrant(res)) return "مسموح بإعادة التقديم";
+  if (res.status === "canceled") return "ملغى — بانتظار قرار المعلم";
+  if (res.status === "completed") return "مكتمل — لا يُسمح بإعادة التقديم";
+  return "—";
+}
+
+function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId) {
+  if (!studentLookupKey || !examId || !newRecordId) return;
+  const now = new Date().toISOString();
+  systemState.results.forEach(res => {
+    if (!res || res.recordId === newRecordId || isSupersededResult(res)) return;
+    if (res.studentLookupKey !== studentLookupKey || res.examId !== examId) return;
+    if (res.status === "incomplete") return;
+    res.superseded = true;
+    res.supersededAt = now;
+    res.supersededByRecordId = newRecordId;
+    res.allowRetake = false;
+  });
+}
+
+function appendResultRetakeActions(res, actionsCell) {
+  if (!actionsCell || !res || isSupersededResult(res)) return;
+
+  if (resultCanGrantRetake(res)) {
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.className = "btn btn-outline btn-sm";
+    allowBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary);";
+    allowBtn.textContent = res.status === "canceled" ? "السماح بإعادة التقديم" : "إعادة الامتحان";
+    allowBtn.addEventListener("click", () => allowStudentExamRetake(res.recordId || ""));
+    actionsCell.appendChild(allowBtn);
+  }
+
+  if (resultHasActiveRetakeGrant(res)) {
+    const revokeBtn = document.createElement("button");
+    revokeBtn.type = "button";
+    revokeBtn.className = "btn btn-outline btn-sm";
+    revokeBtn.style.cssText = "border-color:var(--warning); color:var(--warning);";
+    revokeBtn.textContent = "إلغاء السماح";
+    revokeBtn.addEventListener("click", () => revokeStudentExamRetake(res.recordId || ""));
+    actionsCell.appendChild(revokeBtn);
+  }
+}
+
+function renderResultRetakeManagementPanel(res) {
+  const statusEl = document.getElementById("detail-retake-status");
+  const actionsEl = document.getElementById("detail-retake-actions");
+  if (!statusEl || !actionsEl) return;
+
+  const statusText = getResultRetakeStatusText(res);
+  const tone = isSupersededResult(res)
+    ? "var(--text-muted)"
+    : resultHasActiveRetakeGrant(res)
+      ? "var(--secondary)"
+      : res.status === "canceled"
+        ? "var(--error)"
+        : "var(--text-muted)";
+
+  statusEl.innerHTML = `<strong style="color:${tone};">${escapeHtml(statusText)}</strong>` +
+    (res.retakeGrantedAt ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;">تاريخ السماح: ${escapeHtml(formatRetakeTimestamp(res.retakeGrantedAt))}</div>` : "") +
+    (res.supersededAt ? `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;">استُبدلت بتاريخ: ${escapeHtml(formatRetakeTimestamp(res.supersededAt))}</div>` : "");
+
+  actionsEl.innerHTML = "";
+  if (isSupersededResult(res)) {
+    actionsEl.innerHTML = `<span style="font-size:0.85rem; color:var(--text-muted);">هذه محاولة سابقة محفوظة للأرشفة فقط.</span>`;
+    return;
+  }
+
+  if (resultCanGrantRetake(res)) {
+    const allowBtn = document.createElement("button");
+    allowBtn.type = "button";
+    allowBtn.className = "btn btn-outline btn-sm";
+    allowBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary);";
+    allowBtn.textContent = res.status === "canceled" ? "السماح بإعادة التقديم" : "السماح بإعادة الامتحان";
+    allowBtn.addEventListener("click", () => allowStudentExamRetake(res.recordId || ""));
+    actionsEl.appendChild(allowBtn);
+  }
+
+  if (resultHasActiveRetakeGrant(res)) {
+    const revokeBtn = document.createElement("button");
+    revokeBtn.type = "button";
+    revokeBtn.className = "btn btn-outline btn-sm";
+    revokeBtn.style.cssText = "border-color:var(--warning); color:var(--warning);";
+    revokeBtn.textContent = "إلغاء السماح بإعادة التقديم";
+    revokeBtn.addEventListener("click", () => revokeStudentExamRetake(res.recordId || ""));
+    actionsEl.appendChild(revokeBtn);
+  }
+}
+
+function formatRetakeTimestamp(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
+  }
+  return String(value);
+}
+
+function buildResultCloudRetakeFields(res) {
+  return {
+    allowRetake: !!res?.allowRetake,
+    superseded: !!res?.superseded,
+    retakeGrantedAt: res?.retakeGrantedAt || "",
+    retakeRevokedAt: res?.retakeRevokedAt || "",
+    supersededAt: res?.supersededAt || "",
+    supersededByRecordId: res?.supersededByRecordId || ""
+  };
+}
+
+window.allowStudentExamRetake = function(recordId) {
+  const res = systemState.results.find(r => r.recordId === recordId);
+  if (!res) {
+    alert("لم يتم العثور على سجل النتيجة.");
+    return;
+  }
+  if (!resultCanGrantRetake(res)) {
+    alert("لا يمكن منح إعادة التقديم لهذا السجل حالياً.");
+    return;
+  }
+  const promptText = res.status === "canceled"
+    ? `هل تريد السماح للطالب "${res.name}" بإعادة أداء الامتحان بعد الإلغاء؟`
+    : `هل تريد السماح للطالب "${res.name}" بإعادة أداء امتحان "${res.examTitle || "الامتحان"}"؟`;
+  if (!confirm(promptText)) return;
+
+  res.allowRetake = true;
+  res.retakeGrantedAt = new Date().toISOString();
+  res.retakeGrantedBy = systemState.activeTeacher?.username || "teacher";
+  delete res.retakeRevokedAt;
+  saveSystemState(true);
+  renderStudentResultsTable();
+  renderTeacherStudentsTable();
+  if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
+    renderResultRetakeManagementPanel(res);
+  }
+  const syncEl = document.getElementById("grading-sync-status");
+  sendUpdatedResultToCloud(res, syncEl);
+  alert(`تم السماح للطالب "${res.name}" بإعادة أداء الامتحان.`);
+};
+
+window.revokeStudentExamRetake = function(recordId) {
+  const res = systemState.results.find(r => r.recordId === recordId);
+  if (!res) {
+    alert("لم يتم العثور على سجل النتيجة.");
+    return;
+  }
+  if (!resultHasActiveRetakeGrant(res)) {
+    alert("لا يوجد سماح نشط بإعادة التقديم على هذا السجل.");
+    return;
+  }
+  if (!confirm(`هل تريد إلغاء السماح بإعادة التقديم للطالب "${res.name}"؟`)) return;
+
+  res.allowRetake = false;
+  res.retakeRevokedAt = new Date().toISOString();
+  saveSystemState(true);
+  renderStudentResultsTable();
+  renderTeacherStudentsTable();
+  if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
+    renderResultRetakeManagementPanel(res);
+  }
+  const syncEl = document.getElementById("grading-sync-status");
+  sendUpdatedResultToCloud(res, syncEl);
+  alert("تم إلغاء السماح بإعادة التقديم.");
+};
+
+function findBlockingExamResult(studentLookupKey, examId) {
+  if (!studentLookupKey || !examId) return null;
+  if (findActiveRetakeGrant(studentLookupKey, examId)) return null;
+  return systemState.results.find(r =>
+    r.studentLookupKey === studentLookupKey &&
+    r.examId === examId &&
+    !isSupersededResult(r) &&
     r.status !== "incomplete" &&
     r.allowRetake !== true &&
     (r.status === "completed" || r.status === "canceled")
@@ -600,6 +794,7 @@ function getStudentCanceledExamIds(studentLookupKey) {
   if (!studentLookupKey) return [];
   const ids = new Set();
   systemState.results.forEach(r => {
+    if (isSupersededResult(r)) return;
     if (r.studentLookupKey === studentLookupKey && r.status === "canceled" && r.allowRetake !== true && r.examId) {
       ids.add(r.examId);
     }
@@ -608,6 +803,12 @@ function getStudentCanceledExamIds(studentLookupKey) {
 }
 
 function formatResultStatusBadge(res) {
+  if (isSupersededResult(res)) {
+    return '<span style="color:var(--text-muted); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[محاولة سابقة]</span>';
+  }
+  if (resultHasActiveRetakeGrant(res)) {
+    return '<span style="color:var(--secondary); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[مسموح بإعادة التقديم]</span>';
+  }
   if (res.status === "canceled" && res.allowRetake !== true) {
     return '<span style="color:var(--error); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[تم إلغاء الامتحان]</span>';
   }
@@ -4135,6 +4336,12 @@ function validateStudentAndStart() {
     return;
   }
 
+  const activeRetakeGrant = findActiveRetakeGrant(studentLookupKey, examId);
+  if (activeRetakeGrant) {
+    const retakeConfirm = confirm(`المعلم سمح لك بإعادة أداء امتحان "${selectedExam.title}". هل تريد البدء الآن؟`);
+    if (!retakeConfirm) return;
+  }
+
   systemState.currentExam = selectedExam;
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
@@ -4469,6 +4676,7 @@ function submitFinishedExam() {
     allowRetake: false
   };
 
+  markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   saveSystemState(true);
   sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
@@ -4556,7 +4764,8 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     status: resultObj?.status || "completed",
     score: scoreString,
     details: details,
-    maxScore: resultObj?.maxScore || getCurrentExamTotalScore()
+    maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
+    ...buildResultCloudRetakeFields(resultObj)
   };
   const slimPayload = buildSlimResultCloudPayload(payload);
 
@@ -4640,7 +4849,8 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     score: res.score || "",
     details: res.details || "",
     maxScore: res.maxScore || "",
-    isManualGradeUpdate: true
+    isManualGradeUpdate: true,
+    ...buildResultCloudRetakeFields(res)
   };
 
   let done = 0;
@@ -4762,6 +4972,8 @@ function parseResultTimestamp(value) {
 
 function resultMatchesStatusFilter(res, statusFilter) {
   if (!statusFilter || statusFilter === "all") return true;
+  if (statusFilter === "retake_allowed") return resultHasActiveRetakeGrant(res);
+  if (statusFilter === "superseded") return isSupersededResult(res);
   return getResultDisplayStatus(res) === statusFilter;
 }
 
@@ -4964,6 +5176,7 @@ window.setTeacherResultsExamFilter = function(examIdOrTitle) {
 function countStudentResults(student) {
   const studentKey = student.studentKey || getStudentLookupKey(student);
   return (systemState.results || []).filter(res => {
+    if (isSupersededResult(res)) return false;
     const resultKey = res.studentLookupKey || getStudentLookupKey({
       id: res.id,
       code: res.accessCode,
@@ -5322,15 +5535,7 @@ function renderStudentResultsTable() {
     `;
 
     const actionsCell = row.querySelector(".teacher-results-actions");
-    if (res.status === "canceled" && res.allowRetake !== true) {
-      const uncancelBtn = document.createElement("button");
-      uncancelBtn.type = "button";
-      uncancelBtn.className = "btn btn-outline btn-sm";
-      uncancelBtn.style.cssText = "border-color:var(--warning); color:var(--warning); margin-right:0.25rem;";
-      uncancelBtn.textContent = "إلغاء علامة الإلغاء";
-      uncancelBtn.addEventListener("click", () => uncancelStudentExam(res.recordId || ""));
-      actionsCell.appendChild(uncancelBtn);
-    }
+    appendResultRetakeActions(res, actionsCell);
 
     const viewBtn = document.createElement("button");
     viewBtn.type = "button";
@@ -5390,6 +5595,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-exam-title").innerText = res.examTitle || examForDisplay.title;
   document.getElementById("detail-exam-date").innerText = res.timestamp;
   document.getElementById("detail-total-score-input").value = res.score;
+  renderResultRetakeManagementPanel(res);
 
   if (!res.studentAnswers) res.studentAnswers = {};
   if (!res.questionScores) res.questionScores = {};
@@ -5638,7 +5844,7 @@ function exportTeacherResultsToCSV() {
   }
 
   let csvContent = "\ufeffsep=,\n";
-  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,النتيجة,التاريخ والوقت\n";
+  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,إعادة التقديم,النتيجة,التاريخ والوقت\n";
 
   exportRows.forEach(res => {
     csvContent += buildCsvLine([
@@ -5651,6 +5857,7 @@ function exportTeacherResultsToCSV() {
       res.examTitle || "",
       res.examType || "أعمال سنة",
       getResultDisplayStatus(res),
+      getResultRetakeStatusText(res),
       res.score || "",
       res.timestamp || ""
     ]);
@@ -5891,6 +6098,7 @@ function submitCheatedExam() {
     cheatViolations: systemState.cheatViolations
   };
 
+  markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   systemState.currentExamRuntime = null;
   saveSystemState(true);
@@ -5989,24 +6197,7 @@ function setupStudentAutofill() {
 // عرض قائمة الطلاب وأكوادهم في لوحة المعلم
 
 window.uncancelStudentExam = function(recordId) {
-  const res = systemState.results.find(r => r.recordId === recordId);
-  if (!res) {
-    alert("لم يتم العثور على سجل النتيجة.");
-    return;
-  }
-  if (res.status !== "canceled") {
-    alert("هذا السجل ليس بحالة إلغاء.");
-    return;
-  }
-  if (!confirm(`هل تريد إلغاء علامة "تم إلغاء الامتحان" للطالب ${res.name} والسماح له بإعادة التقديم؟`)) {
-    return;
-  }
-  res.allowRetake = true;
-  res.uncanceledAt = new Date().toLocaleString("ar-EG");
-  saveSystemState(true);
-  renderStudentResultsTable();
-  renderTeacherStudentsTable();
-  alert("تم السماح للطالب بإعادة أداء الامتحان.");
+  allowStudentExamRetake(recordId);
 };
 
 
