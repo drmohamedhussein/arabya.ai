@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.5";
+const ARABYA_APP_VERSION = "2026.05.30.6";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -243,21 +243,28 @@ function initDatabase() {
         entryScore: systemState.config.entryScore,
         entryDetails: systemState.config.entryDetails
       };
-      // حفظ محلي فقط دون مزامنة سحابية أثناء التهيئة
+      const configCode = parsedConfig.teacherCode || parsedConfig.autoEntryCode;
+      if (configCode) {
+        syncActiveTeacherCredentials(String(configCode).trim());
+      }
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     } catch(e){}
   }
-  
+
   const savedProfile = localStorage.getItem("arabya_teacher_profile");
   if (savedProfile && systemState.activeTeacher) {
-    try { 
+    try {
       const parsedProfile = JSON.parse(savedProfile);
       systemState.teacherProfile = parsedProfile;
       if (parsedProfile.name) systemState.activeTeacher.name = parsedProfile.name;
       if (parsedProfile.subject) systemState.activeTeacher.subject = parsedProfile.subject;
-      if (parsedProfile.autoEntryCode) {
+      const storedCode = systemState.activeTeacher.autoEntryCode || systemState.activeTeacher.password || systemState.config?.teacherCode || systemState.config?.autoEntryCode;
+      if (storedCode) {
+        systemState.teacherProfile.autoEntryCode = storedCode;
+      } else if (parsedProfile.autoEntryCode) {
         syncActiveTeacherCredentials(parsedProfile.autoEntryCode);
       }
+      localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     } catch(e){}
   }
@@ -979,6 +986,32 @@ function mergeRemoteCollection_(current, incoming, keyFn) {
 }
 
 
+
+function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
+  const keyFn = item => String(item.username || item.name || "");
+  const map = {};
+  (remoteTeachers || []).forEach(item => {
+    if (!item) return;
+    map[keyFn(item)] = { ...item };
+  });
+  (localTeachers || []).forEach(local => {
+    if (!local) return;
+    const key = keyFn(local);
+    const remote = map[key] || {};
+    map[key] = {
+      ...remote,
+      ...local,
+      password: local.password || remote.password,
+      autoEntryCode: local.autoEntryCode || local.password || remote.autoEntryCode || remote.password,
+      integrationConfig: {
+        ...(remote.integrationConfig || {}),
+        ...(local.integrationConfig || {})
+      }
+    };
+  });
+  return Object.keys(map).map(key => map[key]);
+}
+
 function hydrateStudentsFromResults(results) {
   if (!Array.isArray(results)) return;
   results.forEach(res => {
@@ -997,7 +1030,14 @@ function hydrateStudentsFromResults(results) {
 function mergeRemoteDatabaseIntoLocal(remoteData) {
   if (!remoteData || typeof remoteData !== "object") return false;
   if (Array.isArray(remoteData.teachers)) {
-    systemState.teachers = mergeRemoteCollection_(systemState.teachers, remoteData.teachers, item => String(item.username || item.name || ""));
+    systemState.teachers = mergeTeachersPreservingLocalAuth_(systemState.teachers, remoteData.teachers);
+    if (systemState.activeTeacher) {
+      const refreshedTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username);
+      if (refreshedTeacher) {
+        systemState.activeTeacher = refreshedTeacher;
+        syncActiveTeacherCredentials();
+      }
+    }
   }
   if (Array.isArray(remoteData.students)) {
     systemState.students = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""));
@@ -1491,11 +1531,11 @@ function persistCloudSyncUrlForTeacher(url) {
 
 function applyCloudBackupData(data) {
   if (data.teachers && Array.isArray(data.teachers)) {
-    systemState.teachers = data.teachers;
+    const localTeachers = systemState.teachers || [];
+    systemState.teachers = mergeTeachersPreservingLocalAuth_(localTeachers, data.teachers);
     localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     if (systemState.activeTeacher) {
       const restoredTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username)
-        || systemState.teachers.find(t => t.password === systemState.activeTeacher.password)
         || systemState.teachers[0];
       if (restoredTeacher) loginTeacherObject(restoredTeacher);
     }
@@ -2334,12 +2374,14 @@ function saveTeacherProfile() {
     systemState.teachers[idx] = systemState.activeTeacher;
   }
 
+  syncActiveTeacherCredentials(autoCode);
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
-  
-  // إعادة التحميل لتحديث الرابط
+  localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  saveSystemState(true);
+
   loadTeacherDashboardData();
-  alert("تم حفظ بيانات الملف الشخصي وتحديث رمز الدخول بنجاح!");
+  alert("تم حفظ بيانات الملف الشخصي وتحديث رمز الدخول بنجاح! جارٍ رفع التغيير للمزامنة السحابية.");
 }
 
 function saveTeacherIntegrationConfig() {
@@ -2386,10 +2428,17 @@ function saveTeacherIntegrationConfig() {
     systemState.teachers[idx] = systemState.activeTeacher;
   }
 
+  systemState.teacherProfile = {
+    name: systemState.activeTeacher.name,
+    subject: systemState.activeTeacher.subject,
+    autoEntryCode: code
+  };
+  syncActiveTeacherCredentials(code);
   saveTeachersToLocalStorage();
+  localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
-  
-  // تحديث مؤشر المزامنة فوراً بعد الحفظ
+  saveSystemState(true);
+
   const indicator = document.getElementById("cloud-sync-status-indicator");
   if (indicator) {
     if (url && (url.includes("/macros/s/") || url.endsWith("/exec"))) {
