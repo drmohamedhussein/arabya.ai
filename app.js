@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.7";
+const ARABYA_APP_VERSION = "2026.05.31.8";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -1034,6 +1034,71 @@ function sortResultsForDisplay(results, sortOrder, sourceList) {
 function sortResultsByRecency(results, sourceList) {
   return sortResultsForDisplay(results, "newest", sourceList);
 }
+
+
+const TEACHER_ACTIVE_TAB_KEY = "arabya_teacher_active_tab";
+const TEACHER_TAB_IDS = ["stats", "exams", "results", "students", "integration", "profile"];
+
+function normalizeTeacherTabId(tabId) {
+  const id = String(tabId || "").trim();
+  return TEACHER_TAB_IDS.includes(id) ? id : "stats";
+}
+
+function getSavedTeacherActiveTab() {
+  try {
+    return normalizeTeacherTabId(localStorage.getItem(TEACHER_ACTIVE_TAB_KEY));
+  } catch (e) {
+    return "stats";
+  }
+}
+
+function saveTeacherActiveTab(tabId) {
+  try {
+    localStorage.setItem(TEACHER_ACTIVE_TAB_KEY, normalizeTeacherTabId(tabId));
+  } catch (e) {}
+}
+
+function activateTeacherTab(tabId, options = {}) {
+  const normalizedTab = normalizeTeacherTabId(tabId);
+  if (systemState.activeView !== "teacher-dashboard-view" && !options.force) return normalizedTab;
+
+  document.querySelectorAll(".teacher-menu-item[data-tab]").forEach(item => {
+    const isActive = item.dataset.tab === normalizedTab;
+    item.classList.toggle("active", isActive);
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+
+  document.querySelectorAll(".teacher-tab-panel").forEach(panel => {
+    panel.classList.add("hidden");
+  });
+  const targetPanel = document.getElementById(`teacher-tab-${normalizedTab}`);
+  if (targetPanel) targetPanel.classList.remove("hidden");
+
+  if (!options.skipSave) saveTeacherActiveTab(normalizedTab);
+  if (options.skipRefresh) return normalizedTab;
+
+  reloadSystemStateFromLocalStorage();
+  if (normalizedTab === "stats") {
+    renderTeacherStatsDashboard();
+  } else if (normalizedTab === "results") {
+    if (typeof pullTeacherResultsFromCloud === "function") {
+      pullTeacherResultsFromCloud();
+    } else {
+      syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
+    }
+  } else if (normalizedTab === "students") {
+    syncDatabaseFromCloud({ silent: true }).finally(() => refreshTeacherDashboardViews({ all: true }));
+  } else if (normalizedTab === "exams") {
+    renderExamsList();
+  }
+  return normalizedTab;
+}
+
+function restoreTeacherActiveTab() {
+  activateTeacherTab(getSavedTeacherActiveTab(), { skipSave: true, skipRefresh: true });
+}
+
+window.activateTeacherTab = activateTeacherTab;
 
 function refreshTeacherDashboardViews(options = {}) {
   const refreshAll = !!options.all;
@@ -2298,34 +2363,10 @@ function setupUIEventListeners() {
     teacherQuickLoginBtn.addEventListener("click", handleTeacherQuickLogin);
   }
 
-  const menuItems = document.querySelectorAll(".teacher-menu-item");
+  const menuItems = document.querySelectorAll(".teacher-menu-item[data-tab]");
   menuItems.forEach(item => {
     item.addEventListener("click", () => {
-      menuItems.forEach(i => i.classList.remove("active"));
-      item.classList.add("active");
-      
-      const tabId = item.dataset.tab;
-      document.querySelectorAll(".teacher-tab-panel").forEach(panel => {
-        panel.classList.add("hidden");
-      });
-      const targetPanel = document.getElementById(`teacher-tab-${tabId}`);
-      if (targetPanel) targetPanel.classList.remove("hidden");
-      reloadSystemStateFromLocalStorage();
-      if (tabId === "stats") {
-        renderTeacherStatsDashboard();
-      } else if (tabId === "results") {
-        if (typeof pullTeacherResultsFromCloud === "function") {
-          pullTeacherResultsFromCloud();
-        } else {
-          syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
-        }
-      } else if (tabId === "students") {
-        syncDatabaseFromCloud({ silent: true }).finally(() => refreshTeacherDashboardViews({ all: true }));
-      } else if (tabId === "exams") {
-        renderExamsList();
-      } else if (tabId === "integration" || tabId === "profile") {
-        loadTeacherDashboardData();
-      }
+      activateTeacherTab(item.dataset.tab);
     });
   });
 
@@ -2569,8 +2610,7 @@ function computeTeacherStatsSnapshot() {
 }
 
 function openTeacherDashboardTab(tabId, afterOpen) {
-  const menuItem = document.querySelector(`.teacher-menu-item[data-tab="${tabId}"]`);
-  if (menuItem) menuItem.click();
+  activateTeacherTab(tabId, { skipRefresh: true });
   if (typeof afterOpen === "function") {
     setTimeout(afterOpen, 40);
   }
@@ -2907,6 +2947,8 @@ function loadTeacherDashboardData() {
   renderExamsList();
   renderStudentResultsTable();
   renderTeacherStudentsTable();
+
+  restoreTeacherActiveTab();
 
   syncDatabaseFromCloud({ silent: true }).then(synced => {
     if (synced && synced.ok) {
@@ -3645,13 +3687,7 @@ function createArabyaExamForm() {
 `;
 
   navigateToView("teacher-dashboard-view");
-  const tabIntegration = document.getElementById("teacher-tab-integration");
-  document.querySelectorAll(".teacher-menu-item").forEach(i => i.classList.remove("active"));
-  document.querySelectorAll(".teacher-menu-item").forEach(i => {
-    if (i.dataset.tab === "integration") i.classList.add("active");
-  });
-  document.querySelectorAll(".teacher-tab-panel").forEach(p => p.classList.add("hidden"));
-  tabIntegration.classList.remove("hidden");
+  activateTeacherTab("integration", { force: true, skipRefresh: true });
 
   const oldTextarea = document.getElementById("google-apps-script-code");
   if (oldTextarea) {
@@ -4917,9 +4953,8 @@ window.setTeacherResultsExamFilter = function(examIdOrTitle) {
   getResultsTableViewSettings().examFilter = String(examIdOrTitle);
   getResultsTableViewSettings().page = 1;
   persistResultsTableFilters();
-  const resultsTabBtn = document.querySelector('[data-teacher-tab="teacher-tab-results"]');
-  if (resultsTabBtn) resultsTabBtn.click();
-  else navigateToView("teacher-dashboard-view");
+  navigateToView("teacher-dashboard-view");
+  activateTeacherTab("results", { force: true, skipRefresh: true });
   setTimeout(() => {
     syncResultsFilterControlsUI();
     renderStudentResultsTable();

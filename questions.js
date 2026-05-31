@@ -381,6 +381,10 @@ function repairArabyaTeacherPanels() {
 function showArabyaTeacherPanel(tabId) {
   if (!tabId) return;
   repairArabyaTeacherPanelPlacementOnly();
+  if (typeof window.activateTeacherTab === "function") {
+    window.activateTeacherTab(tabId, { force: true, skipRefresh: true });
+    return;
+  }
   document.querySelectorAll(".teacher-tab-panel").forEach(function(panel) {
     panel.classList.add("hidden");
   });
