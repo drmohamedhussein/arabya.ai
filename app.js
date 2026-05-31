@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.2";
+const ARABYA_APP_VERSION = "2026.05.31.3";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -1316,6 +1316,9 @@ window.pullTeacherResultsFromCloud = async function() {
   }
   renderStudentResultsTable();
   renderTeacherStudentsTable();
+  if (typeof renderTeacherStatsDashboard === "function") {
+    renderTeacherStatsDashboard();
+  }
   if (el) {
     if (syncResult.ok) {
       const sheetNote = formatSheetSyncNote(syncResult);
@@ -2204,6 +2207,8 @@ function setupUIEventListeners() {
     createExamBtn.addEventListener("click", createNewExam);
   }
 
+  setupTeacherStatsControls();
+
   const exportResultsBtn = document.getElementById("teacher-export-results-btn");
   if (exportResultsBtn) {
     exportResultsBtn.addEventListener("click", exportTeacherResultsToCSV);
@@ -2506,33 +2511,118 @@ function bindTeacherStatsCardActions(container, actions) {
   });
 }
 
+
+function updateTeacherStatsSyncStatus(message, tone = "muted") {
+  const el = document.getElementById("teacher-stats-sync-status");
+  if (!el) return;
+  const colors = {
+    muted: "var(--text-muted)",
+    loading: "var(--secondary)",
+    success: "var(--success)",
+    error: "var(--error)",
+    warning: "var(--warning)"
+  };
+  el.style.color = colors[tone] || colors.muted;
+  el.innerHTML = message || "";
+}
+
+async function refreshTeacherStatsDashboard(options = {}) {
+  const refreshBtn = document.getElementById("teacher-stats-refresh-btn");
+  if (refreshBtn) refreshBtn.disabled = true;
+  updateTeacherStatsSyncStatus(
+    `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">refresh</span> جاري تحديث الإحصائيات...`,
+    "loading"
+  );
+  try {
+    if (typeof reloadSystemStateFromLocalStorage === "function") {
+      reloadSystemStateFromLocalStorage();
+    }
+    renderTeacherStatsDashboard();
+    if (options.silent) return true;
+    updateTeacherStatsSyncStatus(
+      `<span class="material-icons" style="vertical-align:middle; color:var(--success);">check_circle</span> تم تحديث الإحصائيات من البيانات المحلية (${systemState.results.length} نتيجة · ${systemState.students.length} طالب)`,
+      "success"
+    );
+    return true;
+  } catch (err) {
+    console.error("refreshTeacherStatsDashboard:", err);
+    updateTeacherStatsSyncStatus(
+      `<span class="material-icons" style="vertical-align:middle; color:var(--error);">error</span> تعذّر تحديث الإحصائيات. راجع Console للتفاصيل.`,
+      "error"
+    );
+    return false;
+  } finally {
+    if (refreshBtn) refreshBtn.disabled = false;
+  }
+}
+
+async function syncTeacherStatsFromCloud() {
+  const syncBtn = document.getElementById("teacher-stats-sync-btn");
+  const urls = typeof getArabyaWebAppUrls === "function" ? getArabyaWebAppUrls() : [];
+  if (!urls.length) {
+    updateTeacherStatsSyncStatus(
+      `<span class="material-icons" style="vertical-align:middle; color:var(--warning);">link_off</span> لم يتم ربط Google Sheets بعد. اذهب إلى تبويب «الربط بـ Google Sheets» وأدخل رابط /exec.`,
+      "warning"
+    );
+    return false;
+  }
+  if (syncBtn) syncBtn.disabled = true;
+  updateTeacherStatsSyncStatus(
+    `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">cloud_sync</span> جاري المزامنة من Google Sheets...`,
+    "loading"
+  );
+  try {
+    let ok = false;
+    if (typeof pullTeacherResultsFromCloud === "function") {
+      ok = await pullTeacherResultsFromCloud();
+    } else if (typeof syncDatabaseFromCloud === "function") {
+      const result = await syncDatabaseFromCloud({ silent: false });
+      ok = !!(result && result.ok);
+    }
+    if (typeof reloadSystemStateFromLocalStorage === "function") {
+      reloadSystemStateFromLocalStorage();
+    }
+    renderTeacherStatsDashboard();
+    if (ok) {
+      updateTeacherStatsSyncStatus(
+        `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} نتيجة · ${systemState.students.length} طالب`,
+        "success"
+      );
+    } else {
+      updateTeacherStatsSyncStatus(
+        `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّرت المزامنة. تأكد من رابط /exec ونشر Apps Script كإصدار جديد (Anyone).`,
+        "error"
+      );
+    }
+    return ok;
+  } catch (err) {
+    console.error("syncTeacherStatsFromCloud:", err);
+    updateTeacherStatsSyncStatus(
+      `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> خطأ أثناء المزامنة: ${escapeHtml(err.message || "خطأ غير معروف")}`,
+      "error"
+    );
+    return false;
+  } finally {
+    if (syncBtn) syncBtn.disabled = false;
+  }
+}
+
 function setupTeacherStatsControls() {
   const refreshBtn = document.getElementById("teacher-stats-refresh-btn");
   if (refreshBtn && !refreshBtn.dataset.bound) {
     refreshBtn.dataset.bound = "1";
-    refreshBtn.addEventListener("click", renderTeacherStatsDashboard);
+    refreshBtn.addEventListener("click", () => refreshTeacherStatsDashboard());
   }
   const syncBtn = document.getElementById("teacher-stats-sync-btn");
   if (syncBtn && !syncBtn.dataset.bound) {
     syncBtn.dataset.bound = "1";
-    syncBtn.addEventListener("click", async () => {
-      syncBtn.disabled = true;
-      try {
-        if (typeof pullTeacherResultsFromCloud === "function") {
-          await pullTeacherResultsFromCloud();
-        }
-      } finally {
-        syncBtn.disabled = false;
-        renderTeacherStatsDashboard();
-      }
-    });
+    syncBtn.addEventListener("click", () => syncTeacherStatsFromCloud());
   }
 }
 
 function renderTeacherStatsDashboard() {
   const overview = document.getElementById("teacher-stats-overview");
   if (!overview) return;
-  setupTeacherStatsControls();
 
   const stats = computeTeacherStatsSnapshot();
   const updatedEl = document.getElementById("teacher-stats-updated-at");
