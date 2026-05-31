@@ -128,14 +128,15 @@ function readArabyaSheetResults_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("نتائج الطلاب");
   if (!sheet || sheet.getLastRow() < 2) return [];
 
-  var numCols = Math.max(sheet.getLastColumn(), 12);
-  var numRows = sheet.getLastRow() - 1;
-  var values = sheet.getRange(2, 1, numRows, numCols).getValues();
+  var allValues = sheet.getDataRange().getValues();
+  if (!allValues || allValues.length < 2) return [];
+
+  var numCols = Math.max(allValues[0].length, sheet.getLastColumn(), 12);
   var layout = detectArabyaResultLayout_(sheet, numCols);
   var results = [];
 
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
+  for (var i = 1; i < allValues.length; i++) {
+    var row = allValues[i];
     if (!row || !row.length) continue;
     var hasContent = false;
     for (var c = 0; c < row.length; c++) {
@@ -146,7 +147,7 @@ function readArabyaSheetResults_() {
     }
     if (!hasContent) continue;
 
-    var item = rowToArabyaResultObject_(row, layout, i + 2);
+    var item = rowToArabyaResultObject_(row, layout, i + 1);
     if (item && (item.name || item.id || item.recordId)) {
       results.push(item);
     }

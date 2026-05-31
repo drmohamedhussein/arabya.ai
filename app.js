@@ -968,6 +968,7 @@ window.pullTeacherResultsFromCloud = async function() {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
   const syncResult = await syncDatabaseFromCloud({ silent: false });
+  if (syncResult.ok) getResultsTableViewSettings().page = 1;
   renderStudentResultsTable();
   renderTeacherStudentsTable();
   if (el) {
@@ -975,7 +976,7 @@ window.pullTeacherResultsFromCloud = async function() {
       const sheetNote = syncResult.sheetResultRows
         ? ` — ${syncResult.sheetResultRows} صفاً في ورقة «نتائج الطلاب»`
         : "";
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تم تحديث السجلات من السحابة (${systemState.results.length} نتيجة${sheetNote})`;
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت مزامنة ${systemState.results.length} نتيجة من السحابة (بدون حد أقصى)${sheetNote}`;
     } else {
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، ثم انسخ الكود الذي يحتوي readArabyaSheetResults_ من تبويب الربط وأعد النشر كإصدار جديد.`;
     }
@@ -3748,20 +3749,126 @@ window.viewResultDetailQuery = function(recordId, studentId, examId) {
   }
 };
 
+
+function getResultsTableViewSettings() {
+  if (!systemState.resultsTableView) {
+    let pageSize = 50;
+    try {
+      const saved = parseInt(localStorage.getItem("arabya_results_page_size") || "50", 10);
+      if ([25, 50, 100, 200, 500, 0].includes(saved)) pageSize = saved;
+    } catch (e) {}
+    systemState.resultsTableView = { page: 1, pageSize };
+  }
+  return systemState.resultsTableView;
+}
+
+function setResultsTablePageSize(size) {
+  const view = getResultsTableViewSettings();
+  view.pageSize = [25, 50, 100, 200, 500, 0].includes(size) ? size : 50;
+  view.page = 1;
+  try { localStorage.setItem("arabya_results_page_size", String(view.pageSize)); } catch (e) {}
+}
+
+function clampResultsTablePage(totalItems, pageSize, page) {
+  if (!pageSize || pageSize <= 0) return 1;
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  return Math.min(Math.max(1, page), totalPages);
+}
+
+function updateResultsPaginationUI(totalItems, page, pageSize) {
+  const info = document.getElementById("teacher-results-page-info");
+  const pageNum = document.getElementById("teacher-results-page-number");
+  const prevBtn = document.getElementById("teacher-results-prev-page");
+  const nextBtn = document.getElementById("teacher-results-next-page");
+  const sizeSelect = document.getElementById("teacher-results-page-size");
+
+  if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
+    sizeSelect.value = String(pageSize);
+  }
+
+  if (totalItems === 0) {
+    if (info) info.textContent = "";
+    if (pageNum) pageNum.textContent = "";
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  if (!pageSize || pageSize <= 0) {
+    if (info) info.textContent = `إجمالي ${totalItems} سجلاً — عرض الكل`;
+    if (pageNum) pageNum.textContent = "";
+    if (prevBtn) prevBtn.disabled = true;
+    if (nextBtn) nextBtn.disabled = true;
+    return;
+  }
+
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, totalItems);
+  if (info) info.textContent = `عرض ${start}–${end} من ${totalItems} سجلاً`;
+  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  if (prevBtn) prevBtn.disabled = page <= 1;
+  if (nextBtn) nextBtn.disabled = page >= totalPages;
+}
+
+function setupResultsTablePaginationControls() {
+  const sizeSelect = document.getElementById("teacher-results-page-size");
+  const prevBtn = document.getElementById("teacher-results-prev-page");
+  const nextBtn = document.getElementById("teacher-results-next-page");
+
+  if (sizeSelect && !sizeSelect.dataset.bound) {
+    sizeSelect.dataset.bound = "1";
+    sizeSelect.value = String(getResultsTableViewSettings().pageSize);
+    sizeSelect.addEventListener("change", () => {
+      setResultsTablePageSize(parseInt(sizeSelect.value, 10));
+      renderStudentResultsTable();
+    });
+  }
+  if (prevBtn && !prevBtn.dataset.bound) {
+    prevBtn.dataset.bound = "1";
+    prevBtn.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderStudentResultsTable();
+      }
+    });
+  }
+  if (nextBtn && !nextBtn.dataset.bound) {
+    nextBtn.dataset.bound = "1";
+    nextBtn.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      view.page += 1;
+      renderStudentResultsTable();
+    });
+  }
+}
+
 function renderStudentResultsTable() {
   const tbody = document.getElementById("teacher-results-table-body");
   if (!tbody) return;
   tbody.innerHTML = "";
+  setupResultsTablePaginationControls();
 
   if (systemState.results.length === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
+    updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize);
     return;
   }
 
   const sorted = [...systemState.results].reverse();
+  const view = getResultsTableViewSettings();
+  const totalItems = sorted.length;
+  view.page = clampResultsTablePage(totalItems, view.pageSize, view.page);
 
-  sorted.forEach(res => {
+  let pageItems = sorted;
+  if (view.pageSize > 0) {
+    const start = (view.page - 1) * view.pageSize;
+    pageItems = sorted.slice(start, start + view.pageSize);
+  }
+
+  pageItems.forEach(res => {
     const row = document.createElement("tr");
     const statusBadge = formatResultStatusBadge(res);
     const uncancelBtn = (res.status === "canceled" && res.allowRetake !== true)
@@ -3778,6 +3885,8 @@ function renderStudentResultsTable() {
     `;
     tbody.appendChild(row);
   });
+
+  updateResultsPaginationUI(totalItems, view.page, view.pageSize);
 }
 
 window.viewTeacherResultDetail = function(recordId, studentId, examId) {

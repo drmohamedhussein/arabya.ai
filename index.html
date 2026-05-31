@@ -770,7 +770,7 @@
             <div class="panel-header">
               <div>
                 <div class="panel-title">سجلات نتائج الطلاب</div>
-                <div style="font-size:0.85rem; color:var(--text-muted);">إدارة النتائج محلياً وسحابياً وتنزيلها ورفعها بالـ JSON/CSV</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">إدارة النتائج محلياً وسحابياً (بدون حد أقصى للعدد) مع تقسيم العرض إلى صفحات</div>
               </div>
               
               <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
@@ -812,6 +812,27 @@
                   <!-- تعبأ ديناميكياً -->
                 </tbody>
               </table>
+            </div>
+
+            <div id="teacher-results-pagination" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem; margin-top:1rem; padding:0.75rem 0; border-top:1px solid var(--border-color);">
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <span style="font-size:0.85rem; color:var(--text-muted);">عرض</span>
+                <select id="teacher-results-page-size" class="form-control" style="width:auto; min-width:5.5rem; padding:0.35rem 0.75rem;" aria-label="عدد السجلات في الصفحة">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="500">500</option>
+                  <option value="0">الكل</option>
+                </select>
+                <span style="font-size:0.85rem; color:var(--text-muted);">سجلاً في الصفحة</span>
+              </div>
+              <div id="teacher-results-page-info" style="font-size:0.85rem; color:var(--text-muted);"></div>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <button type="button" id="teacher-results-prev-page" class="btn btn-outline btn-sm">السابق</button>
+                <span id="teacher-results-page-number" style="font-size:0.85rem; color:var(--text-muted); min-width:4rem; text-align:center;"></span>
+                <button type="button" id="teacher-results-next-page" class="btn btn-outline btn-sm">التالي</button>
+              </div>
             </div>
 
             <!-- لوحة تفاصيل وتعديل إجابات ونتيجة الطالب الفردية -->
