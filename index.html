@@ -1225,6 +1225,18 @@ function jsonArabya_(obj) {
             </div>
             <div id="teacher-students-sync-status" style="margin:0.75rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;"></div>
 
+            <div class="form-group" style="margin-bottom:1rem;">
+              <label class="form-label" for="teacher-students-search-input">بحث في الطلاب</label>
+              <div style="display:flex; gap:0.5rem; align-items:stretch;">
+                <div class="input-wrapper" style="position:relative; flex:1;">
+                  <input type="search" id="teacher-students-search-input" class="form-control" placeholder="ابحث بالاسم، ID، كود الاشتراك، البريد، أو الموبايل..." autocomplete="off" aria-describedby="teacher-students-search-hint" style="padding-left:2.5rem;">
+                  <span class="material-icons input-icon" aria-hidden="true" style="pointer-events:none;">search</span>
+                </div>
+                <button type="button" id="teacher-students-search-clear" class="btn btn-outline btn-sm" aria-label="مسح البحث">مسح</button>
+              </div>
+              <small id="teacher-students-search-hint" style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">البحث فوري — يفلتر الجدول أثناء الكتابة</small>
+            </div>
+
             <!-- فورم إضافة طالب مخفي كـ inline card -->
             <div id="add-student-form-card" class="exam-builder-card hidden" style="margin-bottom: 1.5rem;">
               <h4 style="color:var(--secondary); margin-bottom: 1rem; font-weight:700;">تسجيل حساب طالب جديد في النظام</h4>

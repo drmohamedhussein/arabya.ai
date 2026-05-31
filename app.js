@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.8";
+const ARABYA_APP_VERSION = "2026.05.30.9";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -4993,6 +4993,65 @@ window.uncancelStudentExam = function(recordId) {
 };
 
 
+
+function getStudentsSearchQuery() {
+  const input = document.getElementById("teacher-students-search-input");
+  return input ? input.value.trim() : "";
+}
+
+function studentMatchesSearchQuery(student, query) {
+  const normalizedQuery = normalizeResultsSearchText(query);
+  if (!normalizedQuery) return true;
+  const fields = [
+    student.name,
+    student.id,
+    student.code,
+    student.email,
+    student.mobile,
+    student.timestamp,
+    student.studentKey
+  ];
+  if (fields.some(field => normalizeResultsSearchText(field).includes(normalizedQuery))) {
+    return true;
+  }
+  const queryId = normalizeStudentId(query);
+  if (queryId && normalizeStudentId(student.id).includes(queryId)) return true;
+  const queryCode = sanitizeStudentCodeInput(query);
+  if (queryCode && sanitizeStudentCodeInput(student.code || "") === queryCode) return true;
+  return false;
+}
+
+function filterStudentsForSearch(students, query) {
+  const list = Array.isArray(students) ? students : [];
+  const activeQuery = query != null ? String(query).trim() : getStudentsSearchQuery();
+  if (!activeQuery) return list;
+  return list.filter(student => studentMatchesSearchQuery(student, activeQuery));
+}
+
+function setupStudentsTableSearchControl() {
+  const input = document.getElementById("teacher-students-search-input");
+  const clearBtn = document.getElementById("teacher-students-search-clear");
+  if (!input || input.dataset.bound) return;
+  input.dataset.bound = "1";
+  let timer = null;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      getStudentsTableViewSettings().page = 1;
+      renderTeacherStudentsTable();
+    }, 180);
+  });
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", () => {
+      input.value = "";
+      getStudentsTableViewSettings().page = 1;
+      renderTeacherStudentsTable();
+      input.focus();
+    });
+  }
+}
+
 function getStudentsTableViewSettings() {
   if (!systemState.studentsTableView) {
     let pageSize = 50;
@@ -5018,27 +5077,38 @@ function clampStudentsTablePage(totalItems, pageSize, page) {
   return Math.min(Math.max(1, page), totalPages);
 }
 
-function updateStudentsPaginationUI(totalItems, page, pageSize) {
+function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = totalItems, searchQuery = "") {
   const info = document.getElementById("teacher-students-page-info");
   const pageNum = document.getElementById("teacher-students-page-number");
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
   const sizeSelect = document.getElementById("teacher-students-page-size");
+  const isFiltered = !!searchQuery && totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
 
   if (totalItems === 0) {
-    if (info) info.textContent = "";
+    if (info) {
+      info.textContent = searchQuery
+        ? `وُجد 0 من ${totalAll} طالب`
+        : "";
+    }
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
     return;
   }
 
+  const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} طالب — ` : "";
+
   if (!pageSize || pageSize <= 0) {
-    if (info) info.textContent = `إجمالي ${totalItems} طالب — عرض الكل`;
+    if (info) {
+      info.textContent = isFiltered
+        ? `${countPrefix}عرض الكل`
+        : `إجمالي ${totalItems} طالب — عرض الكل`;
+    }
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
@@ -5048,7 +5118,7 @@ function updateStudentsPaginationUI(totalItems, page, pageSize) {
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `عرض ${start}–${end} من ${totalItems} طالب`;
+  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} طالب`;
   if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
@@ -5111,23 +5181,34 @@ function renderTeacherStudentsTable() {
   if (!tbody) return;
   tbody.innerHTML = "";
   setupStudentsTablePaginationControls();
+  setupStudentsTableSearchControl();
 
-  if (systemState.students.length === 0) {
+  const searchQuery = getStudentsSearchQuery();
+  const totalAll = systemState.students.length;
+
+  if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
-    updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize);
+    updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, searchQuery);
     return;
   }
 
   const reversed = [...systemState.students].reverse();
+  const filtered = filterStudentsForSearch(reversed, searchQuery);
   const view = getStudentsTableViewSettings();
-  const totalItems = reversed.length;
+  const totalItems = filtered.length;
   view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
 
-  let pageItems = reversed;
+  if (totalItems === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب يطابقون «${escapeHtml(searchQuery)}» من ${totalAll} طالب.</td></tr>`;
+    updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, searchQuery);
+    return;
+  }
+
+  let pageItems = filtered;
   if (view.pageSize > 0) {
     const start = (view.page - 1) * view.pageSize;
-    pageItems = reversed.slice(start, start + view.pageSize);
+    pageItems = filtered.slice(start, start + view.pageSize);
   }
 
   pageItems.forEach(s => {
@@ -5167,7 +5248,7 @@ function renderTeacherStudentsTable() {
     tbody.appendChild(row);
   });
 
-  updateStudentsPaginationUI(totalItems, view.page, view.pageSize);
+  updateStudentsPaginationUI(totalItems, view.page, view.pageSize, totalAll, searchQuery);
 }
 
 // إظهار بطاقة إضافة طالب جديد
