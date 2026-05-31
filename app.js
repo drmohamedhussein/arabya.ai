@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.30.4";
+const ARABYA_APP_VERSION = "2026.05.30.5";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -1180,6 +1180,19 @@ async function syncLocalDatabaseToCloud() {
   return pushCloudBackupNow();
 }
 
+
+function formatSheetSyncNote(syncResult) {
+  if (!syncResult || syncResult.sheetResultRows == null) return "";
+  const imported = syncResult.sheetResultRows;
+  const total = syncResult.sheetTotalRows != null ? syncResult.sheetTotalRows : imported;
+  if (total > imported) {
+    const skipped = syncResult.sheetSkippedRows != null ? syncResult.sheetSkippedRows : (total - imported);
+    const skippedNote = skipped === 1 ? "صف فارغ واحد متروك" : `${skipped} صفوف فارغة متروكة`;
+    return ` — ${total} صفاً في ورقة «نتائج الطلاب» (${imported} مستورد، ${skippedNote})`;
+  }
+  return ` — ${imported} صفاً في ورقة «نتائج الطلاب»`;
+}
+
 window.pullTeacherResultsFromCloud = async function() {
   const el = document.getElementById("teacher-results-sync-status");
   if (el) {
@@ -1194,10 +1207,8 @@ window.pullTeacherResultsFromCloud = async function() {
   renderTeacherStudentsTable();
   if (el) {
     if (syncResult.ok) {
-      const sheetNote = syncResult.sheetResultRows
-        ? ` — ${syncResult.sheetResultRows} صفاً في ورقة «نتائج الطلاب»`
-        : "";
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} نتيجة و ${systemState.students.length} طالب${sheetNote}`;
+      const sheetNote = formatSheetSyncNote(syncResult);
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} سجلاً نتائج · ${systemState.students.length} طالب${sheetNote}`;
     } else {
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، ثم انسخ الكود الذي يحتوي readArabyaSheetResults_ من تبويب الربط وأعد النشر كإصدار جديد.`;
     }
@@ -1227,6 +1238,8 @@ async function syncDatabaseFromCloud(options = {}) {
         return {
           ok: true,
           sheetResultRows: response.sheetResultRows ?? null,
+          sheetTotalRows: response.sheetTotalRows ?? null,
+          sheetSkippedRows: response.sheetSkippedRows ?? null,
           backupResultRows: response.backupResultRows ?? null,
           totalResults: systemState.results.length
         };

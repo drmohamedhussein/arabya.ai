@@ -73,7 +73,8 @@ function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_backup") {
-      var sheetResults = readArabyaSheetResults_();
+      var sheetRead = readArabyaSheetResults_();
+      var sheetResults = sheetRead.results || [];
       var backupSheet = readArabyaBackupSheet_();
       var backupResultRows = backupSheet && Array.isArray(backupSheet.results) ? backupSheet.results.length : 0;
       var db = readArabyaDatabase_();
@@ -90,6 +91,8 @@ function doGet(e) {
         data: db,
         counts: countArabya_(db),
         sheetResultRows: sheetResults.length,
+        sheetTotalRows: sheetRead.totalRows || sheetResults.length,
+        sheetSkippedRows: sheetRead.skippedRows || 0,
         backupResultRows: backupResultRows,
         derivedStudentCount: derivedStudents.length
       });
@@ -160,18 +163,24 @@ function ensureArabyaResultHeaders_(sheet) {
 
 function readArabyaSheetResults_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("نتائج الطلاب");
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (!sheet || sheet.getLastRow() < 2) {
+    return { results: [], totalRows: 0, skippedRows: 0 };
+  }
 
-  var allValues = sheet.getDataRange().getValues();
-  if (!allValues || allValues.length < 2) return [];
-
-  var numCols = Math.max(allValues[0].length, sheet.getLastColumn(), 12);
+  var lastRow = sheet.getLastRow();
+  var numCols = Math.max(sheet.getLastColumn(), 17);
   var layout = detectArabyaResultLayout_(sheet, numCols);
+  var dataRows = sheet.getRange(2, 1, lastRow, numCols).getValues();
   var results = [];
+  var skippedRows = 0;
 
-  for (var i = 1; i < allValues.length; i++) {
-    var row = allValues[i];
-    if (!row || !row.length) continue;
+  for (var i = 0; i < dataRows.length; i++) {
+    var row = dataRows[i];
+    var sheetRow = i + 2;
+    if (!row || !row.length) {
+      skippedRows++;
+      continue;
+    }
     var hasContent = false;
     for (var c = 0; c < row.length; c++) {
       if (row[c] !== "" && row[c] !== null && row[c] !== undefined) {
@@ -179,14 +188,24 @@ function readArabyaSheetResults_() {
         break;
       }
     }
-    if (!hasContent) continue;
+    if (!hasContent) {
+      skippedRows++;
+      continue;
+    }
 
-    var item = rowToArabyaResultObject_(row, layout, i + 1);
+    var item = rowToArabyaResultObject_(row, layout, sheetRow);
     if (item && (item.name || item.id || item.recordId)) {
       results.push(item);
+    } else {
+      skippedRows++;
     }
   }
-  return results;
+
+  return {
+    results: results,
+    totalRows: dataRows.length,
+    skippedRows: skippedRows
+  };
 }
 
 function detectArabyaResultLayout_(sheet, numCols) {
