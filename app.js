@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.14";
+const ARABYA_APP_VERSION = "2026.05.31.15";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -5191,8 +5191,10 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     score: scoreString,
     details: details,
     maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
+    attemptNumber: resultObj?.attemptNumber ?? "",
     ...buildResultCloudRetakeFields(resultObj),
-    ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile)
+    ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
+    ...(resultObj ? buildCheatTrackingFieldsFromResult(resultObj) : buildCheatTrackingFields())
   };
   const slimPayload = buildSlimResultCloudPayload(payload);
 
@@ -5277,13 +5279,17 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     details: res.details || "",
     maxScore: res.maxScore || "",
     isManualGradeUpdate: true,
-    ...buildResultCloudRetakeFields(res)
+    attemptNumber: res.attemptNumber ?? "",
+    ...buildResultCloudRetakeFields(res),
+    ...buildResultDeviceFields(res),
+    ...buildCheatTrackingFieldsFromResult(res)
   };
+  const slimPayload = buildSlimResultCloudPayload(payload);
 
   let done = 0;
   const total = urls.size;
   urls.forEach(url => {
-    postToArabyaWebApp(url, payload).then(() => {
+    postToArabyaWebApp(url, slimPayload).then(() => {
       done++;
       if (done === total) {
         pushCloudBackupNow().catch(() => {});
@@ -6758,6 +6764,25 @@ function getCheatReasonLabel(reason) {
     "keyboard-shortcut": "استخدام اختصار لوحة مفاتيح محظور"
   };
   return actionMap[reason] || "مخالفة قواعد الامتحان";
+}
+
+
+function buildCheatTrackingFieldsFromResult(res) {
+  if (!res) return buildCheatTrackingFields();
+  const log = Array.isArray(res.cheatAttemptLog) ? res.cheatAttemptLog : [];
+  const violations = Number(res.cheatViolations);
+  let maxAllowed = res.maxCheatAttemptsAllowed;
+  if (maxAllowed === undefined || maxAllowed === null || maxAllowed === "") {
+    const exam = Array.isArray(systemState.exams)
+      ? systemState.exams.find(e => e && e.id === res.examId)
+      : null;
+    maxAllowed = getExamMaxCheatAttempts(exam || systemState.currentExam);
+  }
+  return {
+    cheatViolations: Number.isFinite(violations) ? violations : log.length,
+    cheatAttemptLog: log,
+    maxCheatAttemptsAllowed: maxAllowed
+  };
 }
 
 function buildCheatTrackingFields() {
