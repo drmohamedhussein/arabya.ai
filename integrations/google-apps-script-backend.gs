@@ -64,6 +64,8 @@ function doGet(e) {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_backup") {
       var sheetResults = readArabyaSheetResults_();
+      var backupSheet = readArabyaBackupSheet_();
+      var backupResultRows = backupSheet && Array.isArray(backupSheet.results) ? backupSheet.results.length : 0;
       var db = readArabyaDatabase_();
       if (sheetResults.length) {
         db.results = mergeArabyaCollection_(db.results || [], sheetResults, "results");
@@ -74,9 +76,7 @@ function doGet(e) {
         data: db,
         counts: countArabya_(db),
         sheetResultRows: sheetResults.length,
-        backupResultRows: (readArabyaBackupSheet_() && readArabyaBackupSheet_().results)
-          ? readArabyaBackupSheet_().results.length
-          : 0
+        backupResultRows: backupResultRows
       });
     }
     return jsonArabya_({ status: "active", service: "ARABYA.NET backend bridge" });
