@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.13";
+const ARABYA_APP_VERSION = "2026.05.31.14";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 
 let systemState = {
@@ -130,6 +130,8 @@ document.addEventListener("DOMContentLoaded", () => {
               systemState.currentQuestionIndex = session.currentQuestionIndex || 0;
               systemState.studentAnswers = session.studentAnswers || {};
               systemState.cheatViolations = session.cheatViolations || 0;
+              systemState.cheatAttemptLog = Array.isArray(session.cheatAttemptLog) ? session.cheatAttemptLog : [];
+              systemState.examMaxCheatAttemptsAllowed = session.examMaxCheatAttemptsAllowed ?? getExamMaxCheatAttempts(matchedExam);
               systemState.isExamActive = true;
               systemState.isCheatingSuspended = false;
               markExamAntiCheatStarted();
@@ -910,6 +912,11 @@ function formatResultStatusBadge(res) {
   }
   if (res.status === "incomplete") {
     return '<span style="color:var(--warning); font-weight:700; font-size:0.8rem; margin-right:0.35rem;">[جاري]</span>';
+  }
+  const cheatCount = Number(res.cheatViolations) || 0;
+  if (cheatCount > 0) {
+    const max = res.maxCheatAttemptsAllowed ?? res.maxCheatAttempts ?? "؟";
+    return `<span style="color:var(--error); font-weight:700; font-size:0.75rem; margin-right:0.35rem; display:inline-block;">[غش ${cheatCount}/${max}]</span>`;
   }
   return "";
 }
@@ -4747,6 +4754,8 @@ async function validateStudentAndStart() {
   systemState.isExamActive = true;
   systemState.isCheatingSuspended = false;
   systemState.cheatViolations = 0;
+  systemState.cheatAttemptLog = [];
+  systemState.examMaxCheatAttemptsAllowed = getExamMaxCheatAttempts(selectedExam);
   markExamAntiCheatStarted();
 
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === selectedExam.id && r.status === "incomplete"));
@@ -4770,8 +4779,9 @@ function showExamSecurityNotice() {
   hint.innerHTML =
     `<span class="material-icons" style="vertical-align:middle; font-size:1rem;">security</span> ` +
     `وضع تأمين الامتحان مفعّل على ${deviceLabel}: لا تغادر التبويب ولا تفتح ChatGPT أو تطبيقات أخرى. ` +
-    `أي تبديل تبويب أو إخفاء للصفحة يُسجَّل كمخالفة بعد ${graceSec} ثانية. ` +
-    `يُمنع استخدام نفس الجهاز لطالبين مختلفين في نفس الامتحان.`;
+    `أي تبديل تبويب أو مغادرة الصفحة يُسجَّل كمحاولة غش (حسب حد المعلم) بعد ${graceSec} ثانية. ` +
+    `لن يظهر لك عدد المحاولات — تظهر للمعلم فقط في سجل النتائج. ` +
+    `يُمنع استخدام نفس الجهاز لطالبين مختلفين.`;
 }
 
 function renderRunnerQuestion() {
@@ -5086,6 +5096,7 @@ function submitFinishedExam() {
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions)),
     status: "completed",
     ...buildResultDeviceFields(systemState.examDeviceProfile),
+    ...buildCheatTrackingFields(),
     allowRetake: false
   };
 
@@ -6103,6 +6114,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-total-score-input").value = res.score;
   renderResultRetakeManagementPanel(res);
   renderStudentAttemptsPanel(res);
+  renderTeacherCheatAttemptsPanel(res);
 
   if (!res.studentAnswers) res.studentAnswers = {};
   if (!res.questionScores) res.questionScores = {};
@@ -6351,7 +6363,7 @@ function exportTeacherResultsToCSV() {
   }
 
   let csvContent = "\ufeffsep=,\n";
-  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,إعادة التقديم,النتيجة,التاريخ والوقت\n";
+  csvContent += "اسم الطالب,رقم ID,كود الاشتراك,الجامعة,الكلية,الفرقة,الامتحان,النوع,الحالة,إعادة التقديم,محاولات غش,حد الغش,تفاصيل محاولات الغش,النتيجة,التاريخ والوقت\n";
 
   exportRows.forEach(res => {
     csvContent += buildCsvLine([
@@ -6365,6 +6377,9 @@ function exportTeacherResultsToCSV() {
       res.examType || "أعمال سنة",
       getResultDisplayStatus(res),
       getResultRetakeStatusText(res),
+      formatCheatAttemptsTeacherSummary(res),
+      res.maxCheatAttemptsAllowed ?? "",
+      formatCheatAttemptsExportText(res),
       res.score || "",
       res.timestamp || ""
     ]);
@@ -6728,10 +6743,10 @@ function getExamBlockingMessage(blockingResult) {
   return "لقد أنهيت هذا الامتحان وتسليم إجاباتك مسبقاً.\n\nإذا احتجت محاولة جديدة، اطلب من المعلم «السماح بإعادة الامتحان».";
 }
 
-function getCheatPenaltyMessage(reason, violationNumber, maxViolations) {
+function getCheatReasonLabel(reason) {
   const actionMap = {
     blur: "الخروج من نافذة الامتحان",
-    visibility: "إخفاء تبويب الامتحان أو فتح تبويب/تطبيق آخر (مثل ChatGPT)",
+    visibility: "إخفاء تبويب الامتحان أو فتح تبويب آخر",
     "visibility-watchdog": "إبقاء تبويب الامتحان مخفياً أو التبديل لتطبيق آخر",
     "focus-watchdog": "فقدان تركيز نافذة الامتحان",
     pagehide: "محاولة مغادرة صفحة الامتحان",
@@ -6742,22 +6757,94 @@ function getCheatPenaltyMessage(reason, violationNumber, maxViolations) {
     paste: "محاولة اللصق",
     "keyboard-shortcut": "استخدام اختصار لوحة مفاتيح محظور"
   };
-  const actionText = actionMap[reason] || "مخالفة قواعد الامتحان";
-  const remaining = Math.max(0, maxViolations - violationNumber);
+  return actionMap[reason] || "مخالفة قواعد الامتحان";
+}
+
+function buildCheatTrackingFields() {
+  const log = Array.isArray(systemState.cheatAttemptLog) ? [...systemState.cheatAttemptLog] : [];
+  const maxAllowed = systemState.examMaxCheatAttemptsAllowed ?? getExamMaxCheatAttempts(systemState.currentExam);
+  return {
+    cheatViolations: log.length,
+    cheatAttemptLog: log,
+    maxCheatAttemptsAllowed: maxAllowed
+  };
+}
+
+function recordCheatAttempt(reason) {
+  if (!Array.isArray(systemState.cheatAttemptLog)) {
+    systemState.cheatAttemptLog = [];
+  }
+  systemState.cheatAttemptLog.push({
+    reason: reason || "unknown",
+    label: getCheatReasonLabel(reason),
+    at: new Date().toISOString()
+  });
+  systemState.cheatViolations = systemState.cheatAttemptLog.length;
+  updateLiveIncompleteResult();
+  saveActiveStudentSession();
+}
+
+function formatCheatAttemptsTeacherSummary(res) {
+  const count = Number(res?.cheatViolations) || 0;
+  if (!count) return "";
+  const max = res.maxCheatAttemptsAllowed ?? res.maxCheatAttempts ?? "—";
+  return `محاولات غش: ${count} / ${max}`;
+}
+
+function formatCheatAttemptsExportText(res) {
+  const log = Array.isArray(res?.cheatAttemptLog) ? res.cheatAttemptLog : [];
+  if (!log.length) return "";
+  return log.map((entry, idx) => `${idx + 1}. ${entry.label || entry.reason || "غش"} (${entry.at || ""})`).join(" | ");
+}
+
+function renderTeacherCheatAttemptsPanel(res) {
+  const panel = document.getElementById("detail-cheat-attempts-panel");
+  const listEl = document.getElementById("detail-cheat-attempts-list");
+  const summaryEl = document.getElementById("detail-cheat-attempts-summary");
+  if (!panel || !listEl) return;
+
+  const count = Number(res?.cheatViolations) || 0;
+  const max = res.maxCheatAttemptsAllowed ?? res.maxCheatAttempts ?? "—";
+  if (!count) {
+    panel.classList.add("hidden");
+    listEl.innerHTML = "";
+    if (summaryEl) summaryEl.textContent = "";
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  if (summaryEl) {
+    summaryEl.innerHTML = `<strong style="color:var(--error);">إجمالي محاولات الغش المسجلة:</strong> ${count} من ${max} (الحد الذي حدده المعلم)`;
+  }
+
+  const log = Array.isArray(res.cheatAttemptLog) ? res.cheatAttemptLog : [];
+  listEl.innerHTML = log.map((entry, idx) => {
+    const when = entry.at ? formatRetakeTimestamp(entry.at) : "—";
+    return `<div class="detail-cheat-attempt-item" style="padding:0.75rem 1rem; margin-bottom:0.5rem; border:1px solid rgba(239,68,68,0.25); border-radius:8px; background:rgba(239,68,68,0.05);">` +
+      `<div style="font-weight:700; color:var(--error);">محاولة ${idx + 1}</div>` +
+      `<div style="font-size:0.9rem; margin-top:0.25rem;">${escapeHtml(entry.label || entry.reason || "غش")}</div>` +
+      `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;">${escapeHtml(when)}</div>` +
+      `</div>`;
+  }).join("");
+}
+
+function getCheatPenaltyMessage(reason, isExamCanceled) {
+  const actionText = getCheatReasonLabel(reason);
   const deviceHint = getExamDeviceCategory() === "mobile"
     ? "على الهاتف: لا تخرج من المتصفح ولا تفتح تطبيقات أخرى أثناء الحل."
     : getExamDeviceCategory() === "tablet"
       ? "على التابلت: ابقَ داخل تبويب الامتحان فقط."
       : "على الكمبيوتر: لا تفتح نوافذ أو تبويبات أخرى أثناء الامتحان.";
-  if (violationNumber >= maxViolations) {
+  if (isExamCanceled) {
     return `<span style="color:var(--error); font-size:1.8rem; font-weight:800; display:block; margin-bottom:1rem;">تم إلغاء الامتحان</span>` +
-      `تم رصد ${actionText}. تم إنهاء الاختبار وتسجيل حالة الإلغاء.<br>` +
+      `تم تسجيل محاولة غش: ${actionText}.<br>` +
+      `تم إنهاء الاختبار وفق قواعد المعلم.<br>` +
       `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>`;
   }
-  return `<span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تحذير (${violationNumber} من ${maxViolations})</span>` +
-    `تم رصد ${actionText}. تم إلغاء السؤال الحالي وتصفير درجته.<br>` +
-    `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>` +
-    `<span style="color:var(--error); font-weight:bold; font-size:0.95rem; display:block; margin-top:0.5rem;">متبقي ${remaining} تحذير${remaining === 1 ? "" : "ات"} قبل إلغاء الامتحان.</span>`;
+  return `<span style="color:var(--warning); font-size:1.5rem; font-weight:700; display:block; margin-bottom:0.5rem;">تم رصد محاولة غش</span>` +
+    `${actionText}.<br>` +
+    `تم إلغاء السؤال الحالي وتصفير درجته والانتقال للسؤال التالي.<br>` +
+    `<span style="font-size:0.9rem; color:var(--text-muted);">${deviceHint}</span>`;
 }
 
 function setupAntiCheatHandlers() {
@@ -6898,7 +6985,7 @@ function triggerRunnerCheatPenalty(reason) {
     clearInterval(systemState.timer.intervalId);
   }
 
-  systemState.cheatViolations++;
+  recordCheatAttempt(reason);
 
   const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
   if (currentQ && currentQ.type === "essay") {
@@ -6918,7 +7005,7 @@ function triggerRunnerCheatPenalty(reason) {
   overlay.classList.remove("hidden");
 
   if (shouldCancel) {
-    msg.innerHTML = getCheatPenaltyMessage(reason, systemState.cheatViolations, maxViolations);
+    msg.innerHTML = getCheatPenaltyMessage(reason, true);
 
     systemState.shuffledQuestions.forEach(q => {
       if (systemState.studentAnswers[q.id] === undefined) {
@@ -6938,7 +7025,7 @@ function triggerRunnerCheatPenalty(reason) {
       submitCheatedExam();
     }, 4500);
   } else {
-    msg.innerHTML = getCheatPenaltyMessage(reason, systemState.cheatViolations, maxViolations);
+    msg.innerHTML = getCheatPenaltyMessage(reason, false);
 
     setTimeout(() => {
       overlay.classList.add("hidden");
@@ -6990,7 +7077,7 @@ function submitCheatedExam() {
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions || [])),
     status: "canceled",
     allowRetake: false,
-    cheatViolations: systemState.cheatViolations,
+    ...buildCheatTrackingFields(),
     ...buildResultDeviceFields(systemState.examDeviceProfile)
   };
 
@@ -7802,6 +7889,8 @@ function saveActiveStudentSession() {
     currentQuestionIndex: systemState.currentQuestionIndex,
     studentAnswers: systemState.studentAnswers,
     cheatViolations: systemState.cheatViolations,
+    cheatAttemptLog: systemState.cheatAttemptLog || [],
+    examMaxCheatAttemptsAllowed: systemState.examMaxCheatAttemptsAllowed,
     currentExamRuntime: systemState.currentExamRuntime,
     timeRemaining: systemState.timer.timeRemaining
   };
@@ -7882,6 +7971,7 @@ function updateLiveIncompleteResult() {
   res.details = detailsLog.join("\n");
   res.studentAnswers = { ...systemState.studentAnswers };
   res.questionScores = questionScoresMap;
+  Object.assign(res, buildCheatTrackingFields());
   res.maxScore = getCurrentExamTotalScore();
   res.presentedQuestions = JSON.parse(JSON.stringify(systemState.shuffledQuestions));
   res.timestamp = new Date().toLocaleString("ar-EG");
