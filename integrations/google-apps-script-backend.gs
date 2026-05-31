@@ -34,7 +34,7 @@ function doPost(e) {
     var action = data.action || "save_backup";
 
     if (action === "add_result") {
-      appendArabyaResult_(data);
+      upsertArabyaResult_(data);
       var merged = mergeArabyaDatabase_({ results: [normaliseArabyaResult_(data)] }, "add_result");
       writeArabyaBackupSheet_(merged);
       return jsonArabya_({ status: "success", action: action, counts: countArabya_(merged) });
@@ -47,9 +47,18 @@ function doPost(e) {
     }
 
     if (action === "save_entity") {
+      if (data.collection === "results" && data.record) {
+        upsertArabyaResult_(data.record);
+      }
       var patch = {};
       patch[data.collection] = [data.record];
       var entityDb = mergeArabyaDatabase_(patch, "save_entity:" + data.collection);
+      if (data.collection === "results") {
+        var derivedStudents = hydrateStudentsFromResults_(entityDb.results || []);
+        if (derivedStudents.length) {
+          entityDb.students = mergeArabyaCollection_(entityDb.students || [], derivedStudents, "students");
+        }
+      }
       writeArabyaBackupSheet_(entityDb);
       return jsonArabya_({ status: "success", action: action, counts: countArabya_(entityDb) });
     }
@@ -100,11 +109,11 @@ function parseArabyaPayload_(e) {
   }
 }
 
-function appendArabyaResult_(data) {
-  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = spreadsheet.getSheetByName("نتائج الطلاب") || spreadsheet.insertSheet("نتائج الطلاب");
+
+function upsertArabyaResult_(data) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("نتائج الطلاب") || SpreadsheetApp.getActiveSpreadsheet().insertSheet("نتائج الطلاب");
   ensureArabyaResultHeaders_(sheet);
-  sheet.appendRow([
+  var rowValues = [
     data.recordId || "",
     data.timestamp || new Date(),
     data.name || "",
@@ -119,10 +128,25 @@ function appendArabyaResult_(data) {
     data.faculty || "",
     data.level || "",
     data.examType || "",
-    data.status || "",
+    data.status || (data.isManualGradeUpdate ? "updated" : "completed"),
     data.score || "",
     data.details || ""
-  ]);
+  ];
+  var recordId = String(data.recordId || "").trim();
+  if (recordId && sheet.getLastRow() > 1) {
+    var ids = sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]).trim() === recordId) {
+        sheet.getRange(i + 2, 1, 1, rowValues.length).setValues([rowValues]);
+        return;
+      }
+    }
+  }
+  sheet.appendRow(rowValues);
+}
+
+function appendArabyaResult_(data) {
+  upsertArabyaResult_(data);
 }
 
 function ensureArabyaResultHeaders_(sheet) {

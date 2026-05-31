@@ -982,6 +982,66 @@ async function pushCloudBackupNow() {
   return ok;
 }
 
+function propagateStudentEditsToResults(student, previousKey = "") {
+  if (!student) return;
+  const keys = new Set([previousKey, student.studentKey, getStudentLookupKey(student)].filter(Boolean));
+  systemState.results.forEach(res => {
+    const matches = keys.has(res.studentLookupKey) ||
+      (student.id && normalizeStudentId(res.id) === normalizeStudentId(student.id)) ||
+      (
+        student.name &&
+        normalizeStudentName(res.name) === normalizeStudentName(student.name) &&
+        sanitizeStudentCodeInput(res.accessCode || res.code) === sanitizeStudentCodeInput(student.code)
+      );
+    if (!matches) return;
+    res.name = student.name;
+    res.id = student.id;
+    res.accessCode = student.code;
+    res.studentLookupKey = student.studentKey;
+  });
+}
+
+async function syncStudentRecordToCloud(student) {
+  if (!student) return false;
+  const urlList = getArabyaWebAppUrls();
+  if (urlList.length === 0) return false;
+
+  const payload = {
+    action: "save_entity",
+    collection: "students",
+    record: {
+      name: student.name || "",
+      id: student.id || "",
+      code: student.code || "",
+      email: student.email || "",
+      mobile: student.mobile || "",
+      studentKey: student.studentKey || getStudentLookupKey(student),
+      timestamp: student.timestamp || new Date().toLocaleDateString("ar-EG")
+    }
+  };
+
+  let ok = false;
+  for (const url of urlList) {
+    try {
+      await postToArabyaWebApp(url, payload);
+      ok = true;
+    } catch (e) {
+      const sent = await postToArabyaWebAppNoCors(url, payload);
+      if (sent) ok = true;
+    }
+  }
+  if (ok) {
+    try { await pushCloudBackupNow(); } catch (e) {}
+  }
+  return ok;
+}
+
+async function syncLocalDatabaseToCloud() {
+  const urlList = getArabyaWebAppUrls();
+  if (urlList.length === 0) return false;
+  return pushCloudBackupNow();
+}
+
 window.pullTeacherResultsFromCloud = async function() {
   const el = document.getElementById("teacher-results-sync-status");
   if (el) {
@@ -3705,8 +3765,11 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
   urls.forEach(url => {
     postToArabyaWebApp(url, payload).then(() => {
       done++;
-      if (done === total && syncStatusEl) {
-        syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle; font-size:1rem;">cloud_done</span> تمت مزامنة التصحيح مع Google Sheets بنجاح!`;
+      if (done === total) {
+        pushCloudBackupNow().catch(() => {});
+        if (syncStatusEl) {
+          syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle; font-size:1rem;">cloud_done</span> تمت مزامنة التصحيح مع Google Sheets بنجاح!`;
+        }
       }
     }).catch(() => {
       done++;
@@ -3894,18 +3957,34 @@ function renderStudentResultsTable() {
   pageItems.forEach(res => {
     const row = document.createElement("tr");
     const statusBadge = formatResultStatusBadge(res);
-    const uncancelBtn = (res.status === "canceled" && res.allowRetake !== true)
-      ? `<button class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning); margin-right:0.25rem;" onclick="uncancelStudentExam('${res.recordId || ""}')">إلغاء علامة الإلغاء</button>`
-      : "";
     row.innerHTML = `
-      <td>${statusBadge}${res.name}</td>
-      <td><code>${res.id || "--"}</code></td>
-      <td><span style="color:var(--accent); font-weight:700;">${res.accessCode || "لا يوجد"}</span></td>
-      <td>${res.examTitle} (${res.level || 'عام'})</td>
-      <td style="font-weight:700; color:var(--secondary);">${res.score}</td>
-      <td>${res.timestamp}</td>
-      <td style="display:flex; gap:0.25rem; flex-wrap:wrap;">${uncancelBtn}<button class="btn btn-outline btn-sm" onclick="viewTeacherResultDetail('${res.recordId || ""}', '${res.id}', '${res.examId}')">عرض</button></td>
+      <td>${statusBadge}${escapeHtml(res.name || "")}</td>
+      <td><code>${escapeHtml(res.id || "--")}</code></td>
+      <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(res.accessCode || "لا يوجد")}</span></td>
+      <td>${escapeHtml(res.examTitle || "")} (${escapeHtml(res.level || "عام")})</td>
+      <td style="font-weight:700; color:var(--secondary);">${escapeHtml(res.score || "")}</td>
+      <td>${escapeHtml(res.timestamp || "")}</td>
+      <td class="teacher-results-actions" style="display:flex; gap:0.25rem; flex-wrap:wrap;"></td>
     `;
+
+    const actionsCell = row.querySelector(".teacher-results-actions");
+    if (res.status === "canceled" && res.allowRetake !== true) {
+      const uncancelBtn = document.createElement("button");
+      uncancelBtn.type = "button";
+      uncancelBtn.className = "btn btn-outline btn-sm";
+      uncancelBtn.style.cssText = "border-color:var(--warning); color:var(--warning); margin-right:0.25rem;";
+      uncancelBtn.textContent = "إلغاء علامة الإلغاء";
+      uncancelBtn.addEventListener("click", () => uncancelStudentExam(res.recordId || ""));
+      actionsCell.appendChild(uncancelBtn);
+    }
+
+    const viewBtn = document.createElement("button");
+    viewBtn.type = "button";
+    viewBtn.className = "btn btn-outline btn-sm";
+    viewBtn.textContent = "عرض / تعديل";
+    viewBtn.addEventListener("click", () => viewTeacherResultDetail(res.recordId || "", res.id || "", res.examId || ""));
+    actionsCell.appendChild(viewBtn);
+
     tbody.appendChild(row);
   });
 
@@ -4207,13 +4286,15 @@ function exportTeacherResultsToCSV() {
   document.body.removeChild(link);
 }
 
-function clearTeacherResults() {
-  if (confirm("هل أنت متأكد من رغبتك في حذف جميع نتائج وسجلات الطلاب نهائياً؟ (لا يمكن التراجع عن ذلك)")) {
-    systemState.results = [];
-    localStorage.setItem("arabya_results_db", "[]"); // حفظ مصفوفة فارغة بدلاً من حذف المفتاح
-    renderStudentResultsTable();
-    alert("تم مسح كافة سجلات الطلاب بنجاح!");
+async function clearTeacherResults() {
+  if (!confirm("هل أنت متأكد من رغبتك في حذف جميع نتائج وسجلات الطلاب نهائياً؟ (لا يمكن التراجع عن ذلك)")) {
+    return;
   }
+  systemState.results = [];
+  localStorage.setItem("arabya_results_db", "[]");
+  renderStudentResultsTable();
+  const synced = await syncLocalDatabaseToCloud();
+  alert(synced ? "تم مسح السجلات ومزامنة التغيير مع Google Sheets." : "تم مسح السجلات محلياً.");
 }
 
 // ==========================================
@@ -4697,17 +4778,32 @@ function renderTeacherStudentsTable() {
       : "";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td>${s.name}${canceledBadge}</td>
-      <td><code>${s.id || "--"}</code></td>
-      <td><span style="color:var(--accent); font-weight:700;">${s.code || "لا يوجد"}</span></td>
-      <td>${s.email || "--"}</td>
-      <td>${s.mobile || "--"}</td>
-      <td>${s.timestamp || 'غير معروف'}</td>
-      <td>
-        <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary); padding: 0.25rem 0.5rem; margin-left:0.25rem;" onclick="editStudentByTeacher(${JSON.stringify(studentKey)})">تعديل</button>
-        <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error); padding: 0.25rem 0.5rem;" onclick="deleteStudentByTeacher(${JSON.stringify(studentKey)})">حذف</button>
-      </td>
+      <td>${escapeHtml(s.name || "")}${canceledBadge}</td>
+      <td><code>${escapeHtml(s.id || "--")}</code></td>
+      <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(s.code || "لا يوجد")}</span></td>
+      <td>${escapeHtml(s.email || "--")}</td>
+      <td>${escapeHtml(s.mobile || "--")}</td>
+      <td>${escapeHtml(s.timestamp || "غير معروف")}</td>
+      <td class="teacher-students-actions" style="display:flex; gap:0.25rem; flex-wrap:wrap;"></td>
     `;
+
+    const actionsCell = row.querySelector(".teacher-students-actions");
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "btn btn-outline btn-sm";
+    editBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary); padding:0.25rem 0.5rem;";
+    editBtn.textContent = "تعديل";
+    editBtn.addEventListener("click", () => editStudentByTeacher(studentKey));
+    actionsCell.appendChild(editBtn);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn btn-outline btn-sm";
+    deleteBtn.style.cssText = "border-color:var(--error); color:var(--error); padding:0.25rem 0.5rem;";
+    deleteBtn.textContent = "حذف";
+    deleteBtn.addEventListener("click", () => deleteStudentByTeacher(studentKey));
+    actionsCell.appendChild(deleteBtn);
+
     tbody.appendChild(row);
   });
 
@@ -4745,7 +4841,7 @@ window.hideAddStudentModal = function() {
 };
 
 // حفظ طالب جديد أو تعديل بياناته من قبل المعلم
-window.saveNewStudentByTeacher = function() {
+window.saveNewStudentByTeacher = async function() {
   const name = document.getElementById("new-student-name").value.trim();
   const id = normalizeStudentId(document.getElementById("new-student-id").value.trim());
   const rawCode = document.getElementById("new-student-code").value.trim();
@@ -4761,7 +4857,8 @@ window.saveNewStudentByTeacher = function() {
   }
 
   if (systemState.editingStudentKey) {
-    const existing = findStudentByKey(systemState.editingStudentKey);
+    const previousKey = systemState.editingStudentKey;
+    const existing = findStudentByKey(previousKey);
     if (!existing) {
       alert("لم يتم العثور على الطالب للتعديل!");
       return;
@@ -4784,10 +4881,16 @@ window.saveNewStudentByTeacher = function() {
     existing.id = id;
     existing.code = code;
     existing.studentKey = getStudentLookupKey(existing) || existing.studentKey;
-    saveSystemState(true);
+    propagateStudentEditsToResults(existing, previousKey);
+    saveSystemState(false);
     renderTeacherStudentsTable();
+    renderStudentResultsTable();
     hideAddStudentModal();
-    alert(`تم تعديل بيانات الطالب "${name}" بنجاح!`);
+    const synced = await syncStudentRecordToCloud(existing);
+    systemState.results
+      .filter(r => r.studentLookupKey === existing.studentKey)
+      .forEach(res => sendUpdatedResultToCloud(res));
+    alert(`تم تعديل بيانات الطالب "${name}" بنجاح!${synced ? " وتمت المزامنة مع Google Sheets." : " (محفوظ محلياً — تحقق من رابط المزامنة)"}`);
     return;
   }
 
@@ -4806,16 +4909,20 @@ window.saveNewStudentByTeacher = function() {
     }
   }
 
-  upsertStudentRecord({ name, id, code });
-  saveSystemState(true);
+  const created = upsertStudentRecord({ name, id, code });
+  saveSystemState(false);
   renderTeacherStudentsTable();
   hideAddStudentModal();
-  alert(`تم تسجيل الطالب "${name}" بنجاح!`);
+  const synced = await syncStudentRecordToCloud(created);
+  alert(`تم تسجيل الطالب "${name}" بنجاح!${synced ? " وتمت المزامنة مع Google Sheets." : " (محفوظ محلياً — تحقق من رابط المزامنة)"}`);
 };
 
 window.editStudentByTeacher = function(studentKey) {
   const student = findStudentByKey(studentKey);
-  if (!student) return;
+  if (!student) {
+    alert("لم يتم العثور على الطالب!");
+    return;
+  }
 
   systemState.editingStudentKey = student.studentKey;
 
@@ -4833,13 +4940,18 @@ window.editStudentByTeacher = function(studentKey) {
   document.getElementById("new-student-code").value = student.code || "";
 };
 
-window.deleteStudentByTeacher = function(studentKey) {
+window.deleteStudentByTeacher = async function(studentKey) {
   const student = findStudentByKey(studentKey);
-  if (!student) return;
+  if (!student) {
+    alert("لم يتم العثور على الطالب!");
+    return;
+  }
   if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟`)) return;
   systemState.students = systemState.students.filter(s => s.studentKey !== studentKey);
-  saveSystemState(true);
+  saveSystemState(false);
   renderTeacherStudentsTable();
+  const synced = await syncLocalDatabaseToCloud();
+  alert(synced ? `تم حذف الطالب "${student.name}" ومزامنة التغيير مع Google Sheets.` : `تم حذف الطالب "${student.name}" محلياً.`);
 };
 
 // تصدير الطلاب كملف JSON
