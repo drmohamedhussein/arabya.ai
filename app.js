@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.31";
+const ARABYA_APP_VERSION = "2026.05.31.32";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -6862,6 +6862,9 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
+  if (sizeSelectBottom && String(sizeSelectBottom.value) !== String(pageSize)) {
+    sizeSelectBottom.value = String(pageSize);
+  }
 
   if (totalItems === 0) {
     if (info) {
@@ -6872,6 +6875,10 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+    if (infoBottom) infoBottom.textContent = info ? info.textContent : "";
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
@@ -6896,6 +6903,10 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
+  if (infoBottom) infoBottom.textContent = info ? info.textContent : "";
+  if (pageNumBottom) pageNumBottom.textContent = pageNum ? pageNum.textContent : "";
+  if (prevBtnBottom) prevBtnBottom.disabled = page <= 1;
+  if (nextBtnBottom) nextBtnBottom.disabled = page >= totalPages;
 }
 
 function setupResultsTablePaginationControls() {
@@ -8520,6 +8531,12 @@ function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = total
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
   const sizeSelect = document.getElementById("teacher-students-page-size");
+
+  const infoBottom = document.getElementById("teacher-students-page-info-bottom");
+  const pageNumBottom = document.getElementById("teacher-students-page-number-bottom");
+  const prevBtnBottom = document.getElementById("teacher-students-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-students-next-page-bottom");
+  const sizeSelectBottom = document.getElementById("teacher-students-page-size-bottom");
   const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
@@ -8563,14 +8580,25 @@ function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = total
 
 function setupStudentsTablePaginationControls() {
   const sizeSelect = document.getElementById("teacher-students-page-size");
+  const sizeSelectBottom = document.getElementById("teacher-students-page-size-bottom");
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
+  const prevBtnBottom = document.getElementById("teacher-students-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-students-next-page-bottom");
 
   if (sizeSelect && !sizeSelect.dataset.bound) {
     sizeSelect.dataset.bound = "1";
     sizeSelect.value = String(getStudentsTableViewSettings().pageSize);
     sizeSelect.addEventListener("change", () => {
       setStudentsTablePageSize(parseInt(sizeSelect.value, 10));
+      renderTeacherStudentsTable();
+    });
+  }
+  if (sizeSelectBottom && !sizeSelectBottom.dataset.bound) {
+    sizeSelectBottom.dataset.bound = "1";
+    sizeSelectBottom.value = String(getStudentsTableViewSettings().pageSize);
+    sizeSelectBottom.addEventListener("change", () => {
+      setStudentsTablePageSize(parseInt(sizeSelectBottom.value, 10));
       renderTeacherStudentsTable();
     });
   }
@@ -8584,9 +8612,27 @@ function setupStudentsTablePaginationControls() {
       }
     });
   }
+  if (prevBtnBottom && !prevBtnBottom.dataset.bound) {
+    prevBtnBottom.dataset.bound = "1";
+    prevBtnBottom.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderTeacherStudentsTable();
+      }
+    });
+  }
   if (nextBtn && !nextBtn.dataset.bound) {
     nextBtn.dataset.bound = "1";
     nextBtn.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      view.page += 1;
+      renderTeacherStudentsTable();
+    });
+  }
+  if (nextBtnBottom && !nextBtnBottom.dataset.bound) {
+    nextBtnBottom.dataset.bound = "1";
+    nextBtnBottom.addEventListener("click", () => {
       const view = getStudentsTableViewSettings();
       view.page += 1;
       renderTeacherStudentsTable();
