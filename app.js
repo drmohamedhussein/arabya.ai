@@ -1152,6 +1152,19 @@ function findActiveRetakeGrant(studentLookupKey, examId, studentContext) {
   ) || null;
 }
 
+/** يفتح إعادة الامتحان إذا سمح المعلم صراحةً أو حرّر/غيّر IP للسجل السابق */
+function canStudentBypassExamLockForExam(examId, studentContext) {
+  if (!examId || !studentContext) return false;
+  if (findActiveRetakeGrant(null, examId, studentContext)) return true;
+  return (systemState.results || []).some(r =>
+    r.examId === examId &&
+    !isSupersededResult(r) &&
+    r.status !== "incomplete" &&
+    isResultIpReleasedByStaff(r) &&
+    resultMatchesStudentIdentity(r, studentContext)
+  );
+}
+
 function resultCanGrantRetake(res) {
   if (!res || isSupersededResult(res) || res.status === "incomplete") return false;
   return res.allowRetake !== true;
@@ -1417,13 +1430,14 @@ function buildResultCloudRetakeFields(res) {
     allowRetake: !!res?.allowRetake,
     superseded: !!res?.superseded,
     retakeGrantedAt: res?.retakeGrantedAt || "",
+    retakeGrantedBy: res?.retakeGrantedBy || "",
     retakeRevokedAt: res?.retakeRevokedAt || "",
     supersededAt: res?.supersededAt || "",
     supersededByRecordId: res?.supersededByRecordId || ""
   };
 }
 
-window.allowStudentExamRetake = function(recordId) {
+window.allowStudentExamRetake = async function(recordId) {
   const res = systemState.results.find(r => r.recordId === recordId);
   if (!res) {
     alert("لم يتم العثور على سجل النتيجة.");
@@ -1439,18 +1453,23 @@ window.allowStudentExamRetake = function(recordId) {
   res.retakeGrantedAt = new Date().toISOString();
   res.retakeGrantedBy = systemState.activeTeacher?.username || "teacher";
   delete res.retakeRevokedAt;
-  saveSystemState(true);
-  renderStudentResultsTable();
-  renderTeacherStudentsTable();
+  const lookupKey = res.studentLookupKey || getStudentLookupKey({ id: res.id, name: res.name, code: res.accessCode });
+  if (lookupKey && res.examId) {
+    clearExamDeviceRegistryForStudentExam(lookupKey, res.examId);
+  }
+  const syncEl = document.getElementById("grading-sync-status");
+  const cloudOk = await persistResultRecordWithCloudSync(res, syncEl);
   if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
     renderResultRetakeManagementPanel(res);
   }
-  const syncEl = document.getElementById("grading-sync-status");
-  sendUpdatedResultToCloud(res, syncEl);
-  alert(`تم السماح للطالب "${res.name}" بإعادة أداء الامتحان.\n\nالمحاولة الأولى ما زالت محفوظة — لن تُؤرشف إلا بعد إكمال الطالب لمحاولة جديدة.`);
+  alert(
+    `تم السماح للطالب "${res.name}" بإعادة أداء الامتحان.\n\n` +
+    `المحاولة الأولى ما زالت محفوظة — لن تُؤرشف إلا بعد إكمال الطالب لمحاولة جديدة.` +
+    (cloudOk ? "\n\nتمت مزامنة التحديث مع Google Sheets." : "\n\nتم الحفظ محلياً — تحقق من ربط Google Sheets إن لم تظهر التحديثات في الشيت.")
+  );
 };
 
-window.revokeStudentExamRetake = function(recordId) {
+window.revokeStudentExamRetake = async function(recordId) {
   const res = systemState.results.find(r => r.recordId === recordId);
   if (!res) {
     alert("لم يتم العثور على سجل النتيجة.");
@@ -1464,15 +1483,12 @@ window.revokeStudentExamRetake = function(recordId) {
 
   res.allowRetake = false;
   res.retakeRevokedAt = new Date().toISOString();
-  saveSystemState(true);
-  renderStudentResultsTable();
-  renderTeacherStudentsTable();
+  const syncEl = document.getElementById("grading-sync-status");
+  const cloudOk = await persistResultRecordWithCloudSync(res, syncEl);
   if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
     renderResultRetakeManagementPanel(res);
   }
-  const syncEl = document.getElementById("grading-sync-status");
-  sendUpdatedResultToCloud(res, syncEl);
-  alert("تم إلغاء السماح بإعادة التقديم.");
+  alert(cloudOk ? "تم إلغاء السماح بإعادة التقديم ومزامنة التحديث مع Google Sheets." : "تم إلغاء السماح بإعادة التقديم محلياً — تحقق من ربط Google Sheets.");
 };
 
 function findBlockingExamResult(studentLookupKey, examId, studentContext) {
@@ -6092,25 +6108,9 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
 
 // مزامنة نتيجة معدّلة يدوياً (من قبل المعلم) مع Google Sheets
 function sendUpdatedResultToCloud(res, syncStatusEl = null) {
-  const urls = new Set();
-  if (systemState.config && systemState.config.googleFormUrl) {
-    const u = systemState.config.googleFormUrl.trim();
-    if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
-  }
-  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
-    const u = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
-    if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
-  }
-  if (Array.isArray(systemState.exams)) {
-    systemState.exams.forEach(exam => {
-      if (exam.googleFormUrl) {
-        const u = exam.googleFormUrl.trim();
-        if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
-      }
-    });
-  }
+  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
 
-  if (urls.size === 0) {
+  if (urlList.length === 0) {
     if (syncStatusEl) syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle; font-size:1rem;">cloud_queue</span> لم يتم ربط Google Sheets بعد — تم الحفظ محلياً فقط.`;
     return;
   }
@@ -6147,8 +6147,8 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
   const slimPayload = buildSlimResultCloudPayload(payload);
 
   let done = 0;
-  const total = urls.size;
-  urls.forEach(url => {
+  const total = urlList.length;
+  urlList.forEach(url => {
     postToArabyaWebApp(url, slimPayload).then(() => {
       done++;
       if (done === total) {
@@ -7639,7 +7639,8 @@ function findDeviceExamAttemptConflict(profile, examId, studentContext) {
   return null;
 }
 
-function findDeviceBindingConflict(profile, examId, studentLookupKey) {
+function findDeviceBindingConflict(profile, examId, studentLookupKey, studentContext) {
+  if (studentContext && canStudentBypassExamLockForExam(examId, studentContext)) return null;
   if (!profile || !studentLookupKey) return null;
   if (!profile.deviceFingerprint && !profile.deviceId) return null;
   const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
@@ -7717,7 +7718,7 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
       profile
     };
   }
-  const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey);
+  const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
   if (conflict) {
     return {
       ok: false,

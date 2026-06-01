@@ -184,4 +184,31 @@ assert.ok(deviceProfileMatchesResult(
   { clientIp: "192.0.2.44" }
 ));
 
+function canStudentBypassExamLockForExam(results, examId, studentContext) {
+  const activeRetake = results.find(r =>
+    r.examId === examId &&
+    r.allowRetake === true &&
+    !r.superseded &&
+    r.status !== "incomplete" &&
+    resultMatchesStudentIdentity(r, studentContext)
+  );
+  if (activeRetake) return true;
+  return results.some(r =>
+    r.examId === examId &&
+    !r.superseded &&
+    r.status !== "incomplete" &&
+    r.ipReleasedByTeacher &&
+    resultMatchesStudentIdentity(r, studentContext)
+  );
+}
+
+const lockedResult = { ...completedWithoutDevice, ipReleasedByTeacher: false, allowRetake: false };
+assert.ok(!canStudentBypassExamLockForExam([lockedResult], examId, ctx));
+
+const retakeAllowed = { ...completedWithoutDevice, allowRetake: true };
+assert.ok(canStudentBypassExamLockForExam([retakeAllowed], examId, ctx));
+
+const ipReleased = { ...completedWithoutDevice, ipReleasedByTeacher: true };
+assert.ok(canStudentBypassExamLockForExam([ipReleased], examId, ctx));
+
 console.log("All exam device lock tests passed.");

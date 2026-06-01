@@ -18,6 +18,7 @@ var ARABYA_DEFAULT_DB = {
   students: [],
   exams: [],
   results: [],
+  examDeviceRegistry: { bindings: [] },
   auditLog: []
 };
 
@@ -237,6 +238,23 @@ function writeArabyaBackupSheet_(db) {
   sheet.appendRow([new Date(), JSON.stringify(db)]);
 }
 
+function mergeArabyaExamDeviceRegistry_(localRegistry, incomingRegistry) {
+  var local = localRegistry && Array.isArray(localRegistry.bindings) ? localRegistry : { bindings: [] };
+  var incoming = incomingRegistry && Array.isArray(incomingRegistry.bindings) ? incomingRegistry : { bindings: [] };
+  var map = {};
+  (local.bindings || []).concat(incoming.bindings || []).forEach(function(entry) {
+    if (!entry || !entry.examId || !entry.studentLookupKey) return;
+    var key = [
+      entry.examId,
+      entry.studentLookupKey,
+      entry.deviceId || "",
+      entry.deviceFingerprint || ""
+    ].join("::");
+    map[key] = entry;
+  });
+  return { bindings: Object.keys(map).map(function(key) { return map[key]; }) };
+}
+
 function mergeArabyaDatabase_(patch, reason) {
   var db = readArabyaDatabase_();
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
@@ -244,6 +262,9 @@ function mergeArabyaDatabase_(patch, reason) {
       db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
     }
   });
+  if (patch.examDeviceRegistry) {
+    db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, patch.examDeviceRegistry);
+  }
   db.schemaVersion = ARABYA_DEFAULT_DB.schemaVersion;
   db.updatedAt = new Date().toISOString();
   db.auditLog = db.auditLog || [];
@@ -325,6 +346,7 @@ function normaliseArabyaResult_(data) {
     allowRetake: !!data.allowRetake,
     superseded: !!data.superseded,
     retakeGrantedAt: data.retakeGrantedAt || "",
+    retakeGrantedBy: data.retakeGrantedBy || "",
     retakeRevokedAt: data.retakeRevokedAt || "",
     supersededAt: data.supersededAt || "",
     supersededByRecordId: data.supersededByRecordId || "",
