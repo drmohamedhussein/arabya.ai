@@ -327,7 +327,10 @@
 
   function checkExamHallIp(exam, clientIp) {
     if (!isExamHallIpLockActive(exam)) return { ok: true };
-    const allowedList = getExamHallAllowedIps(exam);
+    const allowedList = [
+      ...getExamHallAllowedIps(exam),
+      ...((exam && exam.allowedRetakeIps) || [])
+    ];
     const ip = String(clientIp || "").trim();
     if (!ip) {
       return { ok: false, message: "وضع قاعة الامتحان مفعّل — تعذّر التحقق من عنوان IP." };
@@ -359,11 +362,16 @@
     const ipsEl = document.getElementById("edit-meta-hall-ips");
     const retakeEl = document.getElementById("edit-meta-allowed-retake-ips");
     const hrs = document.getElementById("edit-meta-hall-hours");
+    const maxSharedEl = document.getElementById("edit-meta-max-shared-ip");
     const allowedIps = getExamHallAllowedIps(exam);
     if (en) en.checked = !!hall.enabled;
     if (ipsEl) ipsEl.value = allowedIps.join("\n");
     if (retakeEl) retakeEl.value = (retakeIps || []).join("\n");
     if (hrs) hrs.value = hall.hours != null ? hall.hours : 2;
+    if (maxSharedEl) {
+      const maxShared = parseInt(exam?.ipAccessPolicy?.maxStudentsPerSharedIp, 10);
+      maxSharedEl.value = Number.isFinite(maxShared) && maxShared >= 1 ? maxShared : 5;
+    }
   }
 
   function saveHallModeToExam(exam) {

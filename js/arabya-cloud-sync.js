@@ -161,6 +161,11 @@
   }
 
   function runPullFromCloud(reason) {
+    if (global.systemState?.cloudPullSuspendedUntil && Date.now() < global.systemState.cloudPullSuspendedUntil) {
+      if (reason !== "manual") {
+        return Promise.resolve({ ok: false, skipped: true });
+      }
+    }
     if (global.systemState?.activeView !== "teacher-dashboard-view") {
       return Promise.resolve(null);
     }
@@ -298,7 +303,8 @@
     fetchRemoteCloudRevision,
     rememberCloudRevisionFromResponse,
     setStoredCloudRevision,
-    getStoredCloudRevision
+    getStoredCloudRevision,
+    runPullFromCloud
   };
 
   global.buildFullCloudBackupData = buildFullCloudBackupData;
