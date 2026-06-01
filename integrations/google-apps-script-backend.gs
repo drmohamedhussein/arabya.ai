@@ -74,6 +74,19 @@ function doPost(e) {
       return jsonArabya_({ status: "success", action: action, recordId: data.recordId || "" });
     }
 
+    if (action === "delete_result") {
+      var sheetRemoved = deleteArabyaResultFromSheet_(data);
+      var dbAfterDelete = applyDeleteResultToDatabase_(data);
+      appendArabyaAuditSheet_("delete_result", data.actor || {}, String(data.recordId || data.id || ""));
+      return jsonArabya_({
+        status: "success",
+        action: action,
+        recordId: data.recordId || "",
+        sheetRowRemoved: sheetRemoved,
+        counts: countArabya_(dbAfterDelete)
+      });
+    }
+
     if (action === "save_backup") {
       var actor = data.actor || (data.data && data.data._actor) || {};
       var merged = mergeArabyaDatabase_(data.data || {}, "save_backup", actor);
@@ -189,6 +202,68 @@ function ensureArabyaResultsHeaders_(sheet) {
       sheet.getRange(2, lastCol + 1, rows + 1, headers.length).setValue("");
     }
   }
+}
+
+function rowMatchesDeleteResultTarget_(row, data) {
+  if (!row || !data) return false;
+  var recordId = String(data.recordId || "").trim();
+  if (recordId && String(row[0] || "").trim() === recordId) return true;
+  var targetId = String(data.id || "").trim().toUpperCase();
+  var targetExamId = String(data.examId || "").trim();
+  if (!targetId || !targetExamId) return false;
+  var rowId = String(row[3] || "").trim().toUpperCase();
+  var rowExamId = String(row[9] || "").trim();
+  if (rowId !== targetId || rowExamId !== targetExamId) return false;
+  var targetTs = String(data.timestamp || "").trim();
+  if (!targetTs) return true;
+  return String(row[1] || "").trim() === targetTs;
+}
+
+function deleteArabyaResultFromSheet_(data) {
+  var sheet = getArabyaResultsSheet_();
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return false;
+  ensureArabyaResultsHeaders_(sheet);
+  var lastCol = Math.max(sheet.getLastColumn(), ARABYA_RESULTS_HEADERS.length);
+  var removed = false;
+  for (var r = lastRow; r >= 2; r--) {
+    var row = sheet.getRange(r, 1, 1, lastCol).getValues()[0];
+    if (!rowMatchesDeleteResultTarget_(row, data)) continue;
+    sheet.deleteRow(r);
+    removed = true;
+    break;
+  }
+  if (removed) touchArabyaSyncRevision_("delete_result");
+  return removed;
+}
+
+function applyDeleteResultToDatabase_(data) {
+  var db = readArabyaDatabase_();
+  var recordId = String(data.recordId || "").trim();
+  var targetId = String(data.id || "").trim().toUpperCase();
+  var targetExamId = String(data.examId || "").trim();
+  var targetTs = String(data.timestamp || "").trim();
+  db.results = (db.results || []).filter(function(item) {
+    if (!item) return false;
+    if (recordId && String(item.recordId || "").trim() === recordId) return false;
+    if (!recordId && targetId && targetExamId) {
+      var sameId = String(item.id || "").trim().toUpperCase() === targetId;
+      var sameExam = String(item.examId || "").trim() === targetExamId;
+      if (sameId && sameExam) {
+        if (!targetTs || String(item.timestamp || "").trim() === targetTs) return false;
+      }
+    }
+    return true;
+  });
+  db.updatedAt = new Date().toISOString();
+  writeArabyaBackupSheet_(db);
+  touchArabyaSyncRevision_("delete_result_db");
+  try {
+    writeArabyaDatabaseToGitHub_(db);
+  } catch (githubErr) {
+    db._githubSyncSkipped = String(githubErr.message || githubErr);
+  }
+  return db;
 }
 
 function upsertArabyaResult_(data) {

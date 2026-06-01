@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.6";
+const ARABYA_APP_VERSION = "2026.06.02.7";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -67,6 +67,10 @@ function canDeleteStudents() {
 
 function canDeleteTeachers() {
   return isSuperAdminTeacher();
+}
+
+function canDeleteResults() {
+  return !!systemState.activeTeacher && isTeacherStaffAccount();
 }
 
 function canManageTeacherRoles() {
@@ -7760,6 +7764,18 @@ function renderStudentResultsTable() {
     viewBtn.addEventListener("click", () => viewTeacherResultDetail(res.recordId || "", res.id || "", res.examId || ""));
     actionsCell.appendChild(viewBtn);
 
+    if (canDeleteResults() && res.recordId) {
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn btn-outline btn-sm";
+      deleteBtn.style.borderColor = "var(--error)";
+      deleteBtn.style.color = "var(--error)";
+      deleteBtn.textContent = "حذف";
+      deleteBtn.setAttribute("aria-label", `حذف نتيجة ${res.name || ""}`);
+      deleteBtn.addEventListener("click", () => deleteTeacherResultByRecordId(res.recordId));
+      actionsCell.appendChild(deleteBtn);
+    }
+
     tbody.appendChild(row);
   });
 
@@ -8093,6 +8109,108 @@ function exportTeacherResultsToCSV() {
     `نتائج_arabya_${getExportDateStamp()}.csv`
   );
 }
+
+function findTeacherResultByRecordId(recordId) {
+  const rid = String(recordId || "").trim();
+  if (!rid) return null;
+  return systemState.results.find(r => String(r.recordId || "") === rid) || null;
+}
+
+async function postDeleteResultToCloud(res) {
+  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  if (!urlList.length || !res) return { ok: false, successCount: 0, total: 0 };
+  const actor = window.ArabyaPlatformSync && window.ArabyaPlatformSync.getCloudSyncActor
+    ? window.ArabyaPlatformSync.getCloudSyncActor()
+    : { username: systemState.activeTeacher?.username || "", name: systemState.activeTeacher?.name || "" };
+  const payload = {
+    action: "delete_result",
+    recordId: res.recordId || "",
+    id: res.id || "",
+    examId: res.examId || "",
+    examTitle: res.examTitle || "",
+    timestamp: res.timestamp || "",
+    studentLookupKey: res.studentLookupKey || "",
+    actor
+  };
+  const outcomes = await Promise.all(urlList.map(async url => {
+    try {
+      await postToArabyaWebApp(url, payload);
+      return true;
+    } catch (err) {
+      console.warn("[ARABYA] delete_result failed:", url, err);
+      try {
+        return await postToArabyaWebAppNoCors(url, payload);
+      } catch (e2) {
+        return false;
+      }
+    }
+  }));
+  const successCount = outcomes.filter(Boolean).length;
+  return { ok: successCount > 0, successCount, total: urlList.length };
+}
+
+window.deleteTeacherResultByRecordId = async function(recordId) {
+  if (!canDeleteResults()) {
+    alert("حذف سجلات النتائج متاح للمعلم ومدير المنصة (سوبر أدمن) فقط.");
+    return;
+  }
+  const res = findTeacherResultByRecordId(recordId);
+  if (!res) {
+    alert("لم يتم العثور على سجل النتيجة.");
+    return;
+  }
+  const label = `${res.name || "طالب"} — ${res.examTitle || "امتحان"} (${res.timestamp || ""})`;
+  if (!confirm(`هل تريد حذف نتيجة:\n${label}\n\nسيُحذف السجل من الجهاز ومن ورقة Google Sheets فوراً.`)) {
+    return;
+  }
+
+  const syncEl = document.getElementById("teacher-results-sync-status");
+  if (syncEl) {
+    syncEl.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري حذف السجل ومزامنته مع Google Sheets...`;
+  }
+
+  systemState.results = systemState.results.filter(r => String(r.recordId || "") !== String(recordId));
+  localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+
+  if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === recordId) {
+    systemState.currentGradingResult = null;
+    systemState.currentGradingExam = null;
+    const panel = document.getElementById("teacher-result-detail-panel");
+    if (panel) panel.classList.add("hidden");
+  }
+
+  let cloudOk = false;
+  try {
+    const [deleteOutcome, backupOk] = await Promise.all([
+      postDeleteResultToCloud(res),
+      pushCloudBackupNow("delete_result")
+    ]);
+    cloudOk = deleteOutcome.ok || backupOk;
+  } catch (syncErr) {
+    console.error("[ARABYA] deleteTeacherResultByRecordId:", syncErr);
+  }
+
+  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("delete_result");
+  }
+
+  renderStudentResultsTable();
+  if (typeof renderTeacherStatsDashboard === "function") {
+    try { renderTeacherStatsDashboard(); } catch (e) {}
+  }
+
+  if (syncEl) {
+    syncEl.innerHTML = cloudOk
+      ? `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تم حذف السجل من Google Sheets والنسخة الاحتياطية`
+      : `<span class="material-icons" style="vertical-align:middle; color:var(--warning);">cloud_off</span> تم الحذف محلياً — تحقق من رابط /exec ونشر Apps Script`;
+  }
+  if (window.ArabyaToast) {
+    window.ArabyaToast.showToast(
+      cloudOk ? "تم حذف النتيجة ومزامنتها مع السحابة" : "تم الحذف محلياً — راجع إعدادات المزامنة",
+      cloudOk ? "success" : "warning"
+    );
+  }
+};
 
 async function clearTeacherResults() {
   if (!confirm("هل أنت متأكد من رغبتك في حذف جميع نتائج وسجلات الطلاب نهائياً؟ (لا يمكن التراجع عن ذلك)")) {
