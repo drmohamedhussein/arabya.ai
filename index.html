@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>ARABYA.NET | منصة تعليم اللغة العربية والامتحانات الأكاديمية</title>
   
   <!-- تحسينات SEO ومحركات البحث -->
@@ -13,7 +16,7 @@
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2026.06.01.6">
 </head>
 <body>
 
@@ -888,7 +891,12 @@
               </div>
             </div>
 
-            <div class="table-container">
+            <p class="table-scroll-hint">اسحب شريط التمرير العلوي أو السفلي يميناً ويساراً لعرض جميع أعمدة الجدول.</p>
+            <div id="teacher-results-table-scroll" class="teacher-table-scroll-stack">
+              <div class="table-hscroll-top" aria-label="تمرير الجدول أفقياً (أعلى)" title="تمرير يمين ويسار">
+                <div class="table-hscroll-top-inner"></div>
+              </div>
+              <div class="table-container table-container--wide">
               <table>
                 <thead>
                   <tr>
@@ -906,7 +914,29 @@
                   <!-- تعبأ ديناميكياً -->
                 </tbody>
               </table>
+              </div>
             </div>
+
+            <div id="teacher-results-pagination" class="teacher-pagination-bar">
+              <div class="teacher-pagination-bar-size">
+                <span class="teacher-page-info">عرض</span>
+                <select id="teacher-results-page-size-bottom" class="form-control teacher-page-size-select" aria-label="عدد النتائج في الصفحة">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="0">الكل</option>
+                </select>
+                <span class="teacher-page-info">سجل في الصفحة</span>
+              </div>
+              <div id="teacher-results-page-info-bottom" class="teacher-page-info"></div>
+              <div class="teacher-pagination-controls">
+                <button type="button" id="teacher-results-prev-page-bottom" class="btn btn-outline btn-sm">السابق</button>
+                <span id="teacher-results-page-number-bottom" class="teacher-page-number"></span>
+                <button type="button" id="teacher-results-next-page-bottom" class="btn btn-outline btn-sm">التالي</button>
+              </div>
+            </div>
+
 
             <!-- لوحة تفاصيل وتعديل إجابات ونتيجة الطالب الفردية -->
             <div id="teacher-result-detail-panel" class="exam-builder-card hidden" style="margin-top: 2rem; border-color: var(--secondary);">
@@ -1399,7 +1429,12 @@ function doGet(e) {
               </div>
             </div>
 
-            <div class="table-container">
+            <p class="table-scroll-hint">اسحب شريط التمرير العلوي أو السفلي يميناً ويساراً لعرض جميع أعمدة الجدول.</p>
+            <div id="teacher-students-table-scroll" class="teacher-table-scroll-stack">
+              <div class="table-hscroll-top" aria-label="تمرير الجدول أفقياً (أعلى)" title="تمرير يمين ويسار">
+                <div class="table-hscroll-top-inner"></div>
+              </div>
+              <div class="table-container table-container--wide">
               <table>
                 <thead>
                   <tr>
@@ -1417,7 +1452,29 @@ function doGet(e) {
                   <!-- تعبأ ديناميكياً -->
                 </tbody>
               </table>
+              </div>
             </div>
+
+            <div id="teacher-students-pagination" class="teacher-pagination-bar">
+              <div class="teacher-pagination-bar-size">
+                <span class="teacher-page-info">عرض</span>
+                <select id="teacher-students-page-size-bottom" class="form-control teacher-page-size-select" aria-label="عدد الطلاب في الصفحة">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="0">الكل</option>
+                </select>
+                <span class="teacher-page-info">طالب في الصفحة</span>
+              </div>
+              <div id="teacher-students-page-info-bottom" class="teacher-page-info"></div>
+              <div class="teacher-pagination-controls">
+                <button type="button" id="teacher-students-prev-page-bottom" class="btn btn-outline btn-sm">السابق</button>
+                <span id="teacher-students-page-number-bottom" class="teacher-page-number"></span>
+                <button type="button" id="teacher-students-next-page-bottom" class="btn btn-outline btn-sm">التالي</button>
+              </div>
+            </div>
+
           </div>
 
           <!-- تبويب الملف الشخصي للمعلم -->
@@ -1512,7 +1569,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.29"></script>
-  <script src="app.js?v=2026.05.31.29"></script>
+  <script src="questions.js?v=2026.06.01.6"></script>
+  <script src="app.js?v=2026.06.01.6"></script>
 </body>
 </html>

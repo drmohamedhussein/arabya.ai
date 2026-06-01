@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.29";
+const ARABYA_APP_VERSION = "2026.06.01.6";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2239,6 +2239,48 @@ function saveTeacherActiveTab(tabId) {
   } catch (e) {}
 }
 
+
+function setupTeacherTableHorizontalScroll(stackId) {
+  const stack = typeof stackId === "string" ? document.getElementById(stackId) : stackId;
+  if (!stack) return;
+  const topBar = stack.querySelector(".table-hscroll-top");
+  const topInner = stack.querySelector(".table-hscroll-top-inner");
+  const body = stack.querySelector(".table-container");
+  if (!topBar || !topInner || !body) return;
+
+  const syncWidths = () => {
+    const table = body.querySelector("table");
+    if (!table) return;
+    topInner.style.width = `${Math.max(table.scrollWidth, body.clientWidth)}px`;
+  };
+
+  if (!stack.dataset.hscrollBound) {
+    stack.dataset.hscrollBound = "1";
+    let syncing = false;
+    const linkScroll = (source, target) => {
+      source.addEventListener("scroll", () => {
+        if (syncing) return;
+        syncing = true;
+        target.scrollLeft = source.scrollLeft;
+        syncing = false;
+      }, { passive: true });
+    };
+    linkScroll(topBar, body);
+    linkScroll(body, topBar);
+    window.addEventListener("resize", syncWidths);
+    const table = body.querySelector("table");
+    if (table && typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(syncWidths).observe(table);
+    }
+  }
+  syncWidths();
+}
+
+function focusTeacherTableControls(tabId) {
+  const stackId = tabId === "results" ? "teacher-results-table-scroll" : "teacher-students-table-scroll";
+  setupTeacherTableHorizontalScroll(stackId);
+}
+
 function activateTeacherTab(tabId, options = {}) {
   const normalizedTab = normalizeTeacherTabId(tabId);
   if (systemState.activeView !== "teacher-dashboard-view" && !options.force) return normalizedTab;
@@ -2256,7 +2298,12 @@ function activateTeacherTab(tabId, options = {}) {
   if (targetPanel) targetPanel.classList.remove("hidden");
 
   if (!options.skipSave) saveTeacherActiveTab(normalizedTab);
-  if (options.skipRefresh) return normalizedTab;
+  if (options.skipRefresh) {
+    if (normalizedTab === "results" || normalizedTab === "students") {
+      focusTeacherTableControls(normalizedTab);
+    }
+    return normalizedTab;
+  }
 
   reloadSystemStateFromLocalStorage();
   if (normalizedTab === "stats") {
@@ -2273,6 +2320,9 @@ function activateTeacherTab(tabId, options = {}) {
     renderExamsList();
   } else if (normalizedTab === "teachers" || normalizedTab === "admins") {
     renderTeacherAccountsPanel();
+  }
+  if (normalizedTab === "results" || normalizedTab === "students") {
+    focusTeacherTableControls(normalizedTab);
   }
   return normalizedTab;
 }
@@ -6857,51 +6907,79 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
   const sizeSelect = document.getElementById("teacher-results-page-size");
+
+  const infoBottom = document.getElementById("teacher-results-page-info-bottom");
+  const pageNumBottom = document.getElementById("teacher-results-page-number-bottom");
+  const prevBtnBottom = document.getElementById("teacher-results-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-results-next-page-bottom");
+  const sizeSelectBottom = document.getElementById("teacher-results-page-size-bottom");
+
   const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
+  if (sizeSelectBottom && String(sizeSelectBottom.value) !== String(pageSize)) {
+    sizeSelectBottom.value = String(pageSize);
+  }
 
   if (totalItems === 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `وُجد 0 من ${totalAll} سجلاً`
-        : "";
-    }
+    const emptyText = isFiltered ? `وُجد 0 من ${totalAll} سجلاً` : "";
+    if (info) info.textContent = emptyText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = emptyText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} سجل — ` : "";
 
   if (!pageSize || pageSize <= 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `${countPrefix}عرض الكل`
-        : `إجمالي ${totalItems} سجلاً — عرض الكل`;
-    }
+    const allText = isFiltered
+      ? `${countPrefix}عرض الكل`
+      : `إجمالي ${totalItems} سجلاً — عرض الكل`;
+    if (info) info.textContent = allText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = allText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} سجلاً`;
-  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  const rangeText = `${countPrefix}عرض ${start}–${end} من ${totalItems} سجلاً`;
+  const pageText = `${page} / ${totalPages}`;
+
+  if (info) info.textContent = rangeText;
+  if (pageNum) pageNum.textContent = pageText;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
+
+  if (infoBottom) infoBottom.textContent = rangeText;
+  if (pageNumBottom) pageNumBottom.textContent = pageText;
+  if (prevBtnBottom) prevBtnBottom.disabled = page <= 1;
+  if (nextBtnBottom) nextBtnBottom.disabled = page >= totalPages;
 }
+
 
 function setupResultsTablePaginationControls() {
   const sizeSelect = document.getElementById("teacher-results-page-size");
+  const sizeSelectBottom = document.getElementById("teacher-results-page-size-bottom");
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
+  const prevBtnBottom = document.getElementById("teacher-results-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-results-next-page-bottom");
 
   if (sizeSelect && !sizeSelect.dataset.bound) {
     sizeSelect.dataset.bound = "1";
@@ -6911,6 +6989,15 @@ function setupResultsTablePaginationControls() {
       renderStudentResultsTable();
     });
   }
+  if (sizeSelectBottom && !sizeSelectBottom.dataset.bound) {
+    sizeSelectBottom.dataset.bound = "1";
+    sizeSelectBottom.value = String(getResultsTableViewSettings().pageSize);
+    sizeSelectBottom.addEventListener("change", () => {
+      setResultsTablePageSize(parseInt(sizeSelectBottom.value, 10));
+      renderStudentResultsTable();
+    });
+  }
+
   if (prevBtn && !prevBtn.dataset.bound) {
     prevBtn.dataset.bound = "1";
     prevBtn.addEventListener("click", () => {
@@ -6921,9 +7008,28 @@ function setupResultsTablePaginationControls() {
       }
     });
   }
+  if (prevBtnBottom && !prevBtnBottom.dataset.bound) {
+    prevBtnBottom.dataset.bound = "1";
+    prevBtnBottom.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderStudentResultsTable();
+      }
+    });
+  }
+
   if (nextBtn && !nextBtn.dataset.bound) {
     nextBtn.dataset.bound = "1";
     nextBtn.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      view.page += 1;
+      renderStudentResultsTable();
+    });
+  }
+  if (nextBtnBottom && !nextBtnBottom.dataset.bound) {
+    nextBtnBottom.dataset.bound = "1";
+    nextBtnBottom.addEventListener("click", () => {
       const view = getResultsTableViewSettings();
       view.page += 1;
       renderStudentResultsTable();
@@ -6948,11 +7054,12 @@ function renderStudentResultsTable() {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-results-table-scroll");
     return;
   }
 
   const view = getResultsTableViewSettings();
-  renderSortableTableHeaders("#teacher-tab-results .table-container table", RESULTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleResultsColumnSort);
+  renderSortableTableHeaders("#teacher-results-table-scroll .table-container table", RESULTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleResultsColumnSort);
   let sorted = sortResultsForDisplay(systemState.results, view.sortOrder);
   sorted = applyResultsColumnSort(sorted, view.columnSort, systemState.results);
   const filtered = filterResultsForTeacherTable(sorted);
@@ -8520,51 +8627,78 @@ function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = total
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
   const sizeSelect = document.getElementById("teacher-students-page-size");
+
+  const infoBottom = document.getElementById("teacher-students-page-info-bottom");
+  const pageNumBottom = document.getElementById("teacher-students-page-number-bottom");
+  const prevBtnBottom = document.getElementById("teacher-students-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-students-next-page-bottom");
+  const sizeSelectBottom = document.getElementById("teacher-students-page-size-bottom");
+
   const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
+  if (sizeSelectBottom && String(sizeSelectBottom.value) !== String(pageSize)) {
+    sizeSelectBottom.value = String(pageSize);
+  }
 
   if (totalItems === 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `وُجد 0 من ${totalAll} طالب`
-        : "";
-    }
+    const emptyText = isFiltered ? `وُجد 0 من ${totalAll} طالب` : "";
+    if (info) info.textContent = emptyText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = emptyText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} طالب — ` : "";
 
   if (!pageSize || pageSize <= 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `${countPrefix}عرض الكل`
-        : `إجمالي ${totalItems} طالب — عرض الكل`;
-    }
+    const allText = isFiltered
+      ? `${countPrefix}عرض الكل`
+      : `إجمالي ${totalItems} طالب — عرض الكل`;
+    if (info) info.textContent = allText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = allText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} طالب`;
-  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  const rangeText = `${countPrefix}عرض ${start}–${end} من ${totalItems} طالب`;
+  const pageText = `${page} / ${totalPages}`;
+
+  if (info) info.textContent = rangeText;
+  if (pageNum) pageNum.textContent = pageText;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
+
+  if (infoBottom) infoBottom.textContent = rangeText;
+  if (pageNumBottom) pageNumBottom.textContent = pageText;
+  if (prevBtnBottom) prevBtnBottom.disabled = page <= 1;
+  if (nextBtnBottom) nextBtnBottom.disabled = page >= totalPages;
 }
 
 function setupStudentsTablePaginationControls() {
   const sizeSelect = document.getElementById("teacher-students-page-size");
+  const sizeSelectBottom = document.getElementById("teacher-students-page-size-bottom");
   const prevBtn = document.getElementById("teacher-students-prev-page");
   const nextBtn = document.getElementById("teacher-students-next-page");
+  const prevBtnBottom = document.getElementById("teacher-students-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-students-next-page-bottom");
 
   if (sizeSelect && !sizeSelect.dataset.bound) {
     sizeSelect.dataset.bound = "1";
@@ -8574,6 +8708,15 @@ function setupStudentsTablePaginationControls() {
       renderTeacherStudentsTable();
     });
   }
+  if (sizeSelectBottom && !sizeSelectBottom.dataset.bound) {
+    sizeSelectBottom.dataset.bound = "1";
+    sizeSelectBottom.value = String(getStudentsTableViewSettings().pageSize);
+    sizeSelectBottom.addEventListener("change", () => {
+      setStudentsTablePageSize(parseInt(sizeSelectBottom.value, 10));
+      renderTeacherStudentsTable();
+    });
+  }
+
   if (prevBtn && !prevBtn.dataset.bound) {
     prevBtn.dataset.bound = "1";
     prevBtn.addEventListener("click", () => {
@@ -8584,9 +8727,28 @@ function setupStudentsTablePaginationControls() {
       }
     });
   }
+  if (prevBtnBottom && !prevBtnBottom.dataset.bound) {
+    prevBtnBottom.dataset.bound = "1";
+    prevBtnBottom.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderTeacherStudentsTable();
+      }
+    });
+  }
+
   if (nextBtn && !nextBtn.dataset.bound) {
     nextBtn.dataset.bound = "1";
     nextBtn.addEventListener("click", () => {
+      const view = getStudentsTableViewSettings();
+      view.page += 1;
+      renderTeacherStudentsTable();
+    });
+  }
+  if (nextBtnBottom && !nextBtnBottom.dataset.bound) {
+    nextBtnBottom.dataset.bound = "1";
+    nextBtnBottom.addEventListener("click", () => {
       const view = getStudentsTableViewSettings();
       view.page += 1;
       renderTeacherStudentsTable();
@@ -8630,11 +8792,12 @@ function renderTeacherStudentsTable() {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-students-table-scroll");
     return;
   }
 
   const view = getStudentsTableViewSettings();
-  renderSortableTableHeaders("#teacher-tab-students .table-container table", STUDENTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleStudentsColumnSort);
+  renderSortableTableHeaders("#teacher-students-table-scroll .table-container table", STUDENTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleStudentsColumnSort);
   let sorted = sortStudentsForDisplay(systemState.students, view.sortOrder);
   sorted = applyStudentsColumnSort(sorted, view.columnSort, systemState.students);
   const filtered = filterStudentsForTeacherTable(sorted);
