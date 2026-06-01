@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.8";
+const ARABYA_APP_VERSION = "2026.06.02.9";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -200,7 +200,7 @@ function renderStudentDashboardProfile() {
     return `<div class="result-query-card" style="text-align:right; margin-bottom:0.5rem;">` +
       `<div class="result-query-title">${escapeHtml(res.examTitle || "امتحان")}</div>` +
       `<div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(res.timestamp || "—")} · <span style="color:${tone}; font-weight:700;">${escapeHtml(status)}</span></div>` +
-      `<div style="font-weight:800; color:var(--secondary); margin-top:0.35rem;">${escapeHtml(res.score || "—")}</div>` +
+      `<div style="font-weight:800; color:var(--secondary); margin-top:0.35rem;">${escapeHtml(formatResultGradeCell(res))}</div>` +
       `</div>`;
   }).join("");
 }
@@ -1673,6 +1673,66 @@ function formatResultStatusBadge(res) {
   return "";
 }
 
+/** درجة مختصرة لجدول النتائج — بدون نص الأسئلة (التفاصيل من «عرض / تعديل») */
+function parseGradeFromScoreText_(text, maxFallback) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  if (/جاري الأداء/i.test(raw)) return "جاري الأداء…";
+  let m = raw.match(/تعادل\s*([\d.,]+)\s*من\s*([\d.,]+)/i);
+  if (m) return `${m[1]} / ${m[2]}`;
+  m = raw.match(/([\d.,]+)\s*من\s*([\d.,]+)\s*درج/i);
+  if (m) return `${m[1]} / ${m[2]}`;
+  m = raw.match(/^([\d.,]+)\s*\/\s*([\d.,]+)(?:\s*\(|$|\s)/);
+  if (m) return `${m[1]} / ${m[2]}`;
+  m = raw.match(/([\d.]+)\s*\/\s*([\d.]+)\s*أسئلة\s*موضوعية/i);
+  if (m) {
+    const max = Number(maxFallback);
+    if (Number.isFinite(max) && max > 0 && Number(m[2]) > 0) {
+      const scaled = Math.round((Number(m[1]) / Number(m[2])) * max * 100) / 100;
+      return `${scaled} / ${max}`;
+    }
+    return `${m[1]} / ${m[2]}`;
+  }
+  if (raw.length <= 48 && !/س\s*\(|إجابة الطالب|سؤال\s*\(/i.test(raw)) return raw;
+  return "";
+}
+
+function formatResultGradeCell(res) {
+  if (!res) return "—";
+  const status = getResultDisplayStatus(res);
+  if (status === "canceled") return "ملغي";
+  if (status === "incomplete") return "غير مكتمل";
+
+  const max = Number(res.maxScore);
+  const hasMax = Number.isFinite(max) && max > 0;
+
+  if (res.questionScores && typeof res.questionScores === "object") {
+    const earned = Object.values(res.questionScores).reduce((sum, val) => sum + (Number(val) || 0), 0);
+    if (Number.isFinite(earned) && (earned > 0 || hasMax)) {
+      return hasMax ? `${earned} / ${max}` : String(earned);
+    }
+  }
+
+  const parsed = parseGradeFromScoreText_(res.score, hasMax ? max : null);
+  if (parsed) return parsed;
+
+  const raw = String(res.score || "").trim();
+  if (!raw) return hasMax ? `— / ${max}` : "—";
+  if (raw.length > 80 || /س\s*\(|إجابة الطالب|الصحيحة:/i.test(raw)) {
+    return hasMax ? `— / ${max}` : "—";
+  }
+  return raw.length <= 48 ? raw : "—";
+}
+
+function getResultNumericGrade(res) {
+  const cell = formatResultGradeCell(res);
+  if (cell === "—" || cell === "ملغي" || cell === "غير مكتمل" || /جاري/i.test(cell)) return -1;
+  const pair = cell.match(/([\d.,]+)\s*\/\s*([\d.,]+)/);
+  if (pair) return parseFloat(String(pair[1]).replace(",", "."));
+  const single = parseFloat(String(cell).replace(",", "."));
+  return Number.isFinite(single) ? single : -1;
+}
+
 function ensureExamsDataShape() {
   if (!Array.isArray(systemState.exams)) {
     systemState.exams = [];
@@ -2260,8 +2320,7 @@ function getColumnSortValue(item, key, indexMap) {
     return getResultSortTime(item, indexMap?.get?.(item) ?? 0);
   }
   if (key === "score") {
-    const match = String(item.score || "").match(/(\d+(?:\.\d+)?)/);
-    return match ? parseFloat(match[1]) : -1;
+    return getResultNumericGrade(item);
   }
   if (key === "clientIp") {
     return formatResultDeviceSummary(item).toLocaleLowerCase("ar");
@@ -4904,7 +4963,7 @@ function renderTeacherStatsDashboard() {
         return `<div class="teacher-stats-list-item">` +
           `<div><div style="font-weight:700;">${escapeHtml(res.name || "طالب")}</div>` +
           `<div style="font-size:0.78rem; color:var(--text-muted);">${escapeHtml(res.examTitle || "امتحان")} • ${escapeHtml(res.timestamp || "")}</div></div>` +
-          `<span style="color:${statusColor}; font-weight:800;">${escapeHtml(res.score || "--")}</span>` +
+          `<span style="color:${statusColor}; font-weight:800;">${escapeHtml(formatResultGradeCell(res))}</span>` +
           `</div>`;
       }).join("");
     }
@@ -7863,7 +7922,7 @@ function renderStudentResultsTable() {
       <td><code>${escapeHtml(res.id || "--")}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(res.accessCode || "لا يوجد")}</span></td>
       <td>${escapeHtml(res.examTitle || "")} (${escapeHtml(res.level || "عام")})</td>
-      <td style="font-weight:700; color:var(--secondary);">${escapeHtml(res.score || "")}</td>
+      <td style="font-weight:700; color:var(--secondary);">${escapeHtml(formatResultGradeCell(res))}</td>
       <td><code style="font-size:0.78rem;">${escapeHtml(formatResultDeviceSummary(res))}</code></td>
       <td>${escapeHtml(res.timestamp || "")}</td>
       <td class="teacher-results-actions teacher-table-actions"></td>
