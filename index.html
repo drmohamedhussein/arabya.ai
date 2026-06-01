@@ -739,6 +739,42 @@
               </div>
             </div>
 
+            <div id="teacher-results-toolbar" class="config-card-box" style="margin-bottom: 1.25rem; text-align: right;">
+              <div id="teacher-results-sync-status" style="margin-bottom: 0.75rem; font-size: 0.9rem;"></div>
+              <div class="form-group" style="margin-bottom: 0.75rem;">
+                <label class="form-label" for="teacher-results-search-input">بحث في النتائج (اسم، ID، كود، امتحان، <strong>عنوان IP</strong>):</label>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                  <div class="input-wrapper" style="flex:1; min-width: min(100%, 280px);">
+                    <input type="text" id="teacher-results-search-input" class="form-control" placeholder="مثال: 102.54.1.20 أو اسم الطالب أو ID..." dir="ltr" style="text-align:left;" autocomplete="off">
+                    <span class="material-icons input-icon" aria-hidden="true">search</span>
+                  </div>
+                  <button type="button" id="teacher-results-search-clear" class="btn btn-outline btn-sm">مسح البحث</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary);color:var(--secondary);" onclick="pullTeacherResultsFromCloud && pullTeacherResultsFromCloud()">مزامنة من السحابة</button>
+                </div>
+                <small style="display:block; margin-top:0.35rem; color:var(--text-muted); font-size:0.8rem;">يُعامل عنوان IP كمعرف للجهاز — ابحث عن نتائج الطالب بكتابة IP كاملاً أو جزء منه.</small>
+              </div>
+              <div id="teacher-results-quick-filters" class="hidden" aria-hidden="true"></div>
+              <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between; margin-top:0.5rem;">
+                <span id="teacher-results-page-info" style="font-size:0.85rem; color:var(--text-muted);"></span>
+                <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+                  <button type="button" id="teacher-results-prev-page" class="btn btn-outline btn-sm">السابق</button>
+                  <span id="teacher-results-page-number" style="font-size:0.85rem; min-width:4rem; text-align:center;"></span>
+                  <button type="button" id="teacher-results-next-page" class="btn btn-outline btn-sm">التالي</button>
+                  <label for="teacher-results-page-size" class="sr-only">عدد الصفوف</label>
+                  <select id="teacher-results-page-size" class="form-control" style="width:auto; padding:0.35rem 0.6rem; min-width:5rem;">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="0">الكل</option>
+                  </select>
+                  <select id="teacher-results-sort-order" class="form-control" style="width:auto; padding:0.35rem 0.6rem; display:none;" aria-hidden="true">
+                    <option value="newest">الأحدث</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div class="table-container">
               <table>
                 <thead>
@@ -748,6 +784,7 @@
                     <th>كود الاشتراك</th>
                     <th>الامتحان</th>
                     <th>النتيجة</th>
+                    <th>IP / الجهاز</th>
                     <th>التاريخ والوقت</th>
                     <th>الإجراء</th>
                   </tr>
@@ -1113,6 +1150,39 @@ function doGet(e) {
               </div>
             </div>
 
+            <div id="teacher-students-toolbar" class="config-card-box" style="margin-bottom: 1.25rem; text-align: right;">
+              <div class="form-group" style="margin-bottom: 0.75rem;">
+                <label class="form-label" for="teacher-students-search-input">بحث في الطلاب (اسم، ID، كود، <strong>عنوان IP</strong>):</label>
+                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+                  <div class="input-wrapper" style="flex:1; min-width: min(100%, 280px);">
+                    <input type="text" id="teacher-students-search-input" class="form-control" placeholder="مثال: 41.128.0.1 أو اسم الطالب أو كود الاشتراك..." dir="ltr" style="text-align:left;" autocomplete="off">
+                    <span class="material-icons input-icon" aria-hidden="true">search</span>
+                  </div>
+                  <button type="button" id="teacher-students-search-clear" class="btn btn-outline btn-sm">مسح البحث</button>
+                </div>
+                <small style="display:block; margin-top:0.35rem; color:var(--text-muted); font-size:0.8rem;">ابحث عن طالب عبر IP المسجّل في نتائج امتحاناته أو آخر IP معروف على حسابه.</small>
+              </div>
+              <div id="teacher-students-quick-filters" class="hidden" aria-hidden="true"></div>
+              <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between; margin-top:0.5rem;">
+                <span id="teacher-students-page-info" style="font-size:0.85rem; color:var(--text-muted);"></span>
+                <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+                  <button type="button" id="teacher-students-prev-page" class="btn btn-outline btn-sm">السابق</button>
+                  <span id="teacher-students-page-number" style="font-size:0.85rem; min-width:4rem; text-align:center;"></span>
+                  <button type="button" id="teacher-students-next-page" class="btn btn-outline btn-sm">التالي</button>
+                  <select id="teacher-students-page-size" class="form-control" style="width:auto; padding:0.35rem 0.6rem; min-width:5rem;">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="0">الكل</option>
+                  </select>
+                  <select id="teacher-students-sort-order" class="form-control" style="width:auto; padding:0.35rem 0.6rem; display:none;" aria-hidden="true">
+                    <option value="newest">الأحدث</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div class="table-container">
               <table>
                 <thead>
@@ -1120,6 +1190,9 @@ function doGet(e) {
                     <th>اسم الطالب</th>
                     <th>رقم الـ ID</th>
                     <th>كود الاشتراك</th>
+                    <th>آخر IP</th>
+                    <th>البريد</th>
+                    <th>الموبايل</th>
                     <th>تاريخ التسجيل</th>
                     <th>الإجراء</th>
                   </tr>
@@ -1223,7 +1296,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.25"></script>
-  <script src="app.js?v=2026.05.31.25"></script>
+  <script src="questions.js?v=2026.05.31.26"></script>
+  <script src="app.js?v=2026.05.31.26"></script>
 </body>
 </html>

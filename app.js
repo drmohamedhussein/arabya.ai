@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.25";
+const ARABYA_APP_VERSION = "2026.05.31.26";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -1805,6 +1805,7 @@ const STUDENTS_TABLE_SORTABLE_COLUMNS = [
   { key: "name", label: "اسم الطالب" },
   { key: "id", label: "رقم ID" },
   { key: "code", label: "كود الاشتراك" },
+  { key: "lastKnownIp", label: "آخر IP" },
   { key: "email", label: "البريد" },
   { key: "mobile", label: "الموبايل" },
   { key: "timestamp", label: "تاريخ التسجيل" }
@@ -1824,6 +1825,9 @@ function getColumnSortValue(item, key, indexMap) {
   }
   if (key === "clientIp") {
     return formatResultDeviceSummary(item).toLocaleLowerCase("ar");
+  }
+  if (key === "lastKnownIp") {
+    return String(getStudentDisplayIp(item) || "").toLocaleLowerCase("ar");
   }
   return String(item[key] || "").toLocaleLowerCase("ar");
 }
@@ -6223,6 +6227,41 @@ function setupStudentsTableFilterControls() {
   if (clearBtn) clearBtn.addEventListener("click", resetStudentsTableFilters);
 }
 
+function normalizeIpSearchToken(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function ipMatchesSearchQuery(ipValue, query) {
+  const token = normalizeIpSearchToken(query);
+  const ip = normalizeIpSearchToken(ipValue);
+  if (!token || !ip) return false;
+  return ip.includes(token);
+}
+
+function getStudentDisplayIp(student) {
+  const ips = collectStudentIpAddresses(student);
+  if (!ips.length) return "—";
+  const preferred = String(student?.lastKnownIp || student?.clientIp || "").trim();
+  if (preferred) return preferred;
+  return ips[0];
+}
+
+function collectStudentIpAddresses(student) {
+  const ips = new Set();
+  const addIp = (value) => {
+    const ip = String(value || "").trim();
+    if (ip) ips.add(ip.toLowerCase());
+  };
+  if (!student) return [];
+  addIp(student.lastKnownIp);
+  addIp(student.clientIp);
+  const ctx = buildStudentMatchContext(student);
+  (systemState.results || []).forEach(res => {
+    if (resultMatchesStudentIdentity(res, ctx)) addIp(res.clientIp);
+  });
+  return [...ips];
+}
+
 function normalizeResultsSearchText(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -6235,6 +6274,7 @@ function getResultsSearchQuery() {
 function resultMatchesSearchQuery(res, query) {
   const normalizedQuery = normalizeResultsSearchText(query);
   if (!normalizedQuery) return true;
+  const ipToken = normalizeIpSearchToken(query);
   const fields = [
     res.name,
     res.id,
@@ -6244,11 +6284,15 @@ function resultMatchesSearchQuery(res, query) {
     res.level,
     res.examType,
     res.status,
-    res.timestamp
+    res.timestamp,
+    res.clientIp,
+    res.deviceId,
+    res.deviceFingerprint
   ];
   if (fields.some(field => normalizeResultsSearchText(field).includes(normalizedQuery))) {
     return true;
   }
+  if (ipToken && ipMatchesSearchQuery(res.clientIp, ipToken)) return true;
   const queryId = normalizeStudentId(query);
   if (queryId && normalizeStudentId(res.id).includes(queryId)) return true;
   const queryCode = sanitizeStudentCodeInput(query);
@@ -7912,6 +7956,7 @@ function getStudentsSearchQuery() {
 function studentMatchesSearchQuery(student, query) {
   const normalizedQuery = normalizeResultsSearchText(query);
   if (!normalizedQuery) return true;
+  const ipToken = normalizeIpSearchToken(query);
   const fields = [
     student.name,
     student.id,
@@ -7919,11 +7964,14 @@ function studentMatchesSearchQuery(student, query) {
     student.email,
     student.mobile,
     student.timestamp,
-    student.studentKey
+    student.studentKey,
+    student.lastKnownIp,
+    student.clientIp
   ];
   if (fields.some(field => normalizeResultsSearchText(field).includes(normalizedQuery))) {
     return true;
   }
+  if (ipToken && collectStudentIpAddresses(student).some(ip => ip.includes(ipToken))) return true;
   const queryId = normalizeStudentId(query);
   if (queryId && normalizeStudentId(student.id).includes(queryId)) return true;
   const queryCode = sanitizeStudentCodeInput(query);
@@ -8110,7 +8158,7 @@ function renderTeacherStudentsTable() {
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, filtersActive);
     return;
   }
@@ -8127,7 +8175,7 @@ function renderTeacherStudentsTable() {
     const emptyMsg = filters.searchQuery
       ? `لا يوجد طلاب يطابقون «${escapeHtml(filters.searchQuery)}»`
       : "لا يوجد طلاب يطابقون الفلاتر المحددة";
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} طالب.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} طالب.</td></tr>`;
     updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
@@ -8145,10 +8193,12 @@ function renderTeacherStudentsTable() {
       ? `<span style="color:var(--error); font-weight:700; font-size:0.75rem; display:block; margin-top:0.15rem;">تم إلغاء الامتحان</span>`
       : "";
     const row = document.createElement("tr");
+    const studentIp = getStudentDisplayIp(s);
     row.innerHTML = `
       <td>${escapeHtml(s.name || "")}${canceledBadge}</td>
       <td><code>${escapeHtml(s.id || "--")}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(s.code || "لا يوجد")}</span></td>
+      <td><code style="font-size:0.78rem;">${escapeHtml(studentIp)}</code></td>
       <td>${escapeHtml(s.email || "--")}</td>
       <td>${escapeHtml(s.mobile || "--")}</td>
       <td>${escapeHtml(s.timestamp || "غير معروف")}</td>
