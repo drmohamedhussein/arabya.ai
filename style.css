@@ -1384,3 +1384,106 @@ tr:hover td {
 .cloud-sync-active {
   animation: spin 1s infinite linear;
 }
+
+
+}
+
+/* حالة المزامنة السحابية */
+.cloud-sync-active {
+  animation: spin 1s infinite linear;
+}
+.teacher-stats-status-grid {
+  margin-top: 1rem;
+}
+
+.teacher-stats-two-col {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.teacher-stats-card {
+  padding: 1.25rem;
+}
+
+.teacher-stats-card--wide {
+  margin-top: 1rem;
+}
+
+.teacher-stats-card-title {
+  color: white;
+  margin-bottom: 0.75rem;
+  font-weight: 700;
+}
+
+.teacher-stats-card-title--secondary {
+  color: var(--secondary);
+}
+
+.teacher-stats-card-title--accent {
+  color: var(--accent);
+}
+
+.teacher-stats-clickable {
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.teacher-stats-clickable:hover {
+  transform: translateY(-2px);
+  border-color: rgba(20, 184, 166, 0.35);
+}
+
+.teacher-stats-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 0.9rem;
+}
+
+.teacher-stats-list-item:last-child {
+  border-bottom: none;
+}
+
+.teacher-stats-bar-row {
+  margin-bottom: 0.85rem;
+}
+
+.teacher-stats-bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.teacher-stats-bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.teacher-stats-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--secondary), var(--accent));
+}
+
+
+.teacher-sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.teacher-sortable-th.is-sorted {
+  color: var(--secondary);
+}
+
+.teacher-sortable-th:hover {

@@ -487,9 +487,13 @@
             <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin-bottom:0.75rem; width: 64px; height: 64px;">
             <h4 style="color:white; font-size:1.1rem; font-weight:700;">لوحة إدارة ARABYA.NET</h4>
             <span style="font-size: 0.8rem; color:var(--text-muted);" id="teacher-sidebar-subtitle">حساب المعلم الأكاديمي</span>
+            <span id="teacher-account-role-badge" class="teacher-role-badge is-teacher" style="display:inline-block; margin-top:0.5rem; font-size:0.75rem;">معلم</span>
           </div>
           
           <ul class="teacher-menu" role="tablist" aria-label="خيارات المعلم الجانبية">
+            <li class="teacher-menu-item" data-tab="stats" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">insights</span> الإحصائيات
+            </li>
             <li class="teacher-menu-item active" data-tab="exams" role="tab" aria-selected="true">
               <span class="material-icons" aria-hidden="true">assignment</span> الامتحانات والأسئلة
             </li>
@@ -516,6 +520,50 @@
         <!-- اللوحة الرئيسية المتغيرة -->
         <div class="teacher-main-panel">
           
+
+          <div id="teacher-tab-stats" class="teacher-tab-panel hidden" role="tabpanel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">لوحة الإحصائيات</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">ملخص فوري للامتحانات والطلاب والنتائج</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" id="teacher-stats-refresh-btn" class="btn btn-outline btn-sm"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">refresh</span> تحديث</button>
+                <button type="button" id="teacher-stats-sync-btn" class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">cloud_sync</span> مزامنة</button>
+              </div>
+            </div>
+            <div id="teacher-stats-sync-status" style="margin:0.5rem 0 1rem; font-size:0.85rem; color:var(--text-muted); min-height:1.25rem;" aria-live="polite"></div>
+            <div id="teacher-stats-date-range" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; margin-bottom:1rem; padding:0.85rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);">
+              <div class="form-group" style="margin:0; min-width:150px;">
+                <label class="form-label" for="teacher-stats-date-from" style="font-size:0.8rem;">من تاريخ</label>
+                <input type="date" id="teacher-stats-date-from" class="form-control" style="padding:0.4rem 0.65rem;">
+              </div>
+              <div class="form-group" style="margin:0; min-width:150px;">
+                <label class="form-label" for="teacher-stats-date-to" style="font-size:0.8rem;">إلى تاريخ</label>
+                <input type="date" id="teacher-stats-date-to" class="form-control" style="padding:0.4rem 0.65rem;">
+              </div>
+              <button type="button" id="teacher-stats-apply-date-range" class="btn btn-outline btn-sm">تطبيق على الإحصائيات</button>
+              <button type="button" id="teacher-stats-clear-date-range" class="btn btn-outline btn-sm" style="border-color:var(--warning); color:var(--warning);">مسح النطاق</button>
+            </div>
+            <div id="teacher-stats-updated-at" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem;"></div>
+            <div id="teacher-stats-overview" class="profile-summary-grid" aria-live="polite"></div>
+            <div id="teacher-stats-status-grid" class="profile-summary-grid teacher-stats-status-grid"></div>
+            <div class="teacher-stats-two-col">
+              <div class="exam-builder-card teacher-stats-card">
+                <h4 class="teacher-stats-card-title teacher-stats-card-title--secondary">أكثر الامتحانات نشاطاً</h4>
+                <div id="teacher-stats-top-exams"></div>
+              </div>
+              <div class="exam-builder-card teacher-stats-card">
+                <h4 class="teacher-stats-card-title teacher-stats-card-title--accent">آخر النتائج المسجلة</h4>
+                <div id="teacher-stats-recent-results"></div>
+              </div>
+            </div>
+            <div class="exam-builder-card teacher-stats-card teacher-stats-card--wide">
+              <h4 class="teacher-stats-card-title">ملخص الطلاب</h4>
+              <div id="teacher-stats-students-summary" class="profile-summary-grid"></div>
+            </div>
+          </div>
+
           <!-- تبويب الامتحانات (Exams Tab) -->
           <div id="teacher-tab-exams" class="teacher-tab-panel" role="tabpanel">
             
@@ -1358,7 +1406,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.27"></script>
-  <script src="app.js?v=2026.05.31.27"></script>
+  <script src="questions.js?v=2026.05.31.28"></script>
+  <script src="app.js?v=2026.05.31.28"></script>
 </body>
 </html>
