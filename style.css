@@ -1881,3 +1881,40 @@ table .btn,
     width: auto !important;
   }
 }
+
+
+/* تثبيت ظهور عناصر التحكم أعلى/أسفل الجداول في النتائج والطلاب */
+#teacher-results-toolbar,
+#teacher-students-toolbar,
+#teacher-results-pagination,
+#teacher-students-pagination {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+}
+
+#teacher-results-toolbar .teacher-pagination-controls,
+#teacher-students-toolbar .teacher-pagination-controls,
+#teacher-results-pagination > div,
+#teacher-students-pagination > div {
+  min-width: max-content;
+}
+
+#teacher-results-toolbar .form-control,
+#teacher-students-toolbar .form-control,
+#teacher-results-pagination .form-control,
+#teacher-students-pagination .form-control {
+  width: auto;
+  min-width: 5rem;
+}
+
+@media (max-width: 900px) {
+  #teacher-results-toolbar,
+  #teacher-students-toolbar,
+  #teacher-results-pagination,
+  #teacher-students-pagination {
+    padding-bottom: 0.25rem;
+  }
+}
