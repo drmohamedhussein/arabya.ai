@@ -398,3 +398,83 @@ table .btn,
     font-size: 1.05rem;
   }
 }
+
+/* شريط مزامنة عام في لوحة المعلم */
+.teacher-global-sync-bar {
+  margin-bottom: 1rem;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.teacher-global-sync-bar.is-syncing {
+  border-color: rgba(20, 184, 166, 0.35);
+}
+
+.teacher-global-sync-bar.is-local-only {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.teacher-global-sync-bar.is-error {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+/* قائمة تنقل الموقع على الجوال */
+.site-nav-toggle {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-main);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+  margin-inline-start: auto;
+}
+
+.site-nav-toggle .material-icons {
+  font-size: 1.5rem;
+  vertical-align: middle;
+}
+
+@media (max-width: 768px) {
+  .site-nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-container {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .nav-links {
+    display: none;
+    flex-direction: column;
+    width: 100%;
+    order: 3;
+    padding: 0.75rem 0;
+    border-top: 1px solid var(--border-color);
+    margin-top: 0.25rem;
+  }
+
+  .nav-links.is-open {
+    display: flex;
+  }
+
+  .nav-links li {
+    width: 100%;
+  }
+
+  .nav-links a {
+    display: block;
+    padding: 0.65rem 0.25rem;
+  }
+}

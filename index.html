@@ -38,7 +38,10 @@
         <span>ARABYA<span class="net-text">.NET</span></span>
       </a>
       
-      <ul class="nav-links" role="menubar">
+      <button type="button" id="site-nav-toggle" class="site-nav-toggle" aria-expanded="false" aria-controls="site-nav-drawer" aria-label="فتح قائمة التنقل">
+        <span class="material-icons" aria-hidden="true">menu</span>
+      </button>
+      <ul id="site-nav-drawer" class="nav-links" role="menubar">
         <li role="none"><a href="#" data-target="welcome-view" class="active-link" role="menuitem">الرئيسية</a></li>
         <li role="none"><a href="#" data-target="student-login-view" role="menuitem">بوابة الطالب</a></li>
         <li role="none"><a href="#" data-target="result-search-view" role="menuitem">استعلام النتائج</a></li>
@@ -505,7 +508,7 @@
               <span class="material-icons" aria-hidden="true">people</span> الطلاب وأكواد الاشتراك
             </li>
             <li class="teacher-menu-item" data-tab="teachers" data-super-admin-only role="tab" aria-selected="false">
-              <span class="material-icons" aria-hidden="true">supervisor_account</span> إدارة المعلمين
+              <span class="material-icons" aria-hidden="true">supervisor_account</span> حسابات المعلمين
             </li>
             <li class="teacher-menu-item" data-tab="integration" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">sync</span> الربط بـ Google Sheets
@@ -523,7 +526,7 @@
 
         <!-- اللوحة الرئيسية المتغيرة -->
         <div class="teacher-main-panel">
-          
+          <div id="teacher-global-sync-bar" class="teacher-global-sync-bar hidden" role="status" aria-live="polite"></div>
 
           <div id="teacher-tab-stats" class="teacher-tab-panel hidden" role="tabpanel">
             <div class="panel-header">
@@ -960,6 +963,18 @@
                 </div>
               </div>
 
+              <div id="detail-attempts-panel" class="config-card-box hidden" style="margin-bottom: 2rem; text-align: right;">
+                <h4 style="color: var(--accent); margin-bottom: 0.75rem; font-weight: 700;">محاولات الطالب لنفس الامتحان</h4>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">اضغط على محاولة لعرض تفاصيلها (الدرجة، التاريخ، حالة إعادة التقديم).</p>
+                <div id="detail-attempts-list"></div>
+              </div>
+
+              <div id="detail-cheat-attempts-panel" class="config-card-box hidden" style="margin-bottom: 2rem; text-align: right; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.04);">
+                <h4 style="color: var(--error); margin-bottom: 0.75rem; font-weight: 700;">سجل مخالفات الغش والجهاز</h4>
+                <div id="detail-cheat-attempts-summary" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:0.75rem;"></div>
+                <div id="detail-cheat-attempts-list"></div>
+              </div>
+
               <div id="detail-retake-panel" class="config-card-box" style="margin-bottom: 2rem; text-align: right;">
                 <h4 style="color: var(--secondary); margin-bottom: 0.75rem; font-weight: 700;">إعادة التقديم</h4>
                 <div id="detail-retake-status"></div>
@@ -1189,8 +1204,14 @@
                 <li>انسخ رابط <strong>تطبيق الويب (Web App URL)</strong> المولد (والذي ينتهي بـ <code>/exec</code>) والصقه في حقل <strong>رابط المزامنة (Google Form Submit URL)</strong> بالأعلى واضغط حفظ إعدادات التكامل.</li>
               </ol>
 
+              <div id="apps-script-deploy-notice" class="config-card-box" style="margin-bottom:1rem; text-align:right; border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.04);">
+                <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.7; margin:0;">
+                  <strong style="color:var(--accent);">بعد كل تعديل على كود Apps Script:</strong> انسخ الكود أدناه (يُحمَّل تلقائياً من ملف <code>integrations/google-apps-script-backend.gs</code>) → الصقه في مشروع Apps Script → <strong>نشر إصدار جديد</strong> (Deploy → New version) مع الوصول <strong>Anyone</strong> ورابط <code>/exec</code> → اختبر صفاً واحداً في الشيت (حفظ نتيجة أو نسخة احتياطية) قبل الاعتماد على المزامنة الحية.
+                </p>
+              </div>
+
               <h4 style="color:var(--accent); margin-bottom:0.5rem; font-weight:700; font-size:1.05rem;">الكود البرمجي الموحد للربط والمزامنة (Google Apps Script):</h4>
-              <textarea id="google-sheets-sync-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem; min-height: 200px; direction: ltr; text-align: left; background: rgba(0,0,0,0.3); color:#34d399; margin-bottom:0.75rem;" readonly>/**
+              <textarea id="google-sheets-sync-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem; min-height: 200px; direction: ltr; text-align: left; background: rgba(0,0,0,0.3); color:#34d399; margin-bottom:0.75rem;" readonly placeholder="جاري تحميل الكود من integrations/google-apps-script-backend.gs ...">/**
  * Google Apps Script - ARABYA.NET Platform Integration
  * يربط منصة الامتحانات بجداول Google Sheets تلقائياً
  * النسخة المحدّثة: تدعم add_result + save_backup + get_backup
@@ -1319,6 +1340,15 @@ function doGet(e) {
                 </button>
                 <input type="file" id="db-restore-file-input" style="display: none;" accept=".json" onchange="importCompleteDatabase(event)">
 
+              <div style="margin:1rem 0; padding:0.85rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02); text-align:right;">
+                <label class="form-label" for="db-restore-mode" style="font-size:0.85rem;">وضع استعادة الملف المحلي (JSON):</label>
+                <select id="db-restore-mode" class="form-control" style="max-width:320px;">
+                  <option value="replace">استبدال كامل (يمسح البيانات الحالية)</option>
+                  <option value="merge">دمج آمن (إضافة السجلات الجديدة فقط)</option>
+                </select>
+                <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">الدمج يحافظ على الحسابات والنتائج الحالية ويضيف ما لا يتكرر (حسب recordId أو المفاتيح).</small>
+              </div>
+
                 <button id="btn-cloud-backup" class="btn btn-accent" onclick="backupDatabaseToCloud()">
                   <span class="material-icons" aria-hidden="true">cloud_upload</span> حفظ نسخة احتياطية سحابية (جوجل شيت)
                 </button>
@@ -1333,9 +1363,10 @@ function doGet(e) {
               </div>
 
               <!-- مؤشر المزامنة السحابية -->
-              <div id="cloud-sync-status-indicator" style="margin-top: 1.25rem; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.5rem; border-top: 1px solid rgba(255,255,255,0.03); padding-top:1rem;">
+              <div id="cloud-sync-status-indicator" style="margin-top: 1.25rem; font-size: 0.85rem; color: var(--text-muted); display: flex; flex-direction:column; align-items:flex-start; gap: 0.35rem; border-top: 1px solid rgba(255,255,255,0.03); padding-top:1rem;">
                 <span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (تأكد من إدخال رابط الويب اب لحفظ واستعادة البيانات تلقائياً)
               </div>
+              <div id="cloud-sync-last-sync-line" style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;" aria-live="polite"></div>
             </div>
 
 
@@ -1452,49 +1483,69 @@ function doGet(e) {
             </div>
           </div>
 
-          <!-- تبويب الملف الشخصي للمعلم -->
+          <!-- تبويب الملف الشخصي (معلم / مدير / طالب) -->
           <div id="teacher-tab-profile" class="teacher-tab-panel hidden" role="tabpanel">
             <div class="panel-header">
               <div class="panel-title" id="teacher-profile-panel-title">الملف الشخصي للمعلم</div>
               <div id="teacher-profile-panel-subtitle" style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب ورابط الدخول المباشر</div>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="teacher-profile-name">اسم المعلم:</label>
-              <div class="input-wrapper">
-                <input type="text" id="teacher-profile-name" class="form-control" placeholder="أدخل اسم المعلم ثلاثياً...">
-                <span class="material-icons input-icon" aria-hidden="true">person</span>
+            <div id="teacher-profile-staff-panel">
+              <div class="form-group">
+                <label class="form-label" for="teacher-profile-name">اسم المعلم:</label>
+                <div class="input-wrapper">
+                  <input type="text" id="teacher-profile-name" class="form-control" placeholder="أدخل اسم المعلم ثلاثياً...">
+                  <span class="material-icons input-icon" aria-hidden="true">person</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="teacher-profile-subject">اسم الفرع / المادة التعليمية الافتراضية:</label>
+                <div class="input-wrapper">
+                  <input type="text" id="teacher-profile-subject" class="form-control" placeholder="مثال: لغة عربية - النحو والبلاغة">
+                  <span class="material-icons input-icon" aria-hidden="true">subject</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="teacher-profile-autocode">رمز الدخول التلقائي للمعلم:</label>
+                <div class="input-wrapper">
+                  <input type="text" id="teacher-profile-autocode" class="form-control" placeholder="أدخل رمز الدخول التلقائي...">
+                  <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
+                </div>
+              </div>
+
+              <div id="teacher-profile-sheets-box" class="exam-direct-link-box hidden" style="margin-top: 1.25rem; background: rgba(20, 184, 166, 0.05); border-color: rgba(20, 184, 166, 0.2);">
+                <div>
+                  <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط مزامنة Google Sheets (Web App):</span>
+                  <input type="text" id="teacher-profile-sheets-url" class="exam-link-input" style="color:var(--secondary); direction:ltr; text-align:left;" readonly>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary);color:var(--secondary);" onclick="navigator.clipboard.writeText(document.getElementById('teacher-profile-sheets-url').value).then(() => alert('تم نسخ رابط الشيت.'));">نسخ الرابط</button>
+              </div>
+
+              <button id="save-teacher-profile-btn" class="btn btn-primary" style="margin-top: 1rem;">
+                <span class="material-icons" aria-hidden="true">save</span>
+                <span id="save-teacher-profile-btn-label">حفظ الملف الشخصي</span>
+              </button>
+
+              <div id="teacher-auto-login-box" class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(245, 158, 11, 0.05); border-color: rgba(245, 158, 11, 0.2);">
+                <div>
+                  <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط الدخول التلقائي والمستمر للوحة التحكم الخاصة بك (احفظه في المفضلة):</span>
+                  <input type="text" id="teacher-auto-login-url" class="exam-link-input" style="color:var(--accent);" readonly>
+                </div>
+                <button type="button" class="btn btn-accent btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('teacher-auto-login-url').value).then(() => alert('تم نسخ رابط الدخول التلقائي بنجاح! احفظه لتسجيل الدخول الفوري لاحقاً.'));">نسخ الرابط</button>
               </div>
             </div>
 
-            <div class="form-group">
-              <label class="form-label" for="teacher-profile-subject">اسم الفرع / المادة التعليمية الافتراضية:</label>
-              <div class="input-wrapper">
-                <input type="text" id="teacher-profile-subject" class="form-control" placeholder="مثال: لغة عربية - النحو والبلاغة">
-                <span class="material-icons input-icon" aria-hidden="true">subject</span>
+            <div id="teacher-profile-student-panel" class="hidden">
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:1.5rem; padding:1rem; border:1px solid var(--border-color); border-radius:12px; background:rgba(255,255,255,0.02); text-align:right;">
+                <div><strong>الاسم:</strong> <span id="student-dashboard-profile-name">—</span></div>
+                <div><strong>المعرف:</strong> <code id="student-dashboard-profile-id">—</code></div>
+                <div><strong>كود الاشتراك:</strong> <span id="student-dashboard-profile-code" style="color:var(--accent); font-weight:700;">—</span></div>
               </div>
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="teacher-profile-autocode">رمز الدخول التلقائي للمعلم:</label>
-              <div class="input-wrapper">
-                <input type="text" id="teacher-profile-autocode" class="form-control" placeholder="أدخل رمز الدخول التلقائي...">
-                <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
-              </div>
-            </div>
-
-            <button id="save-teacher-profile-btn" class="btn btn-primary" style="margin-top: 1rem;">
-              <span class="material-icons" aria-hidden="true">save</span>
-              <span id="save-teacher-profile-btn-label">حفظ الملف الشخصي</span>
-            </button>
-
-            <!-- رابط الدخول التلقائي لوحة التحكم الخاصة بالمعلم -->
-            <div id="teacher-auto-login-box" class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(245, 158, 11, 0.05); border-color: rgba(245, 158, 11, 0.2);">
-              <div>
-                <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط الدخول التلقائي والمستمر للوحة التحكم الخاصة بك (احفظه في المفضلة):</span>
-                <input type="text" id="teacher-auto-login-url" class="exam-link-input" style="color:var(--accent);" readonly>
-              </div>
-              <button class="btn btn-accent btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('teacher-auto-login-url').value).then(() => alert('تم نسخ رابط الدخول التلقائي بنجاح! احفظه لتسجيل الدخول الفوري لاحقاً.'));">نسخ الرابط</button>
+              <h4 style="color:var(--secondary); font-weight:700; margin-bottom:0.75rem;">سجل الامتحانات والنتائج</h4>
+              <div id="student-dashboard-exam-history" class="result-query-list" aria-live="polite"></div>
+              <p style="font-size:0.8rem; color:var(--text-muted); margin-top:1rem;">لا تظهر هنا حقول إدارية (رمز المعلم أو ربط الشيت) — للاستفسار تواصل مع معلمك.</p>
             </div>
           </div>
 

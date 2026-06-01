@@ -669,32 +669,20 @@ function renderArabyaStudentProfile(student) {
 }
 
 function enhanceArabyaTeacherDashboard() {
+  if (document.getElementById("teacher-tab-stats") && typeof window.activateTeacherTab === "function") {
+    return;
+  }
   var menu = document.querySelector(".teacher-menu");
   var panelHost = document.querySelector(".teacher-main-panel");
   if (!menu || !panelHost || document.getElementById("teacher-tab-dashboard")) return;
 
   var item = document.createElement("li");
   item.className = "teacher-menu-item";
-  item.dataset.tab = "dashboard";
+  item.dataset.tab = "stats";
   item.setAttribute("role", "tab");
   item.setAttribute("aria-selected", "false");
-  item.innerHTML = '<span class="material-icons" aria-hidden="true">dashboard</span> الرئيسية';
+  item.innerHTML = '<span class="material-icons" aria-hidden="true">insights</span> الإحصائيات';
   menu.insertBefore(item, menu.firstElementChild);
-
-  var panel = document.createElement("div");
-  panel.id = "teacher-tab-dashboard";
-  panel.className = "teacher-tab-panel hidden";
-  panel.setAttribute("role", "tabpanel");
-  panel.innerHTML = '<div class="panel-header"><div><div class="panel-title">الرئيسية والملف الأكاديمي للمعلم</div><div style="font-size:0.85rem; color:var(--text-muted);">ملخص سريع للحساب والامتحانات والطلاب والنتائج</div></div></div><div id="teacher-dashboard-summary" class="profile-summary-grid"></div>';
-  panelHost.insertBefore(panel, panelHost.firstElementChild);
-
-  item.addEventListener("click", function() {
-    document.querySelectorAll(".teacher-menu-item").forEach(function(i) { i.classList.remove("active"); });
-    item.classList.add("active");
-    document.querySelectorAll(".teacher-tab-panel").forEach(function(p) { p.classList.add("hidden"); });
-    panel.classList.remove("hidden");
-    renderArabyaTeacherDashboardSummary();
-  });
 }
 
 function renderArabyaTeacherDashboardSummary() {
