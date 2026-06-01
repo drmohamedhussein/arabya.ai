@@ -1139,14 +1139,16 @@ function syncRetakeAffectedResultsToCloud(results, syncStatusEl) {
 }
 
 
-function findActiveRetakeGrant(studentLookupKey, examId) {
-  if (!studentLookupKey || !examId) return null;
+function findActiveRetakeGrant(studentLookupKey, examId, studentContext) {
+  if (!examId) return null;
+  const ctx = studentContext || buildStudentMatchContext({ studentKey: studentLookupKey || "" });
+  if (!ctx || (!ctx.studentKey && !ctx.id && !ctx.name && !ctx.accessCode)) return null;
   return systemState.results.find(r =>
-    r.studentLookupKey === studentLookupKey &&
     r.examId === examId &&
     r.allowRetake === true &&
-    !r.superseded &&
-    r.status !== "incomplete"
+    !isSupersededResult(r) &&
+    r.status !== "incomplete" &&
+    resultMatchesStudentIdentity(r, ctx)
   ) || null;
 }
 
@@ -1832,12 +1834,21 @@ function getStudentLookupKeysForMatch(student) {
   return [...keys];
 }
 
+function normalizeDeviceIp(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
 function deviceProfileMatchesResult(profile, result) {
   if (!profile || !result) return false;
   if (profile.deviceFingerprint && result.deviceFingerprint && profile.deviceFingerprint === result.deviceFingerprint) {
     return true;
   }
-  return !!(profile.deviceId && result.deviceId && profile.deviceId === result.deviceId);
+  if (profile.deviceId && result.deviceId && profile.deviceId === result.deviceId) {
+    return true;
+  }
+  const profileIp = normalizeDeviceIp(profile.clientIp);
+  const resultIp = normalizeDeviceIp(result.clientIp);
+  return !!(profileIp && resultIp && profileIp === resultIp);
 }
 
 function resultMatchesStudentIdentity(result, student) {
@@ -2448,6 +2459,9 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
   hydrateStudentsFromResults(systemState.results);
   ensureResultRecordIds();
   hydratePresentedQuestionsForResults();
+  if (remoteData.examDeviceRegistry) {
+    saveExamDeviceRegistry(mergeRemoteExamDeviceRegistry_(loadExamDeviceRegistry(), remoteData.examDeviceRegistry));
+  }
   ensureStudentsDataShape();
   ensureExamsDataShape();
   return true;
@@ -2528,6 +2542,26 @@ function postToArabyaWebApp(url, payload) {
   });
 }
 
+function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
+  const local = localRegistry && Array.isArray(localRegistry.bindings) ? localRegistry : { bindings: [] };
+  const remote = remoteRegistry && Array.isArray(remoteRegistry.bindings) ? remoteRegistry : { bindings: [] };
+  const merged = new Map();
+  [...local.bindings, ...remote.bindings].forEach(entry => {
+    if (!entry || !entry.examId || !entry.studentLookupKey) return;
+    const key = [
+      entry.examId,
+      entry.studentLookupKey,
+      entry.deviceId || "",
+      entry.deviceFingerprint || ""
+    ].join("::");
+    const existing = merged.get(key);
+    const entrySavedAt = Number(entry.savedAt) || Date.parse(entry.boundAt || "") || 0;
+    const existingSavedAt = existing ? (Number(existing.savedAt) || Date.parse(existing.boundAt || "") || 0) : 0;
+    if (!existing || entrySavedAt >= existingSavedAt) merged.set(key, { ...entry });
+  });
+  return pruneExamDeviceRegistry({ bindings: [...merged.values()] });
+}
+
 async function pushCloudBackupNow() {
   const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
   if (urlList.length === 0) return false;
@@ -2537,7 +2571,8 @@ async function pushCloudBackupNow() {
       teachers: systemState.teachers,
       students: systemState.students,
       exams: systemState.exams,
-      results: systemState.results
+      results: systemState.results,
+      examDeviceRegistry: loadExamDeviceRegistry()
     }
   };
   let ok = false;
@@ -5419,6 +5454,14 @@ function populateExamSelectionList() {
 
 async function validateStudentAndStart() {
   reloadSystemStateFromLocalStorage();
+  if (getArabyaWebAppUrls().length > 0) {
+    try {
+      await syncDatabaseFromCloud({ silent: true });
+    } catch (cloudErr) {
+      console.warn("[ARABYA] pre-exam cloud sync failed:", cloudErr);
+    }
+    reloadSystemStateFromLocalStorage();
+  }
 
   const name = document.getElementById("student-fullname-input").value.trim();
   const id = document.getElementById("student-id-input").value.trim();
@@ -5815,6 +5858,14 @@ function submitFinishedExam() {
   }
 
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
+  const submitContext = buildStudentMatchContext(systemState.currentStudent);
+  const blockingOnSubmit = findBlockingExamResult(studentLookupKey, systemState.currentExam.id, submitContext);
+  if (blockingOnSubmit) {
+    localStorage.removeItem("arabya_active_student_session");
+    alert(getExamBlockingMessage(blockingOnSubmit));
+    navigateToView("student-login-view");
+    return;
+  }
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === systemState.currentExam.id && r.status === "incomplete"));
   localStorage.removeItem("arabya_active_student_session");
 
@@ -7559,7 +7610,7 @@ function deviceBindingMatchesEntry(profile, entry) {
 }
 
 function findDeviceExamAttemptConflict(profile, examId, studentContext) {
-  if (!profile || !examId || !studentContext) return null;
+  if (!examId || !studentContext) return null;
   if (findActiveRetakeGrant(null, examId, studentContext)) return null;
 
   let sameStudentBlock = null;
@@ -7568,16 +7619,19 @@ function findDeviceExamAttemptConflict(profile, examId, studentContext) {
   (systemState.results || []).forEach(r => {
     if (!r || r.examId !== examId || isSupersededResult(r)) return;
     if (isResultIpReleasedByStaff(r)) return;
-    if (!deviceProfileMatchesResult(profile, r)) return;
+    if (r.allowRetake === true) return;
 
-    const isFinished = r.status !== "incomplete" && r.allowRetake !== true && (r.status === "completed" || r.status === "canceled");
+    const isFinished = r.status !== "incomplete" && (r.status === "completed" || r.status === "canceled");
     const isInProgress = r.status === "incomplete";
+    const sameStudent = resultMatchesStudentIdentity(r, studentContext);
 
-    if (resultMatchesStudentIdentity(r, studentContext)) {
-      if (isFinished) sameStudentBlock = r;
+    if (sameStudent) {
+      if (isFinished && !sameStudentBlock) sameStudentBlock = r;
       return;
     }
-    if (isFinished || isInProgress) otherStudentBlock = r;
+
+    if (!profile || !deviceProfileMatchesResult(profile, r)) return;
+    if ((isFinished || isInProgress) && !otherStudentBlock) otherStudentBlock = r;
   });
 
   if (sameStudentBlock) return { kind: "same_student", result: sameStudentBlock };
@@ -9245,6 +9299,15 @@ function updateLiveIncompleteResult() {
   res.maxScore = getCurrentExamTotalScore();
   res.presentedQuestions = JSON.parse(JSON.stringify(systemState.shuffledQuestions));
   res.timestamp = new Date().toLocaleString("ar-EG");
+
+  if (systemState.examDeviceProfile && studentLookupKey && examId) {
+    registerExamDeviceBinding(
+      systemState.examDeviceProfile,
+      studentLookupKey,
+      systemState.currentStudent.name,
+      examId
+    );
+  }
 
   saveSystemState(false);
 }
