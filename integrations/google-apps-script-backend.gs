@@ -74,7 +74,8 @@ function doPost(e) {
     }
 
     if (action === "save_backup") {
-      var merged = mergeArabyaDatabase_(data.data || {}, "save_backup");
+      var actor = data.actor || (data.data && data.data._actor) || {};
+      var merged = mergeArabyaDatabase_(data.data || {}, "save_backup", actor);
       return jsonArabya_({
         status: "success",
         action: action,
@@ -82,6 +83,17 @@ function doPost(e) {
         cloudRevision: getArabyaCloudRevision_(),
         githubSynced: !merged._githubSyncSkipped
       });
+    }
+
+    if (action === "log_device_reject") {
+      appendDeviceRejectSheet_(data);
+      appendArabyaAuditSheet_("device_reject", data.actor || {}, stringifyArabyaJsonField_(data.message || data.reason || ""));
+      return jsonArabya_({ status: "success", action: action });
+    }
+
+    if (action === "run_daily_drive_backup") {
+      var fileName = dailyArabyaDriveBackup_();
+      return jsonArabya_({ status: "success", action: action, fileName: fileName });
     }
 
     if (action === "save_entity") {
@@ -102,11 +114,8 @@ function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_sync_meta") {
-      return jsonArabya_({
-        status: "success",
-        cloudRevision: getArabyaCloudRevision_(),
-        service: "ARABYA.NET backend bridge"
-      });
+      var stats = getArabyaSyncStats_();
+      return jsonArabya_(Object.assign({ status: "success", service: "ARABYA.NET backend bridge" }, stats));
     }
 
     if (action === "get_backup") {
@@ -285,7 +294,7 @@ function mergeArabyaExamDeviceRegistry_(localRegistry, incomingRegistry) {
   return { bindings: Object.keys(map).map(function(key) { return map[key]; }) };
 }
 
-function mergeArabyaDatabase_(patch, reason) {
+function mergeArabyaDatabase_(patch, reason, actor) {
   var db = readArabyaDatabase_();
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
     if (Array.isArray(patch[collection])) {
@@ -309,6 +318,7 @@ function mergeArabyaDatabase_(patch, reason) {
   if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
   writeArabyaBackupSheet_(db);
   touchArabyaSyncRevision_(reason || "merge_db");
+  appendArabyaAuditSheet_(reason || "merge_db", actor || {}, stringifyArabyaJsonField_(countArabya_(db)));
   try {
     writeArabyaDatabaseToGitHub_(db);
   } catch (githubErr) {
@@ -603,6 +613,105 @@ function countArabya_(db) {
     exams: (db.exams || []).length,
     results: (db.results || []).length
   };
+}
+
+function getArabyaSyncStats_() {
+  var db = readArabyaDatabase_();
+  var backupJsonChars = 0;
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP");
+    if (sheet && sheet.getLastRow() >= 2) {
+      backupJsonChars = String(sheet.getRange(sheet.getLastRow(), 2).getValue() || "").length;
+    }
+  } catch (err) {}
+  var qb = db.questionBanks || {};
+  var qbTeachers = Object.keys(qb).length;
+  var qbItems = 0;
+  Object.keys(qb).forEach(function(k) {
+    if (Array.isArray(qb[k])) qbItems += qb[k].length;
+  });
+  return {
+    cloudRevision: getArabyaCloudRevision_(),
+    questionBankTeachers: qbTeachers,
+    questionBankItems: qbItems,
+    backupJsonChars: backupJsonChars,
+    teachers: (db.teachers || []).length,
+    students: (db.students || []).length,
+    exams: (db.exams || []).length,
+    results: (db.results || []).length
+  };
+}
+
+function ensureArabyaAuditSheet_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("ARABYA_AUDIT");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("ARABYA_AUDIT");
+    sheet.appendRow(["الوقت", "المستخدم", "الدور", "الإجراء", "التفاصيل"]);
+  }
+  return sheet;
+}
+
+function appendArabyaAuditSheet_(action, actor, detail) {
+  try {
+    var sheet = ensureArabyaAuditSheet_();
+    var user = (actor && (actor.username || actor.name)) || "system";
+    var role = (actor && actor.role) || "";
+    sheet.appendRow([new Date(), user, role, String(action || ""), String(detail || "").slice(0, 45000)]);
+  } catch (err) {}
+}
+
+function ensureDeviceRejectSheet_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName("رفض دخول الأجهزة");
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet("رفض دخول الأجهزة");
+    sheet.appendRow(["الوقت", "الطالب", "مفتاح الطالب", "الامتحان", "IP", "بصمة الجهاز", "السبب"]);
+  }
+  return sheet;
+}
+
+function appendDeviceRejectSheet_(data) {
+  try {
+    var sheet = ensureDeviceRejectSheet_();
+    sheet.appendRow([
+      data.at || new Date(),
+      data.studentName || "",
+      data.studentLookupKey || "",
+      data.examId || "",
+      data.clientIp || "",
+      data.deviceFingerprint || "",
+      data.message || data.reason || ""
+    ]);
+  } catch (err) {}
+}
+
+/** تشغيل يدوي مرة من محرر Apps Script: installArabyaDailyBackupTrigger */
+function installArabyaDailyBackupTrigger() {
+  var triggers = ScriptApp.getProjectTriggers();
+  triggers.forEach(function(t) {
+    if (t.getHandlerFunction() === "dailyArabyaDriveBackup") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("dailyArabyaDriveBackup").timeBased().everyDays(1).atHour(3).create();
+}
+
+function dailyArabyaDriveBackup() {
+  return dailyArabyaDriveBackup_();
+}
+
+function dailyArabyaDriveBackup_() {
+  var db = readArabyaDatabase_();
+  var folderName = "ARABYA_BACKUPS";
+  var folders = DriveApp.getFoldersByName(folderName);
+  var folder = folders.hasNext() ? folders.next() : DriveApp.createFolder(folderName);
+  var tz = Session.getScriptTimeZone() || "Africa/Cairo";
+  var stamp = Utilities.formatDate(new Date(), tz, "yyyy-MM-dd");
+  var fileName = "arabya-backup-" + stamp + ".json";
+  var existing = folder.getFilesByName(fileName);
+  while (existing.hasNext()) existing.next().setTrashed(true);
+  folder.createFile(fileName, JSON.stringify(db, null, 2), MimeType.PLAIN_TEXT);
+  appendArabyaAuditSheet_("daily_drive_backup", { username: "system", role: "cron" }, fileName);
+  return fileName;
 }
 
 function jsonArabya_(obj) {

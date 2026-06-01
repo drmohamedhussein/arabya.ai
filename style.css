@@ -1486,4 +1486,60 @@ tr:hover td {
   color: var(--secondary);
 }
 
+.arabya-toast-container {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 1rem;
+  z-index: 12000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: min(420px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.arabya-toast {
+  pointer-events: auto;
+  padding: 0.65rem 1rem;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #f1f5f9);
+}
+
+.arabya-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.arabya-toast--success { border-color: rgba(34, 197, 94, 0.45); }
+.arabya-toast--error { border-color: rgba(239, 68, 68, 0.45); }
+.arabya-toast--warning { border-color: rgba(245, 158, 11, 0.45); }
+
+.sync-health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.65rem;
+}
+
+.sync-health-grid > div {
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  font-size: 0.82rem;
+}
+
+.sync-health-grid span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.2rem;
+}
+
 .teacher-sortable-th:hover {

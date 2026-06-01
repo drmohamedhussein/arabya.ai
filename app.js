@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.6";
+const ARABYA_APP_VERSION = "2026.06.02.1";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -664,6 +664,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
+  applyStudentBindTokenFromUrl();
   setupArabyaLiveDataRefresh();
   setupMobileSiteNavigation();
   hydrateGoogleSheetsScriptBox();
@@ -675,6 +676,9 @@ document.addEventListener("DOMContentLoaded", () => {
   window.getArabyaWebAppUrls = getArabyaWebAppUrls;
   window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
   window.isSuperAdminTeacher = isSuperAdminTeacher;
+  window.inferTeacherRole = inferTeacherRole;
+  if (window.ArabyaOfflineQueue) window.ArabyaOfflineQueue.installListeners();
+  if (window.ArabyaRealtimeBridge) window.ArabyaRealtimeBridge.startRealtimeSync();
 
   // ===== تشخيص ما تم تحميله =====
   console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
@@ -1924,6 +1928,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
     existingStudent.mobile = normalizedStudent.mobile;
     existingStudent.timestamp = existingStudent.timestamp || new Date().toLocaleDateString("ar-EG");
     existingStudent.studentKey = existingStudent.studentKey || getStudentLookupKey(existingStudent) || fallbackKey || createRecordId("student");
+    if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.ensureStudentDeviceBindToken(existingStudent);
     return ensureStudentAccountType(existingStudent);
   }
 
@@ -1937,6 +1942,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
     studentKey: fallbackKey || getStudentLookupKey(normalizedStudent) || createRecordId("student"),
     accountType: ARABYA_ACCOUNT_ROLES.STUDENT
   };
+  if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.ensureStudentDeviceBindToken(newStudent);
   systemState.students.push(newStudent);
   return ensureStudentAccountType(newStudent);
 }
@@ -2384,6 +2390,14 @@ function recordCloudSyncOutcome(ok, detail) {
     }
   } catch (e) {}
   refreshCloudSyncStatusUI(detail, ok ? "ok" : "fail");
+  if (window.ArabyaToast && detail) {
+    const msg = String(detail);
+    if (/بنك|question/i.test(msg) && window.ArabyaPlatformSync) {
+      window.ArabyaPlatformSync.recordQuestionBankSync(ok, msg);
+    } else {
+      window.ArabyaToast.showToast(msg, ok ? "success" : "error");
+    }
+  }
 }
 
 function markCloudSyncLocalOnly(reason) {
@@ -2605,7 +2619,10 @@ function getArabyaWebAppUrls() {
   return Array.from(urls).map(normalizeArabyaWebAppUrl).filter(Boolean);
 }
 
-function mergeRemoteCollection_(current, incoming, keyFn) {
+function mergeRemoteCollection_(current, incoming, keyFn, label) {
+  if (window.ArabyaPlatformSync && window.ArabyaPlatformSync.mergeRemoteCollectionWithConflicts) {
+    return window.ArabyaPlatformSync.mergeRemoteCollectionWithConflicts(current, incoming, keyFn, label);
+  }
   const map = {};
   (current || []).forEach(item => { map[keyFn(item)] = item; });
   (incoming || []).forEach(item => {
@@ -2678,16 +2695,16 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
     }
   }
   if (Array.isArray(remoteData.students)) {
-    systemState.students = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""));
+    systemState.students = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
   }
   if (Array.isArray(remoteData.exams)) {
-    systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""));
+    systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
   }
   if (Array.isArray(remoteData.results)) {
     systemState.results = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
       if (item.recordId) return String(item.recordId);
       return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
-    });
+    }, "نتيجة");
   }
   hydrateStudentsFromResults(systemState.results);
   ensureResultRecordIds();
@@ -2747,6 +2764,11 @@ async function postToArabyaWebAppNoCors(url, payload) {
 function postToArabyaWebApp(url, payload) {
   const targetUrl = normalizeArabyaWebAppUrl(url);
   if (!targetUrl) return Promise.reject(new Error("رابط Web App غير صالح"));
+
+  if (!navigator.onLine && window.ArabyaOfflineQueue) {
+    window.ArabyaOfflineQueue.enqueue(targetUrl, payload);
+    return Promise.resolve({ status: "queued" });
+  }
 
   const attempt = () => fetch(targetUrl, {
     method: "POST",
@@ -2817,9 +2839,11 @@ async function pushCloudBackupNow(reason) {
       results: systemState.results,
       examDeviceRegistry: loadExamDeviceRegistry()
     };
+  const actor = window.ArabyaPlatformSync ? window.ArabyaPlatformSync.getCloudSyncActor() : { username: systemState.activeTeacher?.username || "" };
   const payload = {
     action: "save_backup",
-    data: backupData
+    data: backupData,
+    actor
   };
   let ok = false;
   for (const url of urlList) {
@@ -2832,8 +2856,14 @@ async function pushCloudBackupNow(reason) {
       console.warn("pushCloudBackupNow:", url, e);
     }
   }
-  if (ok) recordCloudSyncOutcome(true, "نسخة احتياطية سحابية");
-  else recordCloudSyncOutcome(false, "فشل رفع النسخة الاحتياطية");
+  if (ok) {
+    recordCloudSyncOutcome(true, reason && /question|بنك/i.test(String(reason)) ? "مزامنة بنك الأسئلة والنسخة الاحتياطية" : "نسخة احتياطية سحابية");
+    if (/question|بنك/i.test(String(reason)) && window.ArabyaPlatformSync) {
+      window.ArabyaPlatformSync.recordQuestionBankSync(true, "رفع بنك الأسئلة");
+    }
+  } else {
+    recordCloudSyncOutcome(false, "فشل رفع النسخة الاحتياطية");
+  }
   return ok;
 }
 
@@ -3056,6 +3086,19 @@ async function syncDatabaseFromCloud(options = {}) {
   }
   recordCloudSyncOutcome(false, "تعذّر الجلب من السحابة");
   return { ok: false };
+}
+
+function applyStudentBindTokenFromUrl() {
+  try {
+    const hash = window.location.hash || "";
+    const q = hash.includes("?") ? hash.split("?").slice(1).join("?") : "";
+    const params = new URLSearchParams(q);
+    const token = params.get("token");
+    if (token) {
+      const el = document.getElementById("student-device-bind-token");
+      if (el) el.value = decodeURIComponent(token);
+    }
+  } catch (e) {}
 }
 
 function setupArabyaLiveDataRefresh() {
@@ -4526,6 +4569,10 @@ function loadTeacherDashboardData() {
   if (window.ArabyaCloudSync) {
     window.ArabyaCloudSync.startPullLoop();
   }
+  if (window.ArabyaPlatformSync) {
+    window.ArabyaPlatformSync.renderQuestionBankSyncIndicator();
+    if (isSuperAdminTeacher()) window.ArabyaPlatformSync.renderSyncHealthPanel(null);
+  }
 }
 
 async function saveTeacherProfile() {
@@ -4877,6 +4924,7 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-entry-code").value = exam.entryCode || "";
   document.getElementById("edit-meta-entry-score").value = exam.entryScore || "";
   document.getElementById("edit-meta-entry-details").value = exam.entryDetails || "";
+  if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.applyHallModeToEditor(exam);
 
   // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
   const examUrl = getExamDirectLink(exam);
@@ -5104,6 +5152,7 @@ function applyExamMetaFromEditor(exam, options = {}) {
   exam.entryCode = editEntryCode;
   exam.entryScore = editEntryScore;
   exam.entryDetails = editEntryDetails;
+  if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.saveHallModeToExam(exam);
   sanitizeQuestionConfig(exam);
   return true;
 }
@@ -5843,6 +5892,15 @@ async function validateStudentAndStart() {
       return;
     }
     deviceProfile = deviceCheck.profile;
+    const bindTokenInput = document.getElementById("student-device-bind-token")?.value?.trim() || "";
+    if (window.ArabyaPlatformSync) {
+      const bindOk = window.ArabyaPlatformSync.validateStudentDeviceBinding(studentRecord, bindTokenInput, deviceProfile);
+      if (!bindOk.ok) {
+        alert(bindOk.message);
+        return;
+      }
+      saveStudentsToLocalStorage();
+    }
     mergeDeviceProfileIntoStudent(studentRecord, deviceProfile);
     systemState.currentStudent.deviceId = deviceProfile.deviceId;
     systemState.currentStudent.lastKnownIp = deviceProfile.clientIp || "";
@@ -7990,14 +8048,39 @@ function registerExamDeviceBinding(deviceProfile, studentLookupKey, studentName,
   saveExamDeviceRegistry(registry);
 }
 
+async function logExamDeviceReject_(entry) {
+  if (!window.ArabyaPlatformSync) return;
+  try {
+    await window.ArabyaPlatformSync.logDeviceRejectToCloud({
+      ...entry,
+      actor: window.ArabyaPlatformSync.getCloudSyncActor()
+    });
+  } catch (e) {}
+}
+
 async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, studentContext) {
   const profile = await collectExamDeviceProfile();
   if (!profile.deviceFingerprint) {
-    return {
+    const fail = {
       ok: false,
       message: "تعذر إنشاء بصمة الجهاز في هذا المتصفح. جرّب متصفحاً حديثاً (Chrome / Edge / Firefox) ثم أعد المحاولة.",
       profile
     };
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: fail.message, deviceFingerprint: "", clientIp: profile?.clientIp || "" });
+    return fail;
+  }
+  const exam = (systemState.exams || []).find(e => e.id === examId) || systemState.currentExam;
+  if (window.ArabyaPlatformSync) {
+    const hallCheck = window.ArabyaPlatformSync.checkExamHallIp(exam, profile.clientIp);
+    if (!hallCheck.ok) {
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: hallCheck.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      return { ok: false, message: hallCheck.message, profile };
+    }
+    const maxDev = window.ArabyaPlatformSync.checkMaxStudentDevices(studentLookupKey);
+    if (!maxDev.ok) {
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: maxDev.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      return { ok: false, message: maxDev.message, profile };
+    }
   }
   const ctx = studentContext || buildStudentMatchContext({
     studentKey: studentLookupKey,
@@ -8005,33 +8088,27 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
   });
   const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
   if (attemptConflict?.kind === "same_student") {
-    return {
-      ok: false,
-      message: getExamBlockingMessage(attemptConflict.result),
-      profile
-    };
+    const msg = getExamBlockingMessage(attemptConflict.result);
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
   }
   if (attemptConflict?.kind === "other_student") {
     const other = attemptConflict.result || {};
-    return {
-      ok: false,
-      message:
-        "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
-        `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
-        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.",
-      profile
-    };
+    const msg =
+      "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
+      `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
+      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
   }
   const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
   if (conflict) {
-    return {
-      ok: false,
-      message:
-        "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
-        `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
-        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.",
-      profile
-    };
+    const msg =
+      "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
+      `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
+      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
   }
   registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
   return { ok: true, profile };
@@ -8994,6 +9071,26 @@ function setupStudentsTablePaginationControls() {
   });
 }
 
+window.showStudentBindQrModal = function (student) {
+  if (!student || !window.ArabyaPlatformSync) return;
+  const token = window.ArabyaPlatformSync.ensureStudentDeviceBindToken(student);
+  saveStudentsToLocalStorage();
+  const imgUrl = window.ArabyaPlatformSync.getStudentBindQrImageUrl(student);
+  const w = window.open("", "_blank", "noopener,noreferrer,width=340,height=420");
+  if (!w) {
+    alert(`رمز ربط الجهاز لـ ${student.name}:\n${token}`);
+    return;
+  }
+  w.document.write(
+    `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>QR ربط جهاز</title></head><body style="font-family:Tahoma;text-align:center;padding:1rem;">` +
+    `<h3 style="margin:0 0 0.5rem;">${escapeHtml(student.name || "")}</h3>` +
+    `<img src="${imgUrl}" width="180" height="180" alt="QR" style="border:1px solid #ccc;border-radius:8px;"/>` +
+    `<p style="font-size:0.9rem;">الرمز: <code>${escapeHtml(token)}</code></p>` +
+    `<p style="font-size:0.8rem;color:#666;">يُدخل الطالب الرمز مرة واحدة عند أول امتحان.</p></body></html>`
+  );
+  w.document.close();
+};
+
 window.pullTeacherStudentsFromCloud = async function() {
   const el = document.getElementById("teacher-students-sync-status");
   if (el) {
@@ -9076,6 +9173,15 @@ function renderTeacherStudentsTable() {
     `;
 
     const actionsCell = row.querySelector(".teacher-students-actions");
+    const qrBtn = document.createElement("button");
+    qrBtn.type = "button";
+    qrBtn.className = "btn btn-outline btn-sm";
+    qrBtn.style.cssText = "padding:0.25rem 0.5rem;";
+    qrBtn.textContent = "QR";
+    qrBtn.title = "رمز ربط الجهاز";
+    qrBtn.addEventListener("click", () => showStudentBindQrModal(s));
+    actionsCell.appendChild(qrBtn);
+
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "btn btn-outline btn-sm";

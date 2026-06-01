@@ -192,8 +192,12 @@
         <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
           انتقل لبدء الامتحان <span class="material-icons" aria-hidden="true">arrow_back</span>
         </button>
+        <div class="form-group" style="margin-top:0.85rem;">
+          <label class="form-label" for="student-device-bind-token">رمز ربط الجهاز (من QR المعلم — مرة واحدة)</label>
+          <input type="text" id="student-device-bind-token" class="form-control" placeholder="امسح QR أو الصق الرمز هنا" autocomplete="off">
+        </div>
         <p style="margin-top:0.65rem; font-size:0.82rem; color:var(--text-muted); line-height:1.5;">
-          عند الضغط يُتحقَّق من بصمة الجهاز وعنوان IP لمنع استخدام نفس الجهاز لطالبين مختلفين أو إعادة الغش عبر حساب زميل.
+          عند الضغط يُتحقَّق من بصمة الجهاز وIP ورمز الربط — يُمنع استخدام نفس الجهاز لطالبين مختلفين (يُسجَّل الرفض في الشيت).
         </p>
 
         <div style="text-align: center; margin-top: 1.5rem;">
@@ -770,6 +774,23 @@
                     <small style="color:var(--text-muted); font-size:0.8rem;">اختياري — بعد هذا الموعد لا يستطيع الطالب الدخول.</small>
                   </div>
                 </div>
+                <div class="exam-builder-card" style="margin-bottom:1rem; border-color:rgba(245,158,11,0.25); background:rgba(245,158,11,0.04); padding:1rem;">
+                  <h4 style="color:var(--accent); font-weight:700; margin:0 0 0.75rem; font-size:0.95rem;">وضع قاعة الامتحان (قفل IP)</h4>
+                  <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; margin-bottom:0.75rem;">
+                    <input type="checkbox" id="edit-meta-hall-mode" style="width:1.1rem;height:1.1rem;">
+                    <span>تفعيل قفل IP القاعة للمدة المحددة</span>
+                  </label>
+                  <div style="display:grid; grid-template-columns:1fr 120px; gap:0.75rem;">
+                    <div class="form-group" style="margin:0;">
+                      <label class="form-label" for="edit-meta-hall-ip">عنوان IP المسموح</label>
+                      <input type="text" id="edit-meta-hall-ip" class="form-control" placeholder="مثال: 41.32.10.5">
+                    </div>
+                    <div class="form-group" style="margin:0;">
+                      <label class="form-label" for="edit-meta-hall-hours">المدة (ساعات)</label>
+                      <input type="number" id="edit-meta-hall-hours" class="form-control" min="0.5" max="12" step="0.5" value="2">
+                    </div>
+                  </div>
+                </div>
                 <div class="form-group" style="margin-bottom:1rem;">
                   <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-weight:600;">
                     <input type="checkbox" id="edit-meta-randomize" checked style="width:1.1rem; height:1.1rem;">
@@ -782,7 +803,8 @@
 
                 <div class="exam-builder-card" style="margin-bottom:1.5rem; border-color:rgba(20,184,166,0.25); background:rgba(20,184,166,0.03); text-align:right;">
                   <h4 style="color:var(--secondary); font-weight:700; margin-bottom:0.75rem;">بنك أسئلة مشترك (بين الامتحانات)</h4>
-                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">بنوك الأسئلة <strong>خاصة بكل معلم</strong> على جهازه (localStorage) — لا يراها معلمون آخرون ولا الطلاب. احفظ أسئلة الامتحان أو ادمج بنكاً محفوظاً مع تصدير JSON/CSV.</p>
+                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">بنوك الأسئلة <strong>خاصة بكل معلم</strong> — تُزامَن إلى السحابة ضمن <code>questionBanks</code>. احفظ أو ادمج بنكاً مع تصدير JSON/CSV.</p>
+                  <div id="question-bank-sync-status" style="font-size:0.82rem; margin-bottom:0.75rem;" aria-live="polite"></div>
                   <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem;">
                     <label for="shared-question-bank-select" class="sr-only">بنك أسئلة محفوظ</label>
                     <select id="shared-question-bank-select" class="form-control" style="min-width:220px; max-width:100%;"></select>
@@ -799,6 +821,12 @@
                     <button type="button" class="btn btn-outline btn-sm" onclick="exportSelectedSharedBankCsv()">تصدير CSV</button>
                     <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('shared-bank-file-input').click()">استيراد بنك (JSON)</button>
                     <input type="file" id="shared-bank-file-input" accept=".json" style="display:none" onchange="importQuestionBankFile(event)">
+                    <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary);color:var(--secondary);" onclick="fixQuestionBankCloudSync()">إصلاح مزامنة بنكي</button>
+                  </div>
+                  <div data-super-admin-only class="hidden" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid rgba(255,255,255,0.06);">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="exportAllPlatformQuestionBanks()">تصدير كل بنوك المنصة</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('platform-banks-file-input').click()">استيراد كل البنوك</button>
+                    <input type="file" id="platform-banks-file-input" accept=".json" style="display:none" onchange="importAllPlatformQuestionBanks(event)">
                   </div>
                 </div>
 
@@ -1409,6 +1437,26 @@ function doGet(e) {
                 <span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مع جوجل شيت غير نشطة (تأكد من إدخال رابط الويب اب لحفظ واستعادة البيانات تلقائياً)
               </div>
               <div id="cloud-sync-last-sync-line" style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;" aria-live="polite"></div>
+
+              <div data-super-admin-only class="hidden exam-builder-card" style="margin-top:1.25rem; text-align:right;">
+                <h4 style="color:var(--secondary); font-weight:700; margin:0 0 0.75rem;">صحة المزامنة (سوبر أدمن)</h4>
+                <div id="sync-health-panel-body" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.75rem;">اضغط «اختبار الاتصال» لعرض البيانات.</div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-bottom:0.75rem;">
+                  <button type="button" class="btn btn-outline btn-sm" onclick="testArabyaCloudConnection()">
+                    <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">wifi_tethering</span> اختبار الاتصال
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" onclick="fixQuestionBankCloudSync()">إصلاح بنك الأسئلة</button>
+                  <label style="font-size:0.85rem; display:flex; align-items:center; gap:0.35rem;">
+                    <span>تعارضات:</span>
+                    <select id="conflict-merge-mode" class="form-control" style="width:auto; min-width:140px; padding:0.35rem 0.5rem;" onchange="localStorage.setItem('arabya_conflict_merge_mode', this.value)">
+                      <option value="newest">الأحدث تلقائياً</option>
+                      <option value="ask">سؤالي</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="cloud-connection-test-result" style="font-size:0.85rem;"></div>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:0.75rem;">نسخة Drive اليومية: نفّذ <code>installArabyaDailyBackupTrigger</code> مرة واحدة في Apps Script. Firebase/Supabase: راجع <code>js/arabya-realtime-bridge.js</code>.</p>
+              </div>
             </div>
 
 
@@ -1637,11 +1685,21 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.01.6"></script>
-  <script src="js/arabya-security.js?v=2026.06.01.6"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.01.6"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.01.6"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.01.6"></script>
-  <script src="app.js?v=2026.06.01.6"></script>
+  <script src="questions.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-security.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-toast.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.1"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.02.1"></script>
+  <script src="app.js?v=2026.06.02.1"></script>
+  <script>
+    (function () {
+      const sel = document.getElementById("conflict-merge-mode");
+      if (sel) sel.value = localStorage.getItem("arabya_conflict_merge_mode") || "newest";
+    })();
+  </script>
 </body>
 </html>
