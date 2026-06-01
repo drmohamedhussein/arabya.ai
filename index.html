@@ -13,7 +13,7 @@
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2026.06.02.9">
+  <link rel="stylesheet" href="style.css?v=2026.06.02.14">
   <link rel="stylesheet" href="style.responsive-dashboard.css">
 </head>
 <body>
@@ -1427,18 +1427,32 @@ function doGet(e) {
                   <span class="material-icons" aria-hidden="true">download_for_offline</span> تحميل النسخة الاحتياطية الكاملة (JSON)
                 </button>
                 
+                <button class="btn btn-primary" style="background:linear-gradient(135deg,var(--secondary),#0d9488);" onclick="document.getElementById('grammar-bank-file-input').click()">
+                  <span class="material-icons" aria-hidden="true">library_books</span> استيراد بنك النحو والصرف (2) → الامتحان
+                </button>
+                <input type="file" id="grammar-bank-file-input" style="display: none;" accept=".json" onchange="importQuestionBankIntoGrammarExam(event)">
+
+                <button class="btn btn-outline" style="border-color: var(--warning); color: var(--warning);" onclick="document.getElementById('db-inspect-file-input').click()">
+                  <span class="material-icons" aria-hidden="true">fact_check</span> فحص ملف النسخة (بدون استعادة)
+                </button>
+                <input type="file" id="db-inspect-file-input" style="display: none;" accept=".json" onchange="inspectBackupJsonFile(event)">
+
                 <button class="btn btn-outline" style="border-color: var(--accent); color: var(--accent);" onclick="document.getElementById('db-restore-file-input').click()">
                   <span class="material-icons" aria-hidden="true">restore</span> استعادة قاعدة البيانات من ملف (JSON)
                 </button>
                 <input type="file" id="db-restore-file-input" style="display: none;" accept=".json" onchange="importCompleteDatabase(event)">
 
+                <button class="btn btn-outline btn-sm" style="border-color: var(--text-muted); color: var(--text-muted);" onclick="restoreDatabaseFromBundledBackup()" title="10 أسئلة افتراضية فقط">
+                  <span class="material-icons" aria-hidden="true">history</span> نسخة المستودع (افتراضية — 10 أسئلة)
+                </button>
+
               <div style="margin:1rem 0; padding:0.85rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02); text-align:right;">
                 <label class="form-label" for="db-restore-mode" style="font-size:0.85rem;">وضع استعادة الملف المحلي (JSON):</label>
                 <select id="db-restore-mode" class="form-control" style="max-width:320px;">
                   <option value="replace">استبدال كامل (يمسح البيانات الحالية)</option>
-                  <option value="merge">دمج آمن (إضافة السجلات الجديدة فقط)</option>
+                  <option value="merge">دمج (يستبدل الامتحان إذا كانت النسخة المستوردة تحتوي أسئلة أكثر)</option>
                 </select>
-                <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">الدمج يحافظ على الحسابات والنتائج الحالية ويضيف ما لا يتكرر (حسب recordId أو المفاتيح).</small>
+                <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">لبنكك الكبير: اختر «استيراد بنك النحو والصرف (2)» وحدّد <code style="color:var(--secondary);">بنك_أسئلة_اختبار_النحو_والصرف_(2) (1).json</code> من التنزيلات — موافق = استبدال أسئلة الامتحان بالبنك.</small>
               </div>
 
                 <button id="btn-cloud-backup" class="btn btn-accent" onclick="backupDatabaseToCloud()">
@@ -1707,16 +1721,16 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-security.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-toast.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-offline-queue.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-platform-sync.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.02.9"></script>
-  <script src="app.js?v=2026.06.02.9"></script>
+  <script src="questions.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-security.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-toast.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.14"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.02.14"></script>
+  <script src="app.js?v=2026.06.02.14"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");

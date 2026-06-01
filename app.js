@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.9";
+const ARABYA_APP_VERSION = "2026.06.02.14";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2720,6 +2720,44 @@ function mergeRemoteCollection_(current, incoming, keyFn, label) {
   return Object.keys(map).map(key => map[key]);
 }
 
+function countExamQuestions(exam) {
+  return Array.isArray(exam?.questions) ? exam.questions.length : 0;
+}
+
+/** عند المزامنة: إن كان الامتحان نفس المعرّف، نفضّل النسخة التي تحتوي أسئلة أكثر (لتفادي بقاء امتحان فارغ محلياً). */
+function mergeRemoteExamsPreferRicherQuestions_(localExams, remoteExams) {
+  const map = new Map();
+  (localExams || []).forEach(exam => {
+    if (!exam || !exam.id) return;
+    map.set(String(exam.id), exam);
+  });
+  (remoteExams || []).forEach(incoming => {
+    if (!incoming || !incoming.id) return;
+    const key = String(incoming.id);
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, incoming);
+      return;
+    }
+    const localQ = countExamQuestions(existing);
+    const remoteQ = countExamQuestions(incoming);
+    if (remoteQ >= localQ) {
+      map.set(key, {
+        ...existing,
+        ...incoming,
+        questions: Array.isArray(incoming.questions) ? incoming.questions : existing.questions
+      });
+    } else {
+      map.set(key, {
+        ...incoming,
+        ...existing,
+        questions: Array.isArray(existing.questions) ? existing.questions : incoming.questions
+      });
+    }
+  });
+  return [...map.values()];
+}
+
 
 
 function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
@@ -2967,7 +3005,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     }
   }
   if (Array.isArray(remoteData.exams)) {
-    systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
+    systemState.exams = mergeRemoteExamsPreferRicherQuestions_(systemState.exams, remoteData.exams);
   }
   if (Array.isArray(remoteData.results)) {
     const mergedResults = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
@@ -3948,10 +3986,17 @@ window.restoreDatabaseFromCloud = async function() {
   if (btnRestore) { btnRestore.disabled = false; btnRestore.innerHTML = originalText; }
   if (syncResult && syncResult.ok) {
     finalizeDatabaseImportMessage();
-    alert(`تم استعادة قاعدة البيانات: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان. سيتم إعادة تحميل الصفحة.`);
+    alert(`${formatBackupRestoreSummary()}\n\nسيتم إعادة تحميل الصفحة.`);
     location.reload();
   } else {
-    alert("فشل استعادة قاعدة البيانات. تأكد من رفع نسخة احتياطية أولاً ونشر Apps Script للجميع (Anyone).");
+    alert(
+      "فشل استعادة قاعدة البيانات من السحابة.\n\n" +
+      "الأسباب الشائعة:\n" +
+      "• لم تُرفع نسخة احتياطية سحابية بعد (اضغط «حفظ نسخة احتياطية سحابية» أولاً).\n" +
+      "• رابط Web App غير منشور للجميع (Anyone) أو غير صحيح.\n" +
+      "• النسخة على الشيت قديمة ولا تحتوي أسئلة الامتحان.\n\n" +
+      "استخدم «استعادة النسخة المحفوظة ٣١/٥/٢٠٢٦» أو «استعادة من ملف JSON» واختر ملفك من التنزيلات."
+    );
   }
 };
 // نسخ كود الربط السحابي (Apps Script)
@@ -10281,7 +10326,20 @@ function fallbackCopyTextToClipboard(text) {
   document.body.removeChild(textArea);
 }
 
+function normalizeCompleteBackupPayload(data) {
+  if (!data || typeof data !== "object") return null;
+  const payload = { ...data };
+  if (payload.data && typeof payload.data === "object" && !payload.exams) {
+    Object.assign(payload, payload.data);
+  }
+  return payload;
+}
+
 function applyCompleteDatabaseReplace(data) {
+  const normalized = normalizeCompleteBackupPayload(data);
+  if (!normalized) return;
+  data = normalized;
+
   if (data.teachers && Array.isArray(data.teachers)) {
     systemState.teachers = data.teachers;
     localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
@@ -10292,7 +10350,9 @@ function applyCompleteDatabaseReplace(data) {
   }
   if (data.exams && Array.isArray(data.exams)) {
     systemState.exams = data.exams;
+    ensureExamsDataShape();
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+    localStorage.setItem("arabya_default_exams_seeded", "yes");
   }
   if (data.results && Array.isArray(data.results)) {
     systemState.results = data.results;
@@ -10338,15 +10398,10 @@ function mergeCompleteDatabaseImport(data) {
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
   if (Array.isArray(data.exams)) {
-    const map = new Map((systemState.exams || []).map(e => [String(e.id), e]));
-    data.exams.forEach(e => {
-      const key = String(e.id || "");
-      if (!key || map.has(key)) return;
-      map.set(key, e);
-      summary.exams++;
-    });
-    systemState.exams = [...map.values()];
+    systemState.exams = mergeRemoteExamsPreferRicherQuestions_(systemState.exams, data.exams);
+    ensureExamsDataShape();
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+    summary.exams = data.exams.length;
   }
   if (Array.isArray(data.results)) {
     ensureResultRecordIds();
@@ -10371,6 +10426,7 @@ function mergeCompleteDatabaseImport(data) {
   }
   if (data.questionBanks && window.ArabyaCloudSync) {
     window.ArabyaCloudSync.applyQuestionBanksFromCloud(data.questionBanks);
+    summary.questionBanks = Object.keys(data.questionBanks).length;
   }
   return summary;
 }
@@ -10400,6 +10456,323 @@ window.exportCompleteDatabase = function() {
   alert(`تم تصدير نسخة احتياطية كاملة: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان · ${systemState.teachers.length} معلم.`);
 };
 
+const DEFAULT_GRAMMAR_FIRST_QUESTION_SNIPPET = "الفعل المرفوع دائماً";
+
+function isLikelyDefaultGrammarExam(exam) {
+  if (!exam) return false;
+  const qs = exam.questions || [];
+  if (qs.length !== 10) return false;
+  const first = String(qs[0]?.question || "");
+  return first.includes(DEFAULT_GRAMMAR_FIRST_QUESTION_SNIPPET);
+}
+
+function summarizeQuestionBanksInBackup(questionBanks) {
+  if (!questionBanks || typeof questionBanks !== "object") {
+    return "بنوك أسئلة مشتركة في الملف: لا يوجد";
+  }
+  const lines = ["بنوك أسئلة مشتركة في الملف:"];
+  Object.keys(questionBanks).forEach(ownerKey => {
+    const rows = questionBanks[ownerKey];
+    if (!Array.isArray(rows)) return;
+    let itemCount = 0;
+    rows.forEach(bank => {
+      const n = Array.isArray(bank?.questions) ? bank.questions.length : 0;
+      itemCount += n;
+      lines.push(`  • بنك «${bank?.name || bank?.id || "?"}» (${ownerKey}): ${n} سؤال`);
+    });
+    if (!rows.length) lines.push(`  • (${ownerKey}): فارغ`);
+    else if (itemCount === 0) lines.push(`  • (${ownerKey}): ${rows.length} بنك بدون أسئلة مسجلة`);
+  });
+  return lines.join("\n");
+}
+
+function buildBackupInspectionReport(data) {
+  const payload = normalizeCompleteBackupPayload(data);
+  if (!payload) return "تنسيق الملف غير صالح.";
+
+  const lines = ["═══ فحص ملف النسخة الاحتياطية ═══", ""];
+  if (payload.exportedAt) lines.push(`تاريخ التصدير: ${payload.exportedAt}`);
+  if (payload.appVersion) lines.push(`إصدار التطبيق عند التصدير: ${payload.appVersion}`);
+  lines.push("");
+
+  const exams = Array.isArray(payload.exams) ? payload.exams : [];
+  if (!exams.length) {
+    lines.push("⚠️ لا توجد امتحانات في هذا الملف.");
+  } else {
+    lines.push(`الامتحانات (${exams.length}):`);
+    exams.forEach(exam => {
+      const qCount = countExamQuestions(exam);
+      const shown = exam.questionCount ? ` | معروض للطالب: ${exam.questionCount}` : "";
+      const defaultHint = isLikelyDefaultGrammarExam(exam) ? " ← يبدو الافتراضي (10 أسئلة)" : "";
+      lines.push(`  • «${exam.title || "?"}» [${exam.id}] — ${qCount} سؤال في الملف${shown}${defaultHint}`);
+    });
+  }
+
+  lines.push("");
+  lines.push(summarizeQuestionBanksInBackup(payload.questionBanks));
+
+  const grammar = exams.find(
+    e => /النحو والصرف/i.test(String(e.title || "")) || String(e.id) === "arabic_grammar"
+  );
+  if (grammar) {
+    const qCount = countExamQuestions(grammar);
+    lines.push("");
+    if (isLikelyDefaultGrammarExam(grammar)) {
+      lines.push(
+        "⚠️ تحذير: امتحان النحو في هذا الملف يطابق النسخة الافتراضية (10 أسئلة فقط).\n" +
+        "إذا كنت تتوقع مئات الأسئلة، فهذا الملف لا يحتويها — ابحث عن نسخة أحدث أو ملف JSON آخر من التنزيلات."
+      );
+    } else if (qCount > 10) {
+      lines.push(`✓ امتحان النحو يحتوي ${qCount} سؤالاً — يبدو أنه نسختك المخصصة.`);
+    } else if (qCount <= 10) {
+      lines.push(`امتحان النحو: ${qCount} سؤال فقط في الملف — قد لا تكون هذه نسختك الكاملة.`);
+    }
+  }
+
+  const maxQ = exams.reduce((m, e) => Math.max(m, countExamQuestions(e)), 0);
+  if (maxQ > 10) {
+    const richest = exams.find(e => countExamQuestions(e) === maxQ);
+    lines.push(`\nأغنى امتحان في الملف: «${richest?.title}» — ${maxQ} سؤال.`);
+  }
+
+  return lines.join("\n");
+}
+
+function formatBackupRestoreSummary() {
+  const exams = systemState.exams || [];
+  const grammar = exams.find(
+    e => /النحو والصرف/i.test(String(e.title || "")) || String(e.id) === "arabic_grammar"
+  );
+  const grammarQ = grammar ? countExamQuestions(grammar) : 0;
+  const grammarTitle = grammar ? grammar.title : "—";
+  const maxQ = exams.reduce((m, e) => Math.max(m, countExamQuestions(e)), 0);
+  return (
+    `تمت الاستعادة: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ` +
+    `${systemState.exams.length} امتحان · ${systemState.teachers.length} معلم.\n\n` +
+    `امتحان النحو: «${grammarTitle}» — ${grammarQ} سؤال في الملف.\n` +
+    `أكبر بنك أسئلة بين الامتحانات: ${maxQ} سؤال.`
+  );
+}
+
+function parseQuestionBankFilePayload(parsed, fileName) {
+  if (!parsed || typeof parsed !== "object") return { questions: null, name: "" };
+  const questions =
+    parsed.questions ||
+    parsed.bank?.questions ||
+    (Array.isArray(parsed) ? parsed : null);
+  const name =
+    parsed.name ||
+    parsed.bank?.name ||
+    String(fileName || "").replace(/\.json$/i, "") ||
+    "بنك أسئلة مستورد";
+  return { questions, name };
+}
+
+function findGrammarExamForQuestionBankRestore() {
+  const exams = systemState.exams || [];
+  return (
+    exams.find(e => /النحو والصرف\s*\(2\)/i.test(String(e.title || ""))) ||
+    exams.find(e => String(e.id) === "arabic_grammar") ||
+    exams.find(e => /النحو والصرف/i.test(String(e.title || ""))) ||
+    null
+  );
+}
+
+async function applyQuestionBankPayloadToGrammarExam(questions, bankName, mergeMode) {
+  if (!Array.isArray(questions) || !questions.length) {
+    alert("الملف لا يحتوي أسئلة صالحة.");
+    return false;
+  }
+  reloadSystemStateFromLocalStorage();
+  const exam = findGrammarExamForQuestionBankRestore();
+  if (!exam) {
+    alert(
+      "لم يُعثر على امتحان «النحو والصرف (2)».\n" +
+      "أنشئ الامتحان أو استعد النسخة الاحتياطية الكاملة أولاً، ثم أعد استيراد بنك الأسئلة."
+    );
+    return false;
+  }
+
+  const QB = window.ArabyaQuestionBank;
+  if (!QB || typeof QB.mergeBankIntoExam !== "function") {
+    alert("وحدة بنك الأسئلة غير محمّلة. حدّث الصفحة (Ctrl+Shift+R).");
+    return false;
+  }
+
+  const bank = {
+    name: bankName,
+    questions: QB.normalizeQuestions ? QB.normalizeQuestions(questions) : questions
+  };
+  const before = countExamQuestions(exam);
+  QB.mergeBankIntoExam(exam, bank, mergeMode);
+  if (typeof sanitizeQuestionConfig === "function") sanitizeQuestionConfig(exam);
+  const after = countExamQuestions(exam);
+
+  const username =
+    systemState.activeTeacher?.username ||
+    localStorage.getItem("arabya_active_teacher_username") ||
+    exam.teacher ||
+    "معلم اللغة العربية";
+  if (typeof QB.loadSharedBanks === "function" && typeof QB.saveSharedBanks === "function") {
+    const banks = QB.loadSharedBanks(username);
+    banks.push({
+      id: `bank_${Date.now()}`,
+      name: bankName,
+      subject: exam.subject || "النحو والصرف",
+      teacher: username,
+      questions: bank.questions,
+      updatedAt: new Date().toISOString()
+    });
+    QB.saveSharedBanks(banks, username);
+    if (typeof QB.refreshSharedBankSelect === "function") {
+      QB.refreshSharedBankSelect(username);
+    }
+  }
+
+  saveSystemState(true);
+  if (typeof pushCloudBackupNow === "function") {
+    try { await pushCloudBackupNow(); } catch (e) {}
+  }
+
+  alert(
+    `تم تحديث امتحان «${exam.title}».\n\n` +
+    `الملف: ${bankName}\n` +
+    `قبل: ${before} سؤال → بعد: ${after} سؤال\n` +
+    `الوضع: ${mergeMode === "replace" ? "استبدال كامل" : "دمج (إضافة)"}\n\n` +
+    `افتح «تعديل الامتحان والأسئلة» للمراجعة، ثم احفظ نسخة احتياطية سحابية.`
+  );
+  return true;
+}
+
+window.importQuestionBankIntoGrammarExam = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      const { questions, name } = parseQuestionBankFilePayload(parsed, file.name);
+      if (!questions || !questions.length) {
+        alert("تنسيق غير صالح أو لا توجد أسئلة في الملف.");
+        event.target.value = "";
+        return;
+      }
+      reloadSystemStateFromLocalStorage();
+      const exam = findGrammarExamForQuestionBankRestore();
+      const targetTitle = exam ? exam.title : "النحو والصرف (2)";
+      const currentCount = exam ? countExamQuestions(exam) : 0;
+      const mergeMode = confirm(
+        `ملف: ${file.name}\n` +
+        `أسئلة في الملف: ${questions.length}\n` +
+        `الامتحان: «${targetTitle}» (${currentCount} سؤال حالياً)\n\n` +
+        `موافق = استبدال كل أسئلة الامتحان بأسئلة الملف\n` +
+        `إلغاء = دمج (إضافة غير المكررة فقط)`
+      )
+        ? "replace"
+        : "append";
+      await applyQuestionBankPayloadToGrammarExam(questions, name, mergeMode);
+    } catch (err) {
+      alert("تعذّر قراءة ملف بنك الأسئلة. تأكد أنه JSON صادر من المنصة.");
+    }
+    event.target.value = "";
+  };
+  reader.readAsText(file, "UTF-8");
+};
+
+const GRAMMAR_BANK_BUNDLED_CANDIDATES = [
+  "backups/grammar-question-bank.json",
+  "backups/bank-nahw-sarf-2.json"
+];
+
+window.restoreGrammarQuestionBankFromRepo = async function() {
+  let payload = null;
+  let loadedFrom = "";
+  for (const path of GRAMMAR_BANK_BUNDLED_CANDIDATES) {
+    try {
+      const res = await fetch(path, { cache: "no-store" });
+      if (!res.ok) continue;
+      payload = await res.json();
+      loadedFrom = path;
+      break;
+    } catch (e) {}
+  }
+  if (!payload) {
+    alert(
+      "لم يُرفع ملف البنك إلى مجلد backups/ في المستودع بعد.\n\n" +
+      "استخدم «استيراد بنك النحو → الامتحان» واختر ملفك:\n" +
+      "بنك_أسئلة_اختبار_النحو_والصرف_(2) (1).json"
+    );
+    return;
+  }
+  const { questions, name } = parseQuestionBankFilePayload(payload, loadedFrom);
+  const mergeMode = confirm(
+    `استعادة من: ${loadedFrom}\nأسئلة: ${(questions || []).length}\n\nموافق = استبدال أسئلة الامتحان | إلغاء = دمج`
+  )
+    ? "replace"
+    : "append";
+  await applyQuestionBankPayloadToGrammarExam(questions, name, mergeMode);
+};
+
+window.inspectBackupJsonFile = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      alert(buildBackupInspectionReport(data));
+    } catch (err) {
+      alert("تعذّر قراءة الملف. تأكد أنه JSON صالح.");
+    }
+    event.target.value = "";
+  };
+  reader.readAsText(file);
+};
+
+const ARABYA_BUNDLED_BACKUP_CANDIDATES = [
+  "database/نسخة_احتياطية_كاملة_arabya_31_5_2026.json",
+  "database/arabya-db.json"
+];
+
+window.restoreDatabaseFromBundledBackup = async function() {
+  if (!confirm(
+    "تحذير: النسخة المدمجة في المستودع تحتوي امتحان «النحو والصرف (2)» بـ 10 أسئلة افتراضية فقط " +
+    "(ليست بنكك الكبير).\n\nاستخدم «فحص ملف النسخة» أولاً على ملفك من التنزيلات.\n\nهل تريد استعادة النسخة الافتراضية للمستودع على أي حال؟"
+  )) {
+    return;
+  }
+
+  let payload = null;
+  let loadedFrom = "";
+  for (const path of ARABYA_BUNDLED_BACKUP_CANDIDATES) {
+    try {
+      const res = await fetch(path, { cache: "no-store" });
+      if (!res.ok) continue;
+      payload = await res.json();
+      loadedFrom = path;
+      break;
+    } catch (e) {}
+  }
+
+  if (!payload || !(payload.exams || payload.teachers || payload.students)) {
+    alert("تعذّر تحميل النسخة المدمجة. استخدم «استعادة من ملف JSON» واختر ملفك من مجلد التنزيلات.");
+    return;
+  }
+
+  const inspection = buildBackupInspectionReport(payload);
+  if (!confirm(`${inspection}\n\nهل تريد الاستبدال الكامل بهذه النسخة؟`)) {
+    return;
+  }
+
+  applyCompleteDatabaseReplace(payload);
+  if (typeof pushCloudBackupNow === "function") {
+    try { await pushCloudBackupNow(); } catch (e) {}
+  }
+  finalizeDatabaseImportMessage();
+  alert(`${formatBackupRestoreSummary()}\n\nالمصدر: ${loadedFrom}\nسيتم إعادة تحميل الصفحة.`);
+  location.reload();
+};
+
 // استعادة قاعدة البيانات بالكامل من ملف JSON
 window.importCompleteDatabase = function(event) {
   const file = event.target.files[0];
@@ -10409,21 +10782,22 @@ window.importCompleteDatabase = function(event) {
   const reader = new FileReader();
   reader.onload = function(e) {
     try {
-      const data = JSON.parse(e.target.result);
+      const data = normalizeCompleteBackupPayload(JSON.parse(e.target.result));
       if (data && (data.teachers || data.students || data.exams || data.results)) {
+        const inspection = buildBackupInspectionReport(data);
         if (mode === "merge") {
-          if (!confirm("الدمج الآمن: ستُضاف السجلات الجديدة فقط دون حذف البيانات الحالية. هل تريد المتابعة؟")) {
+          if (!confirm(`${inspection}\n\nالدمج: يُضاف الجديد ويُستبدل الامتحان إذا كانت النسخة المستوردة تحتوي أسئلة أكثر.\n\nهل تريد المتابعة؟`)) {
             event.target.value = "";
             return;
           }
-          const summary = mergeCompleteDatabaseImport(data);
+          mergeCompleteDatabaseImport(data);
           finalizeDatabaseImportMessage();
-          alert(`تم الدمج: +${summary.teachers} معلم · +${summary.students} طالب · +${summary.exams} امتحان · +${summary.results} نتيجة. سيتم إعادة تحميل الصفحة.`);
+          alert(`${formatBackupRestoreSummary()}\n\nسيتم إعادة تحميل الصفحة.`);
           location.reload();
-        } else if (confirm("تحذير: سيقوم هذا باستبدال قاعدة البيانات الحالية بالكامل بالبيانات المستوردة. هل ترغب في الاستمرار؟")) {
+        } else if (confirm(`${inspection}\n\nتحذير: استبدال كامل لقاعدة البيانات الحالية.\n\nهل تريد المتابعة؟`)) {
           applyCompleteDatabaseReplace(data);
           finalizeDatabaseImportMessage();
-          alert(`تم استعادة قاعدة البيانات: ${systemState.students.length} طالب · ${systemState.results.length} نتيجة · ${systemState.exams.length} امتحان. سيتم إعادة تحميل الصفحة.`);
+          alert(`${formatBackupRestoreSummary()}\n\nسيتم إعادة تحميل الصفحة.`);
           location.reload();
         }
       } else {
