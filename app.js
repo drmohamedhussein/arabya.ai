@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.1";
+const ARABYA_APP_VERSION = "2026.06.01.2";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -407,7 +407,7 @@ window.saveTeacherAccountBySuperAdmin = async function() {
     systemState.teachers[idx] = normalizeTeacherAccount(teacherRecord);
     teacherRecord = systemState.teachers[idx];
     if (systemState.activeTeacher && systemState.activeTeacher.username === teacherRecord.username) {
-      loginTeacherObject(teacherRecord, systemState.activeTeacherLoginCredential || form.autoEntryCode);
+      await loginTeacherObject(teacherRecord, systemState.activeTeacherLoginCredential || form.autoEntryCode);
     }
   } else {
     const exists = systemState.teachers.some(t => t.username.toLowerCase() === form.username.toLowerCase());
@@ -425,6 +425,12 @@ window.saveTeacherAccountBySuperAdmin = async function() {
       role: ARABYA_ACCOUNT_ROLES.TEACHER
     });
     systemState.teachers.push(teacherRecord);
+  }
+
+  if (window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(teacherRecord, form.password);
+    const idx = systemState.teachers.findIndex(t => t.username === teacherRecord.username);
+    if (idx !== -1) systemState.teachers[idx] = teacherRecord;
   }
 
   saveTeachersToLocalStorage();
@@ -662,6 +668,9 @@ document.addEventListener("DOMContentLoaded", () => {
   setupMobileSiteNavigation();
   hydrateGoogleSheetsScriptBox();
   refreshCloudSyncStatusUI();
+  if (window.ArabyaSecurity) {
+    window.ArabyaSecurity.setupTeacherIdleSessionGuard(window.logoutTeacher);
+  }
 
   // ===== تشخيص ما تم تحميله =====
   console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
@@ -733,7 +742,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
   
-  const wasRedirected = checkUrlParameters();
+  void (async () => {
+  const wasRedirected = await checkUrlParameters();
   if (!wasRedirected) {
     const savedView = localStorage.getItem("arabya_active_view");
     if (savedView && savedView !== "exam-runner-view") {
@@ -742,7 +752,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (activeTeacherUsername) {
           const matched = systemState.teachers.find(t => t.username === activeTeacherUsername);
           if (matched) {
-            loginTeacherObject(matched);
+            await loginTeacherObject(matched);
             navigateToView("teacher-dashboard-view");
           } else {
             navigateToView("teacher-login-view");
@@ -757,6 +767,7 @@ document.addEventListener("DOMContentLoaded", () => {
       navigateToView("welcome-view");
     }
   }
+  })();
 });
 
 // تهيئة قواعد البيانات المحلية
@@ -1799,12 +1810,25 @@ function calculateRuntimeExamMeta(questions) {
   return { maxScore };
 }
 
-function teacherCredentialMatches(teacher, credential) {
+async function teacherCredentialMatches(teacher, credential) {
   if (!teacher || credential === undefined || credential === null) return false;
+  if (window.ArabyaSecurity) return window.ArabyaSecurity.teacherCredentialMatches(teacher, credential);
   const val = String(credential).trim();
   if (!val) return false;
   return teacher.password === val || teacher.autoEntryCode === val;
 }
+
+function getTeacherAnalyticsHelpers() {
+  return {
+    getTeacherScopedResults,
+    getTeacherScopedExams,
+    getActiveResultsList,
+    getResultDisplayStatus,
+    isSupersededResult,
+    escapeHtml
+  };
+}
+window.getTeacherAnalyticsHelpers = getTeacherAnalyticsHelpers;
 
 function parseExamEndsAtInput(value) {
   const trimmed = String(value || "").trim();
@@ -3232,7 +3256,7 @@ function applyCloudBackupData(data) {
     if (systemState.activeTeacher) {
       const restoredTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username)
         || systemState.teachers[0];
-      if (restoredTeacher) loginTeacherObject(restoredTeacher);
+      if (restoredTeacher) void loginTeacherObject(restoredTeacher);
     }
   }
   if (data.students && Array.isArray(data.students)) {
@@ -3622,17 +3646,17 @@ function getExamDirectLink(exam) {
 }
 
 // فحص معاملات الرابط لفتح امتحان مخصص أو الدخول التلقائي للمعلم
-function checkUrlParameters() {
+async function checkUrlParameters() {
   let redirected = false;
 
   // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
   const autoCode = getUrlParameter("teacher_autocode");
   if (autoCode) {
-    const matched = systemState.teachers.find(t => teacherCredentialMatches(t, autoCode));
-    if (matched) {
-      loginTeacherObject(matched, autoCode);
+    for (const t of systemState.teachers) {
+      if (!(await teacherCredentialMatches(t, autoCode))) continue;
+      await loginTeacherObject(t, autoCode);
       navigateToView("teacher-dashboard-view");
-      alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً عبر رمز الدخول السريع.`);
+      alert(`مرحباً بك يا أستاذ ${t.name}! تم تسجيل الدخول تلقائياً عبر رمز الدخول السريع.`);
       return true;
     }
   }
@@ -3641,13 +3665,12 @@ function checkUrlParameters() {
   const user = getUrlParameter("teacher_username");
   const pass = getUrlParameter("teacher_pass");
   if (user && pass) {
-    const matched = systemState.teachers.find(t =>
-      t.username.toLowerCase() === user.toLowerCase() && teacherCredentialMatches(t, pass)
-    );
-    if (matched) {
-      loginTeacherObject(matched, pass);
+    for (const t of systemState.teachers) {
+      if (t.username.toLowerCase() !== user.toLowerCase()) continue;
+      if (!(await teacherCredentialMatches(t, pass))) continue;
+      await loginTeacherObject(t, pass);
       navigateToView("teacher-dashboard-view");
-      alert(`مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول تلقائياً.`);
+      alert(`مرحباً بك يا أستاذ ${t.name}! تم تسجيل الدخول تلقائياً.`);
       return true;
     }
   }
@@ -3776,12 +3799,21 @@ function checkUrlParameters() {
 }
 
 // تسجيل دخول كائن معلم محدد وتطبيق إعداداته
-function loginTeacherObject(teacher, loginCredential) {
+async function loginTeacherObject(teacher, loginCredential) {
   const normalized = normalizeTeacherAccount(teacher);
   const credential = String(loginCredential || "").trim();
   if (credential && ARABYA_SUPER_ADMIN_SEEDS.has(credential)) {
     normalized.role = ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
   }
+  if (credential && window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(normalized, credential);
+    const idx = systemState.teachers.findIndex(t => t.username === normalized.username);
+    if (idx !== -1) {
+      systemState.teachers[idx] = { ...systemState.teachers[idx], passwordHash: normalized.passwordHash, passwordSalt: normalized.passwordSalt };
+      saveTeachersToLocalStorage();
+    }
+  }
+  if (window.ArabyaSecurity) window.ArabyaSecurity.touchTeacherActivity();
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
   localStorage.setItem("arabya_active_teacher_username", teacher.username);
@@ -3903,7 +3935,7 @@ function setupUIEventListeners() {
 // 3. بوابة وبناء الامتحانات الأكاديمية (Teacher)
 // ==========================================
 
-function handleTeacherLogin() {
+async function handleTeacherLogin() {
   const usernameInput = document.getElementById("teacher-login-username").value.trim();
   const passwordInput = document.getElementById("teacher-password").value;
 
@@ -3912,13 +3944,17 @@ function handleTeacherLogin() {
     return;
   }
 
-  const matched = systemState.teachers.find(t =>
-    (t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput) &&
-    teacherCredentialMatches(t, passwordInput)
-  );
+  let matched = null;
+  for (const t of systemState.teachers) {
+    const identityOk = t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput;
+    if (identityOk && await teacherCredentialMatches(t, passwordInput)) {
+      matched = t;
+      break;
+    }
+  }
 
   if (matched) {
-    loginTeacherObject(matched, passwordInput);
+    await loginTeacherObject(matched, passwordInput);
     const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
     syncTeacherDataOnLogin({ extraSyncUrl });
     document.getElementById("teacher-password").value = "";
@@ -3927,7 +3963,7 @@ function handleTeacherLogin() {
   }
 }
 
-function handleTeacherQuickLogin() {
+async function handleTeacherQuickLogin() {
   const codeInput = document.getElementById("teacher-quick-code");
   const codeVal = codeInput ? codeInput.value.trim() : "";
 
@@ -3936,11 +3972,16 @@ function handleTeacherQuickLogin() {
     return;
   }
 
-  // البحث عن المعلم المطابق للرمز السريع أو الرقم السري
-  const matched = systemState.teachers.find(t => teacherCredentialMatches(t, codeVal));
+  let matched = null;
+  for (const t of systemState.teachers) {
+    if (await teacherCredentialMatches(t, codeVal)) {
+      matched = t;
+      break;
+    }
+  }
 
   if (matched) {
-    loginTeacherObject(matched, codeVal);
+    await loginTeacherObject(matched, codeVal);
     const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
     syncTeacherDataOnLogin({
       extraSyncUrl,
@@ -4444,6 +4485,10 @@ function renderTeacherStatsDashboard() {
       renderTeacherStatsStatCard("امتحان ملغى", stats.studentsCanceled, { action: "students-canceled", onClick: true, valueColor: "var(--error)" });
     bindTeacherStatsCardActions(studentsSummary, cardActions);
   }
+
+  if (window.ArabyaAnalytics) {
+    window.ArabyaAnalytics.renderTeacherAnalyticsPanel(systemState, getTeacherAnalyticsHelpers());
+  }
 }
 
 window.renderTeacherStatsDashboard = renderTeacherStatsDashboard;
@@ -4475,6 +4520,9 @@ function loadTeacherDashboardData() {
   renderStudentResultsTable();
   renderTeacherStudentsTable();
   refreshCloudSyncStatusUI();
+  if (window.ArabyaQuestionBank) {
+    window.ArabyaQuestionBank.refreshSharedBankSelect(systemState.activeTeacher?.username);
+  }
 
   restoreTeacherActiveTab();
 
@@ -4540,6 +4588,11 @@ async function saveTeacherProfile() {
   }
 
   syncActiveTeacherCredentials(autoCode);
+  if (window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(systemState.activeTeacher, autoCode);
+    if (idx !== -1) systemState.teachers[idx] = systemState.activeTeacher;
+    saveTeachersToLocalStorage();
+  }
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
@@ -4789,9 +4842,11 @@ window.deleteExam = function(examId) {
 // 4. محرر الأسئلة والبيانات المطور
 // ==========================================
 let currentEditingExamId = null;
+window.currentEditingExamId = null;
 
 window.editExamQuestions = function(examId) {
   currentEditingExamId = examId;
+  window.currentEditingExamId = examId;
   const exam = systemState.exams.find(e => e.id === examId);
   if (!exam) return;
   sanitizeQuestionConfig(exam);
@@ -4836,12 +4891,16 @@ window.editExamQuestions = function(examId) {
   }
 
   renderQuestionsForEdit(exam);
+  if (window.ArabyaQuestionBank) {
+    window.ArabyaQuestionBank.refreshSharedBankSelect(systemState.activeTeacher?.username);
+  }
 };
 
 window.closeQuestionsEditor = function() {
   document.getElementById("teacher-questions-editor-panel").classList.add("hidden");
   document.getElementById("teacher-exams-list-view").classList.remove("hidden");
   currentEditingExamId = null;
+  window.currentEditingExamId = null;
   renderExamsList();
 };
 

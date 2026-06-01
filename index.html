@@ -569,6 +569,16 @@
               <h4 class="teacher-stats-card-title">ملخص الطلاب</h4>
               <div id="teacher-stats-students-summary" class="profile-summary-grid"></div>
             </div>
+
+            <div class="exam-builder-card teacher-stats-card teacher-stats-card--wide" style="margin-top:1.25rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem; margin-bottom:1rem;">
+                <h4 class="teacher-stats-card-title" style="margin:0;">تقارير وتحليلات</h4>
+                <button type="button" class="btn btn-outline btn-sm" onclick="exportTeacherAnalyticsCsv()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">download</span> تصدير CSV للإدارة
+                </button>
+              </div>
+              <div id="teacher-stats-analytics" aria-live="polite"></div>
+            </div>
           </div>
 
           <!-- تبويب الامتحانات (Exams Tab) -->
@@ -761,6 +771,28 @@
                 <button type="button" class="btn btn-accent btn-sm" style="margin-bottom:1.5rem;" onclick="saveExamMetaSettingsOnly()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">save</span> حفظ إعدادات الامتحان
                 </button>
+
+                <div class="exam-builder-card" style="margin-bottom:1.5rem; border-color:rgba(20,184,166,0.25); background:rgba(20,184,166,0.03); text-align:right;">
+                  <h4 style="color:var(--secondary); font-weight:700; margin-bottom:0.75rem;">بنك أسئلة مشترك (بين الامتحانات)</h4>
+                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">احفظ أسئلة هذا الامتحان كبنك مشترك، أو ادمج بنكاً محفوظاً — مع تصدير JSON/CSV.</p>
+                  <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem;">
+                    <label for="shared-question-bank-select" class="sr-only">بنك أسئلة محفوظ</label>
+                    <select id="shared-question-bank-select" class="form-control" style="min-width:220px; max-width:100%;"></select>
+                    <label for="shared-bank-import-mode" class="sr-only">وضع الدمج</label>
+                    <select id="shared-bank-import-mode" class="form-control" style="max-width:160px;">
+                      <option value="append">دمج (إضافة)</option>
+                      <option value="replace">استبدال البنك</option>
+                    </select>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="importSharedBankIntoCurrentExam()">دمج في الامتحان</button>
+                  </div>
+                  <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="saveSharedBankFromCurrentExam()">حفظ بنك من هذا الامتحان</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="exportSelectedSharedBankJson()">تصدير JSON</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="exportSelectedSharedBankCsv()">تصدير CSV</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('shared-bank-file-input').click()">استيراد بنك (JSON)</button>
+                    <input type="file" id="shared-bank-file-input" accept=".json" style="display:none" onchange="importQuestionBankFile(event)">
+                  </div>
+                </div>
 
                 <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
                 <h4 style="color:var(--accent); margin-top: 1.5rem; margin-bottom: 1rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">الربط والمزامنة السحابية الخاصة بهذا الامتحان (اختياري):</h4>
@@ -1595,7 +1627,10 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.29"></script>
-  <script src="app.js?v=2026.05.31.29"></script>
+  <script src="questions.js?v=2026.06.01.2"></script>
+  <script src="js/arabya-security.js?v=2026.06.01.2"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.01.2"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.01.2"></script>
+  <script src="app.js?v=2026.06.01.2"></script>
 </body>
 </html>
