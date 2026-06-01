@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.26";
+const ARABYA_APP_VERSION = "2026.05.31.27";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -73,6 +73,17 @@ function canUsePublicTeacherRegistration() {
   if (!systemState.teachers || systemState.teachers.length === 0) return true;
   return isSuperAdminTeacher();
 }
+function canManageExamSettings() {
+  return isTeacherStaffAccount();
+}
+
+function canTeacherManageExam(exam) {
+  if (!canManageExamSettings()) return false;
+  if (isSuperAdminTeacher()) return true;
+  const activeUsername = systemState.activeTeacher ? systemState.activeTeacher.username : "";
+  return !exam || !exam.teacher || exam.teacher === activeUsername;
+}
+
 
 function getTeacherRoleLabel(teacher) {
   const role = getActiveDashboardAccountRole(teacher);
@@ -3466,8 +3477,10 @@ function handleTeacherRegister() {
 
 
 function getTeacherScopedExams() {
+  const exams = systemState.exams || [];
+  if (isSuperAdminTeacher()) return exams.slice();
   const activeUsername = systemState.activeTeacher ? systemState.activeTeacher.username : "";
-  return (systemState.exams || []).filter(exam => !exam.teacher || exam.teacher === activeUsername);
+  return exams.filter(exam => !exam.teacher || exam.teacher === activeUsername);
 }
 
 function getTeacherScopedResults() {
@@ -4072,8 +4085,8 @@ function renderExamsList() {
   const container = document.getElementById("teacher-exams-list");
   container.innerHTML = "";
 
-  const activeUsername = systemState.activeTeacher ? systemState.activeTeacher.username : "معلم اللغة العربية";
-  const teacherExams = systemState.exams.filter(exam => !exam.teacher || exam.teacher === activeUsername);
+  const teacherExams = getTeacherScopedExams();
+  const showOwner = isSuperAdminTeacher();
 
   if (teacherExams.length === 0) {
     container.innerHTML = `<div style="grid-column: 1/-1; text-align:center; color: var(--text-muted); padding: 2rem;">لا توجد امتحانات مضافة بعد. أنشئ امتحاناً بالأسفل!</div>`;
@@ -4101,7 +4114,7 @@ function renderExamsList() {
       <div>
         <div class="exam-info-title">${exam.title}</div>
         <div style="font-size:0.8rem; color:var(--secondary); font-weight:600; margin-bottom:0.5rem;">
-          المادة: ${exam.subject} | الفرقة: ${exam.level || 'غير محددة'}
+          المادة: ${exam.subject} | الفرقة: ${exam.level || 'غير محددة'}${showOwner && exam.teacher ? ` | المعلم: ${exam.teacher}` : ""}
         </div>
         <div class="exam-info-details">
           <span>الكلية: ${exam.faculty || 'عام'} | الجامعة: ${exam.university || 'عام'}</span>
@@ -4124,6 +4137,38 @@ function renderExamsList() {
     `;
     container.appendChild(card);
   });
+}
+
+
+function readNewExamTotalScore() {
+  const el = document.getElementById("new-exam-totalscore");
+  const parsed = parseFloat(el?.value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 100;
+}
+
+function readNewExamTimeLimitMinutes() {
+  const el = document.getElementById("new-exam-timelimit");
+  const parsed = parseFloat(el?.value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
+function readNewExamShuffleQuestions() {
+  const el = document.getElementById("new-exam-randomize");
+  return el ? el.checked !== false : true;
+}
+
+function readNewExamQuestionCountRaw() {
+  return String(document.getElementById("new-exam-question-count")?.value || "").trim();
+}
+
+function readNewExamMaxCheatAttempts() {
+  const raw = document.getElementById("new-exam-max-cheat-attempts")?.value ?? "5";
+  const parsed = parseInt(String(raw).trim(), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5;
+}
+
+function readNewExamEndsAtIso() {
+  return parseExamEndsAtInput(document.getElementById("new-exam-ends-at")?.value || "");
 }
 
 // إنشاء امتحان جديد
@@ -4151,10 +4196,12 @@ function createNewExam() {
     faculty,
     university,
     examType,
-    totalScore: 100, // افتراضياً المجموع 100
-    shuffleQuestions: true,
-    questionCount: "",
-    maxCheatAttempts: 5,
+    totalScore: readNewExamTotalScore(),
+    timeLimit: readNewExamTimeLimitMinutes(),
+    shuffleQuestions: readNewExamShuffleQuestions(),
+    questionCount: readNewExamQuestionCountRaw(),
+    maxCheatAttempts: readNewExamMaxCheatAttempts(),
+    endsAt: readNewExamEndsAtIso(),
     questions: []
   };
 
@@ -4166,6 +4213,18 @@ function createNewExam() {
   document.getElementById("new-exam-level").value = "";
   document.getElementById("new-exam-faculty").value = "";
   document.getElementById("new-exam-university").value = "";
+  const newTotal = document.getElementById("new-exam-totalscore");
+  if (newTotal) newTotal.value = "100";
+  const newTime = document.getElementById("new-exam-timelimit");
+  if (newTime) newTime.value = "60";
+  const newCount = document.getElementById("new-exam-question-count");
+  if (newCount) newCount.value = "";
+  const newCheat = document.getElementById("new-exam-max-cheat-attempts");
+  if (newCheat) newCheat.value = "5";
+  const newEnds = document.getElementById("new-exam-ends-at");
+  if (newEnds) newEnds.value = "";
+  const newRand = document.getElementById("new-exam-randomize");
+  if (newRand) newRand.checked = true;
   
   renderExamsList();
 
@@ -4181,6 +4240,11 @@ function createNewExam() {
 }
 
 window.deleteExam = function(examId) {
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (exam && !canTeacherManageExam(exam)) {
+    alert("ليس لديك صلاحية حذف هذا الامتحان.");
+    return;
+  }
   if (confirm("هل أنت متأكد من حذف هذا الامتحان بالكامل؟ ستفقد جميع الأسئلة المرتبطة به.")) {
     systemState.exams = systemState.exams.filter(e => e.id !== examId);
     saveSystemState(true);
@@ -4391,50 +4455,61 @@ function renderQuestionsForEdit(exam) {
 }
 
 // حفظ الأسئلة والبيانات الأكاديمية لاحقاً (تعديل كامل)
-function saveAllEditedQuestions() {
-  if (!currentEditingExamId) return;
-  const exam = systemState.exams.find(e => e.id === currentEditingExamId);
-  if (!exam) return;
 
-  // 1. تحديث وحفظ الميتا داتا الأكاديمية المكتوبة
-  const editTitle = document.getElementById("edit-meta-title").value.trim();
-  const editSubject = document.getElementById("edit-meta-subject").value.trim();
-  const editLevel = document.getElementById("edit-meta-level").value.trim();
-  const editFaculty = document.getElementById("edit-meta-faculty").value.trim();
-  const editUniversity = document.getElementById("edit-meta-university").value.trim();
-  const editType = document.getElementById("edit-meta-type").value;
-  const editTotalScore = parseFloat(document.getElementById("edit-meta-totalscore").value) || 100;
+function applyExamMetaFromEditor(exam, options = {}) {
+  const requireAcademic = options.requireAcademic !== false;
+  const editTitle = document.getElementById("edit-meta-title")?.value.trim() || "";
+  const editSubject = document.getElementById("edit-meta-subject")?.value.trim() || "";
+  const editLevel = document.getElementById("edit-meta-level")?.value.trim() || "";
+  const editFaculty = document.getElementById("edit-meta-faculty")?.value.trim() || "";
+  const editUniversity = document.getElementById("edit-meta-university")?.value.trim() || "";
+  const editType = document.getElementById("edit-meta-type")?.value || exam.examType || "أعمال فصلية";
+  const editTotalScore = parseFloat(document.getElementById("edit-meta-totalscore")?.value) || 100;
   const editRandomizeQuestions = document.getElementById("edit-meta-randomize")?.checked !== false;
   const rawQuestionCount = document.getElementById("edit-meta-question-count")?.value.trim() || "";
-  const rawMaxCheatAttempts = document.getElementById("edit-meta-max-cheat-attempts")?.value.trim() ?? "5";
-  const editGoogleUrl = document.getElementById("edit-meta-google-url").value.trim();
-  const editEntryName = document.getElementById("edit-meta-entry-name").value.trim();
-  const editEntryId = document.getElementById("edit-meta-entry-id").value.trim();
-  const editEntryCode = document.getElementById("edit-meta-entry-code").value.trim();
-  const editEntryScore = document.getElementById("edit-meta-entry-score").value.trim();
-  const editEntryDetails = document.getElementById("edit-meta-entry-details").value.trim();
+  const rawMaxCheatAttempts = document.getElementById("edit-meta-max-cheat-attempts")?.value ?? "5";
+  const editGoogleUrl = document.getElementById("edit-meta-google-url")?.value.trim() || "";
+  const editEntryName = document.getElementById("edit-meta-entry-name")?.value.trim() || "";
+  const editEntryId = document.getElementById("edit-meta-entry-id")?.value.trim() || "";
+  const editEntryCode = document.getElementById("edit-meta-entry-code")?.value.trim() || "";
+  const editEntryScore = document.getElementById("edit-meta-entry-score")?.value.trim() || "";
+  const editEntryDetails = document.getElementById("edit-meta-entry-details")?.value.trim() || "";
 
-  if (!editTitle || !editSubject || !editLevel || !editFaculty || !editUniversity) {
+  if (requireAcademic && (!editTitle || !editSubject || !editLevel || !editFaculty || !editUniversity)) {
     alert("يرجى ملء جميع حقول بيانات الامتحان الأكاديمية المطلوبة!");
-    return;
+    return false;
   }
 
-  exam.title = editTitle;
-  exam.subject = editSubject;
-  exam.level = editLevel;
-  exam.faculty = editFaculty;
-  exam.university = editUniversity;
+  if (rawQuestionCount) {
+    const questionCountNumber = parseInt(rawQuestionCount, 10);
+    if (!Number.isFinite(questionCountNumber) || questionCountNumber <= 0) {
+      alert("عدد الأسئلة المعروضة يجب أن يكون رقماً صحيحاً أكبر من صفر.");
+      return false;
+    }
+    const bankSize = Array.isArray(exam.questions) ? exam.questions.length : 0;
+    if (bankSize && questionCountNumber > bankSize) {
+      alert(`عدد الأسئلة المعروضة (${questionCountNumber}) لا يمكن أن يتجاوز حجم بنك الأسئلة الحالي (${bankSize}).`);
+      return false;
+    }
+  }
+
+  const maxCheatAttemptsNumber = parseInt(String(rawMaxCheatAttempts).trim(), 10);
+  if (!Number.isFinite(maxCheatAttemptsNumber) || maxCheatAttemptsNumber < 0) {
+    alert("عدد محاولات الغش المسموحة يجب أن يكون 0 أو أكبر.");
+    return false;
+  }
+
+  exam.title = editTitle || exam.title;
+  exam.subject = editSubject || exam.subject;
+  exam.level = editLevel || exam.level;
+  exam.faculty = editFaculty || exam.faculty;
+  exam.university = editUniversity || exam.university;
   exam.examType = editType;
   exam.totalScore = editTotalScore;
   exam.timeLimit = parseFloat(document.getElementById("edit-meta-timelimit")?.value) || 60;
   exam.endsAt = parseExamEndsAtInput(document.getElementById("edit-meta-ends-at")?.value || "");
   exam.shuffleQuestions = editRandomizeQuestions;
   exam.questionCount = rawQuestionCount;
-  const maxCheatAttemptsNumber = parseInt(rawMaxCheatAttempts, 10);
-  if (!Number.isFinite(maxCheatAttemptsNumber) || maxCheatAttemptsNumber < 0) {
-    alert("عدد محاولات الغش المسموحة يجب أن يكون 0 أو أكبر.");
-    return;
-  }
   exam.maxCheatAttempts = maxCheatAttemptsNumber;
   exam.googleFormUrl = editGoogleUrl;
   exam.entryName = editEntryName;
@@ -4442,6 +4517,36 @@ function saveAllEditedQuestions() {
   exam.entryCode = editEntryCode;
   exam.entryScore = editEntryScore;
   exam.entryDetails = editEntryDetails;
+  sanitizeQuestionConfig(exam);
+  return true;
+}
+
+window.saveExamMetaSettingsOnly = function() {
+  if (!currentEditingExamId) return;
+  const exam = systemState.exams.find(e => e.id === currentEditingExamId);
+  if (!exam) return;
+  if (!canTeacherManageExam(exam)) {
+    alert("ليس لديك صلاحية تعديل إعدادات هذا الامتحان.");
+    return;
+  }
+  if (!applyExamMetaFromEditor(exam, { requireAcademic: true })) return;
+  saveSystemState(true);
+  document.getElementById("editor-exam-title").innerText = exam.title;
+  alert("تم حفظ إعدادات الامتحان بنجاح.");
+  renderExamsList();
+};
+
+function saveAllEditedQuestions() {
+  if (!currentEditingExamId) return;
+  const exam = systemState.exams.find(e => e.id === currentEditingExamId);
+  if (!exam) return;
+  if (!canTeacherManageExam(exam)) {
+    alert("ليس لديك صلاحية تعديل هذا الامتحان.");
+    return;
+  }
+
+  const rawQuestionCount = document.getElementById("edit-meta-question-count")?.value.trim() || "";
+  if (!applyExamMetaFromEditor(exam, { requireAcademic: true })) return;
 
   // 2. تحديث وحفظ الأسئلة وأوزان درجاتها
   const cards = document.querySelectorAll("#editor-questions-list .exam-builder-card");

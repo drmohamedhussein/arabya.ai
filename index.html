@@ -572,6 +572,38 @@
                   </div>
                 </div>
 
+
+                <h4 style="color:var(--accent); margin-top: 1.25rem; margin-bottom: 0.75rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">إعدادات تشغيل الامتحان للطالب:</h4>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">للمعلم ومدير المنصة — الوقت، عدد الأسئلة المعروضة، الترتيب العشوائي، وحد الغش.</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="new-exam-totalscore">المجموع النهائي الكلي (درجة):</label>
+                    <input type="number" id="new-exam-totalscore" class="form-control" min="1" value="100">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="new-exam-timelimit">وقت الامتحان (بالدقائق):</label>
+                    <input type="number" id="new-exam-timelimit" class="form-control" min="1" value="60" placeholder="60">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="new-exam-question-count">عدد الأسئلة المعروضة:</label>
+                    <input type="number" id="new-exam-question-count" class="form-control" min="1" placeholder="فارغ = كل البنك">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="new-exam-max-cheat-attempts">حد محاولات الغش:</label>
+                    <input type="number" id="new-exam-max-cheat-attempts" class="form-control" min="0" value="5">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="new-exam-ends-at">آخر موعد للإغلاق:</label>
+                    <input type="datetime-local" id="new-exam-ends-at" class="form-control">
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom:1rem;">
+                  <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-weight:600;">
+                    <input type="checkbox" id="new-exam-randomize" checked style="width:1.1rem; height:1.1rem;">
+                    <span>عرض الأسئلة بترتيب عشوائي للطالب</span>
+                  </label>
+                </div>
+
                 <!-- صندوق لعرض الرابط المباشر بعد الحفظ -->
                 <div id="new-exam-direct-link-box" class="exam-direct-link-box hidden">
                   <div>
@@ -644,6 +676,36 @@
                     <small style="color:var(--text-muted); font-size:0.8rem;">مثال: 60 دقيقة = ساعة كاملة. الوقت يُوزَّع تلقائياً على جميع الأسئلة.</small>
                   </div>
                 </div>
+
+
+                <h4 style="color:var(--accent); margin-top: 1.25rem; margin-bottom: 0.75rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">إعدادات تشغيل الامتحان للطالب:</h4>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">متاحة للمعلم ومدير المنصة (سوبر أدمن) — عدد الأسئلة، الترتيب العشوائي، حد الغش، وموعد الإغلاق.</p>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-question-count">عدد الأسئلة المعروضة للطالب:</label>
+                    <input type="number" id="edit-meta-question-count" class="form-control" min="1" placeholder="فارغ = كل بنك الأسئلة">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">مثلاً: 20 من أصل 50 سؤالاً في البنك.</small>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-max-cheat-attempts">حد محاولات الغش المسموحة:</label>
+                    <input type="number" id="edit-meta-max-cheat-attempts" class="form-control" min="0" value="5">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">0 = لا يُلغى الامتحان تلقائياً بسبب الغش.</small>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0;">
+                    <label class="form-label" for="edit-meta-ends-at">آخر موعد لإغلاق الامتحان:</label>
+                    <input type="datetime-local" id="edit-meta-ends-at" class="form-control">
+                    <small style="color:var(--text-muted); font-size:0.8rem;">اختياري — بعد هذا الموعد لا يستطيع الطالب الدخول.</small>
+                  </div>
+                </div>
+                <div class="form-group" style="margin-bottom:1rem;">
+                  <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; font-weight:600;">
+                    <input type="checkbox" id="edit-meta-randomize" checked style="width:1.1rem; height:1.1rem;">
+                    <span>عرض الأسئلة بترتيب عشوائي للطالب (إلغاء التحديد = ترتيب بنك الأسئلة كما هو)</span>
+                  </label>
+                </div>
+                <button type="button" class="btn btn-accent btn-sm" style="margin-bottom:1.5rem;" onclick="saveExamMetaSettingsOnly()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">save</span> حفظ إعدادات الامتحان
+                </button>
 
                 <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
                 <h4 style="color:var(--accent); margin-top: 1.5rem; margin-bottom: 1rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">الربط والمزامنة السحابية الخاصة بهذا الامتحان (اختياري):</h4>
@@ -1296,7 +1358,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.26"></script>
-  <script src="app.js?v=2026.05.31.26"></script>
+  <script src="questions.js?v=2026.05.31.27"></script>
+  <script src="app.js?v=2026.05.31.27"></script>
 </body>
 </html>
