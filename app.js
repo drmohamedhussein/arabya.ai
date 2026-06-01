@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.29";
+const ARABYA_APP_VERSION = "2026.05.31.30";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -6335,7 +6335,7 @@ function ensureResultsQuickFiltersMarkup() {
   if (!container || document.getElementById("teacher-results-exam-filter")) return;
   container.classList.remove("hidden");
   container.removeAttribute("aria-hidden");
-  container.style.cssText = "display:flex; flex-wrap:wrap; gap:0.85rem; align-items:flex-end; margin-bottom:1rem; padding:0.9rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);";
+  container.className = "teacher-filter-toolbar";
   delete container.dataset.bound;
   container.innerHTML = `
     <div>
@@ -6391,7 +6391,7 @@ function ensureStudentsQuickFiltersMarkup() {
   if (!container || document.getElementById("teacher-students-sort-order")) return;
   container.classList.remove("hidden");
   container.removeAttribute("aria-hidden");
-  container.style.cssText = "display:flex; flex-wrap:wrap; gap:0.85rem; align-items:flex-end; margin-bottom:1rem; padding:0.9rem; border:1px solid var(--border-color); border-radius:8px; background:rgba(255,255,255,0.02);";
+  container.className = "teacher-filter-toolbar";
   delete container.dataset.bound;
   container.innerHTML = `
     <div>

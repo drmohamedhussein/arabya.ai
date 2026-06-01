@@ -530,7 +530,7 @@
                 <div class="panel-title">لوحة الإحصائيات</div>
                 <div style="font-size:0.85rem; color:var(--text-muted);">ملخص فوري للامتحانات والطلاب والنتائج</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <div class="panel-header-actions">
                 <button type="button" id="teacher-stats-refresh-btn" class="btn btn-outline btn-sm"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">refresh</span> تحديث</button>
                 <button type="button" id="teacher-stats-sync-btn" class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">cloud_sync</span> مزامنة</button>
               </div>
@@ -834,7 +834,7 @@
                 <div style="font-size:0.85rem; color:var(--text-muted);">إدارة النتائج محلياً وسحابياً وتنزيلها ورفعها بالـ JSON/CSV</div>
               </div>
               
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <div class="panel-header-actions">
                 <button id="teacher-export-results-btn" class="btn btn-outline btn-sm">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">download</span> تصدير Excel (CSV)
                 </button>
@@ -852,12 +852,12 @@
               </div>
             </div>
 
-            <div id="teacher-results-toolbar" class="config-card-box" style="margin-bottom: 1.25rem; text-align: right;">
+            <div id="teacher-results-toolbar" class="config-card-box teacher-toolbar-card">
               <div id="teacher-results-sync-status" style="margin-bottom: 0.75rem; font-size: 0.9rem;"></div>
               <div class="form-group" style="margin-bottom: 0.75rem;">
                 <label class="form-label" for="teacher-results-search-input">بحث في النتائج (اسم، ID، كود، امتحان، <strong>عنوان IP</strong>):</label>
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                  <div class="input-wrapper" style="flex:1; min-width: min(100%, 280px);">
+                <div class="teacher-search-row">
+                  <div class="input-wrapper">
                     <input type="text" id="teacher-results-search-input" class="form-control" placeholder="مثال: 102.54.1.20 أو اسم الطالب أو ID..." dir="ltr" style="text-align:left;" autocomplete="off">
                     <span class="material-icons input-icon" aria-hidden="true">search</span>
                   </div>
@@ -867,9 +867,9 @@
                 <small style="display:block; margin-top:0.35rem; color:var(--text-muted); font-size:0.8rem;">يُعامل عنوان IP كمعرف للجهاز — ابحث عن نتائج الطالب بكتابة IP كاملاً أو جزء منه.</small>
               </div>
               <div id="teacher-results-quick-filters" class="hidden" aria-hidden="true"></div>
-              <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between; margin-top:0.5rem;">
+              <div class="teacher-pagination-row">
                 <span id="teacher-results-page-info" style="font-size:0.85rem; color:var(--text-muted);"></span>
-                <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+                <div class="teacher-pagination-controls">
                   <button type="button" id="teacher-results-prev-page" class="btn btn-outline btn-sm">السابق</button>
                   <span id="teacher-results-page-number" style="font-size:0.85rem; min-width:4rem; text-align:center;"></span>
                   <button type="button" id="teacher-results-next-page" class="btn btn-outline btn-sm">التالي</button>
@@ -888,7 +888,8 @@
               </div>
             </div>
 
-            <div class="table-container">
+            <p class="table-scroll-hint" aria-hidden="true">اسحب الجدول أفقياً لعرض جميع الأعمدة على الشاشات الصغيرة.</p>
+            <div class="table-container table-container--wide">
               <table>
                 <thead>
                   <tr>
@@ -983,7 +984,7 @@
                 <div class="panel-title">إدارة حسابات المعلمين</div>
                 <div style="font-size:0.85rem; color:var(--text-muted);">لمدير المنصة فقط — عرض، تعديل، حذف، ومزامنة بيانات كل معلم مع Google Sheets</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <div class="panel-header-actions">
                 <button type="button" class="btn btn-primary btn-sm" onclick="openTeacherAccountEditor()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">person_add</span> إضافة معلم
                 </button>
@@ -1014,7 +1015,8 @@
               </div>
             </details>
 
-            <div class="table-container" style="margin-bottom:1.5rem;">
+            <p class="table-scroll-hint" aria-hidden="true">اسحب الجدول أفقياً لعرض جميع الأعمدة.</p>
+            <div class="table-container table-container--compact" style="margin-bottom:1.5rem;">
               <table>
                 <thead>
                   <tr>
@@ -1036,7 +1038,7 @@
                 <button type="button" class="btn btn-outline btn-sm" onclick="closeTeacherAccountEditor()">إغلاق</button>
               </div>
               <h5 style="color:var(--secondary); margin-bottom:0.75rem;">الملف الشخصي</h5>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+              <div class="form-grid-2" style="margin-bottom:1rem;">
                 <div class="form-group" style="margin:0;">
                   <label class="form-label" for="super-admin-teacher-name">اسم المعلم</label>
                   <input type="text" id="super-admin-teacher-name" class="form-control">
@@ -1063,14 +1065,14 @@
                 <label class="form-label" for="super-admin-teacher-sync-url">رابط Web App / المزامنة</label>
                 <input type="text" id="super-admin-teacher-sync-url" class="form-control" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec">
               </div>
-              <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
+              <div class="form-grid-auto">
                 <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-name">حقل الاسم</label><input type="text" id="super-admin-teacher-entry-name" class="form-control" dir="ltr"></div>
                 <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-id">حقل ID</label><input type="text" id="super-admin-teacher-entry-id" class="form-control" dir="ltr"></div>
                 <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-code">حقل الكود</label><input type="text" id="super-admin-teacher-entry-code" class="form-control" dir="ltr"></div>
                 <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-score">حقل الدرجة</label><input type="text" id="super-admin-teacher-entry-score" class="form-control" dir="ltr"></div>
                 <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-details">حقل التفاصيل</label><input type="text" id="super-admin-teacher-entry-details" class="form-control" dir="ltr"></div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1.25rem;">
+              <div class="panel-header-actions" style="margin-top:1.25rem;">
                 <button type="button" class="btn btn-primary" onclick="saveTeacherAccountBySuperAdmin()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">save</span> حفظ ومزامنة
                 </button>
@@ -1329,7 +1331,7 @@ function doGet(e) {
                 <div class="panel-title">إدارة حسابات الطلاب وأكواد الاشتراك</div>
                 <div style="font-size:0.85rem; color:var(--text-muted);">قم بتسجيل حسابات الطلاب الجدد وتعيين أكواد اشتراكهم وتصديرها واستيرادها</div>
               </div>
-              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+              <div class="panel-header-actions">
                 <button id="teacher-add-student-btn" class="btn btn-primary btn-sm" onclick="showAddStudentModal()">
                   <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">person_add</span> إضافة طالب جديد
                 </button>
@@ -1366,11 +1368,11 @@ function doGet(e) {
               </div>
             </div>
 
-            <div id="teacher-students-toolbar" class="config-card-box" style="margin-bottom: 1.25rem; text-align: right;">
+            <div id="teacher-students-toolbar" class="config-card-box teacher-toolbar-card">
               <div class="form-group" style="margin-bottom: 0.75rem;">
                 <label class="form-label" for="teacher-students-search-input">بحث في الطلاب (اسم، ID، كود، <strong>عنوان IP</strong>):</label>
-                <div style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
-                  <div class="input-wrapper" style="flex:1; min-width: min(100%, 280px);">
+                <div class="teacher-search-row">
+                  <div class="input-wrapper">
                     <input type="text" id="teacher-students-search-input" class="form-control" placeholder="مثال: 41.128.0.1 أو اسم الطالب أو كود الاشتراك..." dir="ltr" style="text-align:left;" autocomplete="off">
                     <span class="material-icons input-icon" aria-hidden="true">search</span>
                   </div>
@@ -1379,9 +1381,9 @@ function doGet(e) {
                 <small style="display:block; margin-top:0.35rem; color:var(--text-muted); font-size:0.8rem;">ابحث عن طالب عبر IP المسجّل في نتائج امتحاناته أو آخر IP معروف على حسابه.</small>
               </div>
               <div id="teacher-students-quick-filters" class="hidden" aria-hidden="true"></div>
-              <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; justify-content:space-between; margin-top:0.5rem;">
+              <div class="teacher-pagination-row">
                 <span id="teacher-students-page-info" style="font-size:0.85rem; color:var(--text-muted);"></span>
-                <div style="display:flex; gap:0.35rem; align-items:center; flex-wrap:wrap;">
+                <div class="teacher-pagination-controls">
                   <button type="button" id="teacher-students-prev-page" class="btn btn-outline btn-sm">السابق</button>
                   <span id="teacher-students-page-number" style="font-size:0.85rem; min-width:4rem; text-align:center;"></span>
                   <button type="button" id="teacher-students-next-page" class="btn btn-outline btn-sm">التالي</button>
@@ -1399,7 +1401,8 @@ function doGet(e) {
               </div>
             </div>
 
-            <div class="table-container">
+            <p class="table-scroll-hint" aria-hidden="true">اسحب الجدول أفقياً لعرض جميع الأعمدة على الشاشات الصغيرة.</p>
+            <div class="table-container table-container--wide">
               <table>
                 <thead>
                   <tr>
@@ -1512,7 +1515,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.29"></script>
-  <script src="app.js?v=2026.05.31.29"></script>
+  <script src="questions.js?v=2026.05.31.30"></script>
+  <script src="app.js?v=2026.05.31.30"></script>
 </body>
 </html>
