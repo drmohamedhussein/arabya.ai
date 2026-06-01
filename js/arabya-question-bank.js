@@ -32,6 +32,9 @@
 
   function saveSharedBanks(banks, username) {
     localStorage.setItem(storageKeyForTeacher(username), JSON.stringify(banks || []));
+    if (typeof global.scheduleCloudBackupPush === "function") {
+      global.scheduleCloudBackupPush("question-bank");
+    }
   }
 
   function normalizeQuestions(questions) {
@@ -106,7 +109,7 @@
     });
     saveSharedBanks(banks, teacherUsername);
     refreshSharedBankSelect(teacherUsername);
-    alert(`تم حفظ بنك «${name}» (${exam.questions.length} سؤال) — خاص بحسابك فقط على هذا الجهاز.`);
+    alert(`تم حفظ بنك «${name}» (${exam.questions.length} سؤال) — محلياً وستُزامَن إلى السحابة خلال ثانية إذا كان الربط مفعّلاً.`);
     return true;
   }
 
@@ -280,7 +283,7 @@
         });
         saveSharedBanks(banks, username);
         refreshSharedBankSelect(username);
-        alert("تم استيراد بنك الأسئلة إلى حسابك فقط.");
+        alert("تم استيراد بنك الأسئلة — سيُرفع تلقائياً إلى السحابة مع النسخة الاحتياطية.");
       } catch (err) {
         alert("تعذّر قراءة ملف بنك الأسئلة.");
       }

@@ -121,14 +121,87 @@
     URL.revokeObjectURL(a.href);
   }
 
+  function buildAnalyticsPrintHtml(state, helpers) {
+    const data = computeTeacherAnalytics(state, helpers);
+    const esc = helpers.escapeHtml || (t => String(t || ""));
+    const teacherName = esc(state.activeTeacher?.name || state.activeTeacher?.username || "المعلم");
+    const dateStr = new Date().toLocaleString("ar-EG");
+    const appVer = esc(global.ARABYA_APP_VERSION || "");
+
+    let examRows = "";
+    if (!data.examStats.length) {
+      examRows = "<tr><td colspan=\"4\">لا توجد نتائج مكتملة بعد.</td></tr>";
+    } else {
+      examRows = data.examStats.map(row =>
+        `<tr><td>${esc(row.title)}</td><td>${row.attempts}</td><td>${row.avgPercent != null ? row.avgPercent + "%" : "—"}</td><td>${row.cheatRate}%</td></tr>`
+      ).join("");
+    }
+
+    let hardList = "";
+    if (!data.hardest.length) {
+      hardList = "<li>تحتاج 3+ إجابات لكل سؤال لإظهار الأصعب.</li>";
+    } else {
+      hardList = data.hardest.map(q =>
+        `<li><strong>سؤال #${esc(q.qId)}</strong> — نجاح ${q.successRate}% (${q.attempts} محاولة) — ${esc(q.exams)}</li>`
+      ).join("");
+    }
+
+    return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>تقرير تحليلات ARABYA</title>
+<style>
+  body { font-family: Tahoma, Arial, sans-serif; margin: 1.5rem; color: #111; }
+  h1 { font-size: 1.35rem; margin: 0 0 0.25rem; }
+  .meta { color: #555; font-size: 0.9rem; margin-bottom: 1.25rem; }
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0 1.25rem; font-size: 0.9rem; }
+  th, td { border: 1px solid #ccc; padding: 0.45rem 0.6rem; text-align: right; }
+  th { background: #f0f0f0; }
+  h2 { font-size: 1.05rem; margin: 1rem 0 0.35rem; }
+  ul { margin: 0.25rem 0; padding-right: 1.25rem; }
+  @media print { body { margin: 0.75rem; } }
+</style></head><body>
+<h1>تقرير تحليلات المنصة</h1>
+<p class="meta">المعلم: ${teacherName} · التاريخ: ${dateStr} · الإصدار: ${appVer}</p>
+<h2>متوسط الدرجات لكل امتحان</h2>
+<table><thead><tr><th>الامتحان</th><th>محاولات</th><th>متوسط %</th><th>معدل غش %</th></tr></thead><tbody>${examRows}</tbody></table>
+<h2>أصعب الأسئلة (أقل نجاح)</h2>
+<ul>${hardList}</ul>
+<p><strong>معدل مخالفات الغش:</strong> ${data.platformCheatRate}% من ${data.completedCount} نتيجة مكتملة.</p>
+<p class="meta" style="margin-top:2rem;">ARABYA.NET — للطباعة أو الحفظ كـ PDF اختر «حفظ كـ PDF» من نافذة الطباعة.</p>
+</body></html>`;
+  }
+
+  function exportAnalyticsPdf(state, helpers) {
+    const html = buildAnalyticsPrintHtml(state, helpers);
+    const win = window.open("", "_blank", "noopener,noreferrer");
+    if (!win) {
+      alert("تعذّر فتح نافذة التصدير. اسمح بالنوافذ المنبثقة ثم أعد المحاولة.");
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => {
+      try {
+        win.print();
+      } catch (e) {}
+    }, 400);
+  }
+
   global.ArabyaAnalytics = {
     computeTeacherAnalytics,
     renderTeacherAnalyticsPanel,
-    exportAnalyticsCsv
+    exportAnalyticsCsv,
+    exportAnalyticsPdf,
+    buildAnalyticsPrintHtml
   };
 
   global.exportTeacherAnalyticsCsv = function () {
     if (!global.systemState || !global.ArabyaAnalytics) return;
     global.ArabyaAnalytics.exportAnalyticsCsv(global.systemState, global.getTeacherAnalyticsHelpers());
+  };
+
+  global.exportTeacherAnalyticsPdf = function () {
+    if (!global.systemState || !global.ArabyaAnalytics) return;
+    global.ArabyaAnalytics.exportAnalyticsPdf(global.systemState, global.getTeacherAnalyticsHelpers());
   };
 })(window);

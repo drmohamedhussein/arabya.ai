@@ -19,6 +19,7 @@ var ARABYA_DEFAULT_DB = {
   exams: [],
   results: [],
   examDeviceRegistry: { bindings: [] },
+  questionBanks: {},
   auditLog: []
 };
 
@@ -101,12 +102,17 @@ function doGet(e) {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_backup") {
       var db = readArabyaDatabase_();
+      var sheetResults = readArabyaResultsFromSheet_();
+      if (sheetResults.length) {
+        db.results = mergeArabyaCollection_(db.results || [], sheetResults, "results");
+      }
       var resultCount = (db.results || []).length;
       return jsonArabya_({
         status: "success",
         data: db,
         counts: countArabya_(db),
-        sheetResultRows: resultCount,
+        sheetResultRows: sheetResults.length,
+        sheetTotalRows: sheetResults.length,
         backupResultRows: resultCount
       });
     }
@@ -275,6 +281,9 @@ function mergeArabyaDatabase_(patch, reason) {
   });
   if (patch.examDeviceRegistry) {
     db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, patch.examDeviceRegistry);
+  }
+  if (patch.questionBanks && typeof patch.questionBanks === "object") {
+    db.questionBanks = deepMergeArabyaObjects_(db.questionBanks || {}, patch.questionBanks);
   }
   db.schemaVersion = ARABYA_DEFAULT_DB.schemaVersion;
   db.updatedAt = new Date().toISOString();
@@ -462,6 +471,59 @@ function writeArabyaDatabaseToGitHub_(db) {
   if (response.getResponseCode() >= 300) {
     throw new Error("GitHub write failed: " + response.getContentText());
   }
+}
+
+function readArabyaResultsFromSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("نتائج الطلاب");
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  ensureArabyaResultsHeaders_(sheet);
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), ARABYA_RESULTS_HEADERS.length);
+  var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var out = [];
+  values.forEach(function(row) {
+    if (!row || !String(row[0] || "").trim()) return;
+    var cheatLog = parseArabyaJsonField_(row[21], []);
+    var deviceMeta = parseArabyaJsonField_(row[25], {});
+    out.push({
+      recordId: String(row[0] || ""),
+      timestamp: row[1] ? String(row[1]) : "",
+      name: String(row[2] || ""),
+      id: String(row[3] || ""),
+      accessCode: String(row[4] || ""),
+      studentLookupKey: String(row[5] || ""),
+      email: String(row[6] || ""),
+      mobile: String(row[7] || ""),
+      examTitle: String(row[8] || ""),
+      examId: String(row[9] || ""),
+      university: String(row[10] || ""),
+      faculty: String(row[11] || ""),
+      level: String(row[12] || ""),
+      examType: String(row[13] || ""),
+      status: String(row[14] || "completed"),
+      attemptNumber: row[15],
+      score: String(row[16] || ""),
+      maxScore: row[17],
+      details: String(row[18] || ""),
+      cheatViolations: row[19] !== "" && row[19] !== null ? row[19] : 0,
+      maxCheatAttemptsAllowed: row[20],
+      cheatAttemptLog: cheatLog,
+      deviceId: String(row[22] || ""),
+      deviceFingerprint: String(row[23] || ""),
+      clientIp: String(row[24] || ""),
+      deviceMeta: deviceMeta,
+      allowRetake: String(row[26] || "") === "نعم",
+      superseded: String(row[27] || "") === "نعم",
+      retakeGrantedAt: String(row[28] || ""),
+      retakeRevokedAt: String(row[29] || ""),
+      supersededAt: String(row[30] || ""),
+      supersededByRecordId: String(row[31] || ""),
+      ipReleasedByTeacher: String(row[32] || "") === "نعم",
+      ipReleasedAt: String(row[33] || ""),
+      ipReleasedBy: String(row[34] || "")
+    });
+  });
+  return out.map(normaliseArabyaResult_);
 }
 
 function cloneArabyaDefaultDb_() {
