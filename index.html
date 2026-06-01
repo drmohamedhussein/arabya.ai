@@ -779,6 +779,30 @@
                 <div><strong>تاريخ التقدم:</strong> <span id="detail-exam-date">---</span></div>
               </div>
 
+              <!-- جهاز الطالب وعنوان IP (تحكم المعلم/مدير المنصة) -->
+              <div id="detail-device-ip-panel" class="config-card-box" style="margin-bottom: 2rem; text-align: right;">
+                <h4 style="color: var(--accent); margin-bottom: 0.75rem; font-weight: 700;">الجهاز وعنوان IP</h4>
+                <div id="detail-device-info" style="margin-bottom: 1rem;"></div>
+                <div id="detail-ip-staff-controls" class="hidden">
+                  <label class="form-label" for="detail-result-ip-input">عنوان IP المسجّل عند التقديم:</label>
+                  <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+                    <input type="text" id="detail-result-ip-input" class="form-control" placeholder="مثال: 102.54.1.20" dir="ltr" style="max-width: 280px;" autocomplete="off">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="saveResultIpByTeacher()">حفظ تعديل IP</button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="deleteResultIpByTeacher()" style="border-color:var(--error);color:var(--error);">حذف IP وفتح إعادة الدخول</button>
+                  </div>
+                  <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">للمعلم ومدير المنصة فقط: عند حذف أو تعديل IP يُسمح للطالب بإعادة نفس الامتحان ببيانات مختلفة من نفس الجهاز.</small>
+                  <div id="detail-ip-release-status" style="margin-top:0.5rem; font-size:0.85rem;"></div>
+                </div>
+              </div>
+
+              <div id="detail-retake-panel" class="config-card-box" style="margin-bottom: 2rem; text-align: right;">
+                <h4 style="color: var(--secondary); margin-bottom: 0.75rem; font-weight: 700;">إعادة التقديم</h4>
+                <div id="detail-retake-status"></div>
+                <div id="detail-retake-actions" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.75rem;"></div>
+              </div>
+
+              <div id="grading-sync-status" style="margin-bottom:1rem; font-size:0.9rem;"></div>
+
               <!-- حقل تعديل النتيجة النهائية الإجمالية يدوياً -->
               <div class="form-group" style="max-width: 450px; margin-bottom: 2rem; border: 1px solid rgba(245, 158, 11, 0.2); padding: 1rem; border-radius: 12px; background: rgba(245, 158, 11, 0.02); text-align:right;">
                 <label class="form-label" for="detail-total-score-input" style="color:var(--accent);">النتيجة النهائية الإجمالية (نص أو درجة):</label>
@@ -1199,7 +1223,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.24"></script>
-  <script src="app.js?v=2026.05.31.24"></script>
+  <script src="questions.js?v=2026.05.31.25"></script>
+  <script src="app.js?v=2026.05.31.25"></script>
 </body>
 </html>

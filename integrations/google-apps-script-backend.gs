@@ -54,7 +54,10 @@ var ARABYA_RESULTS_HEADERS = [
   "تاريخ منح إعادة التقديم",
   "تاريخ إلغاء إعادة التقديم",
   "تاريخ الأرشفة",
-  "محل بسجل"
+  "محل بسجل",
+  "تحرير IP بواسطة المعلم",
+  "تاريخ تحرير IP",
+  "محرر IP"
 ];
 
 function doPost(e) {
@@ -203,7 +206,10 @@ function buildArabyaResultRow_(data) {
     data.retakeGrantedAt || "",
     data.retakeRevokedAt || "",
     data.supersededAt || "",
-    data.supersededByRecordId || ""
+    data.supersededByRecordId || "",
+    data.ipReleasedByTeacher ? "نعم" : "لا",
+    data.ipReleasedAt || "",
+    data.ipReleasedBy || ""
   ];
 }
 
@@ -322,7 +328,10 @@ function normaliseArabyaResult_(data) {
     retakeRevokedAt: data.retakeRevokedAt || "",
     supersededAt: data.supersededAt || "",
     supersededByRecordId: data.supersededByRecordId || "",
-    isManualGradeUpdate: !!data.isManualGradeUpdate
+    isManualGradeUpdate: !!data.isManualGradeUpdate,
+    ipReleasedByTeacher: !!data.ipReleasedByTeacher,
+    ipReleasedAt: data.ipReleasedAt || "",
+    ipReleasedBy: data.ipReleasedBy || ""
   };
 }
 

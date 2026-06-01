@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.24";
+const ARABYA_APP_VERSION = "2026.05.31.25";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -895,15 +895,11 @@ function resultHasActiveRetakeGrant(res) {
 }
 
 function getResultRetakeStatusText(res) {
-  if (!res) return "—";
-  if (isSupersededResult(res)) {
-    const scoreHint = res.archivedScoreSnapshot || res.score || "—";
-    return `محاولة سابقة محفوظة (الدرجة: ${scoreHint})`;
-  }
+  if (isSupersededResult(res)) return "محاولة سابقة مؤرشفة";
+  if (isResultIpReleasedByStaff(res)) return "تم تحرير IP — يمكن للطالب إعادة الامتحان ببيانات مختلفة";
   if (resultHasActiveRetakeGrant(res)) return "مسموح بإعادة الامتحان — المحاولة الأولى محفوظة";
   if (res.status === "canceled") return "ملغى — بانتظار السماح بإعادة الامتحان";
-  if (res.status === "completed") return "مكتمل — المحاولة محفوظة";
-  return "—";
+  return "مكتمل — لا إعادة تقديم نشطة";
 }
 
 function markPriorResultsSuperseded(studentLookupKey, examId, newRecordId) {
@@ -1054,6 +1050,101 @@ function formatRetakeTimestamp(value) {
   return String(value);
 }
 
+function canManageResultDeviceIp() {
+  return !!systemState.activeTeacher && isTeacherStaffAccount();
+}
+
+function isResultIpReleasedByStaff(res) {
+  return !!(res && res.ipReleasedByTeacher);
+}
+
+function isValidIpv4OrV6(value) {
+  const ip = String(value || "").trim();
+  if (!ip) return true;
+  const ipv4 = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+  const ipv6 = /^([0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}$/i;
+  return ipv4.test(ip) || ipv6.test(ip);
+}
+
+function buildResultCloudIpReleaseFields(res) {
+  return {
+    ipReleasedByTeacher: !!res?.ipReleasedByTeacher,
+    ipReleasedAt: res?.ipReleasedAt || "",
+    ipReleasedBy: res?.ipReleasedBy || ""
+  };
+}
+
+function clearExamDeviceRegistryForStudentExam(studentLookupKey, examId) {
+  if (!studentLookupKey || !examId) return;
+  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  registry.bindings = (registry.bindings || []).filter(entry =>
+    !(entry.examId === examId && entry.studentLookupKey === studentLookupKey)
+  );
+  saveExamDeviceRegistry(registry);
+}
+
+function buildResultDeviceFieldsFromResult(res) {
+  if (!res) return {};
+  return {
+    deviceId: res.deviceId || "",
+    deviceFingerprint: res.deviceFingerprint || "",
+    clientIp: res.clientIp || "",
+    deviceMeta: res.deviceMeta || {}
+  };
+}
+
+async function persistResultRecordWithCloudSync(res, syncStatusEl) {
+  if (!res) return false;
+  saveSystemState(true);
+  if (syncStatusEl) {
+    syncStatusEl.innerHTML = '<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري حفظ البيانات ومزامنتها مع Google Sheets...';
+  }
+  sendUpdatedResultToCloud(res, syncStatusEl);
+  let cloudOk = false;
+  try {
+    cloudOk = await syncLocalDatabaseToCloud();
+  } catch (e) {
+    console.error("[ARABYA] syncLocalDatabaseToCloud after result edit:", e);
+  }
+  renderStudentResultsTable();
+  if (typeof renderTeacherStudentsTable === "function") {
+    try { renderTeacherStudentsTable(); } catch (e) {}
+  }
+  return cloudOk;
+}
+
+function applyResultIpReleaseByStaff(res, newIpValue, syncStatusEl) {
+  if (!canManageResultDeviceIp()) {
+    alert("صلاحية تعديل أو حذف IP متاحة للمعلم ومدير المنصة (سوبر أدمن) فقط.");
+    return Promise.resolve(false);
+  }
+  if (!res || !res.recordId) {
+    alert("لم يتم العثور على سجل النتيجة.");
+    return Promise.resolve(false);
+  }
+  const ip = String(newIpValue ?? "").trim();
+  if (ip && !isValidIpv4OrV6(ip)) {
+    alert("صيغة عنوان IP غير صالحة. اترك الحقل فارغاً للحذف أو أدخل IPv4/IPv6 صحيحاً.");
+    return Promise.resolve(false);
+  }
+  const teacher = systemState.activeTeacher || {};
+  res.clientIp = ip;
+  res.ipReleasedByTeacher = true;
+  res.ipReleasedAt = new Date().toISOString();
+  res.ipReleasedBy = teacher.name || teacher.username || "معلم";
+  const lookupKey = res.studentLookupKey || getStudentLookupKey({ id: res.id, name: res.name, code: res.accessCode });
+  if (lookupKey && res.examId) {
+    clearExamDeviceRegistryForStudentExam(lookupKey, res.examId);
+  }
+  return persistResultRecordWithCloudSync(res, syncStatusEl).then(() => {
+    renderTeacherResultDeviceIpPanel(res);
+    if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
+      renderResultRetakeManagementPanel(res);
+    }
+    return true;
+  });
+}
+
 function buildResultCloudRetakeFields(res) {
   return {
     allowRetake: !!res?.allowRetake,
@@ -1128,6 +1219,7 @@ function findBlockingExamResult(studentLookupKey, examId, studentContext) {
     r.status !== "incomplete" &&
     r.allowRetake !== true &&
     (r.status === "completed" || r.status === "canceled") &&
+    !isResultIpReleasedByStaff(r) &&
     resultMatchesStudentIdentity(r, ctx)
   ) || null;
 }
@@ -5525,6 +5617,7 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     attemptNumber: resultObj?.attemptNumber ?? "",
     ...buildResultCloudRetakeFields(resultObj),
     ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
+    ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
     ...(resultObj ? buildCheatTrackingFieldsFromResult(resultObj) : buildCheatTrackingFields())
   };
   const slimPayload = buildSlimResultCloudPayload(payload);
@@ -5612,7 +5705,8 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     isManualGradeUpdate: true,
     attemptNumber: res.attemptNumber ?? "",
     ...buildResultCloudRetakeFields(res),
-    ...buildResultDeviceFields(res),
+    ...buildResultDeviceFieldsFromResult(res),
+    ...buildResultCloudIpReleaseFields(res),
     ...buildCheatTrackingFieldsFromResult(res)
   };
   const slimPayload = buildSlimResultCloudPayload(payload);
@@ -6443,7 +6537,7 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   document.getElementById("detail-stu-code").innerText = res.accessCode || "لا يوجد";
   document.getElementById("detail-exam-title").innerText = res.examTitle || examForDisplay.title;
   document.getElementById("detail-exam-date").innerText = res.timestamp;
-  renderTeacherDeviceInfo(res);
+  renderTeacherResultDeviceIpPanel(res);
   document.getElementById("detail-total-score-input").value = res.score;
   renderResultRetakeManagementPanel(res);
   renderStudentAttemptsPanel(res);
@@ -6949,6 +7043,7 @@ function findDeviceExamAttemptConflict(profile, examId, studentContext) {
 
   (systemState.results || []).forEach(r => {
     if (!r || r.examId !== examId || isSupersededResult(r)) return;
+    if (isResultIpReleasedByStaff(r)) return;
     if (!deviceProfileMatchesResult(profile, r)) return;
 
     const isFinished = r.status !== "incomplete" && r.allowRetake !== true && (r.status === "completed" || r.status === "canceled");
@@ -7073,6 +7168,65 @@ function buildResultDeviceFields(profile) {
     }
   };
 }
+
+function renderTeacherResultDeviceIpPanel(res) {
+  const infoEl = document.getElementById("detail-device-info");
+  const staffBox = document.getElementById("detail-ip-staff-controls");
+  const ipInput = document.getElementById("detail-result-ip-input");
+  const releaseStatus = document.getElementById("detail-ip-release-status");
+  if (!infoEl) return;
+
+  const hasData = !!(res?.deviceFingerprint || res?.deviceId || res?.clientIp);
+  if (!hasData && !canManageResultDeviceIp()) {
+    infoEl.innerHTML = '<span style="color:var(--warning);">لم تُسجَّل بصمة جهاز أو IP لهذا السجل.</span>';
+  } else if (hasData) {
+    infoEl.innerHTML = formatTeacherDeviceInfoHtml(res);
+  } else {
+    infoEl.innerHTML = '<span style="color:var(--text-muted);">لا توجد بيانات جهاز مسجّلة — يمكنك تسجيل أو حذف IP بالأسفل.</span>';
+  }
+
+  if (staffBox) {
+    staffBox.classList.toggle("hidden", !canManageResultDeviceIp());
+  }
+  if (ipInput) {
+    ipInput.value = (res?.clientIp || "").trim();
+    ipInput.disabled = isSupersededResult(res);
+  }
+  if (releaseStatus) {
+    if (isResultIpReleasedByStaff(res)) {
+      releaseStatus.innerHTML = `<span style="color:var(--secondary); font-weight:700;">تم تحرير قفل IP/الجهاز — يمكن للطالب إعادة الامتحان ببيانات مختلفة.</span>` +
+        `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;">بواسطة: ${escapeHtml(res.ipReleasedBy || "—")} · ${escapeHtml(formatRetakeTimestamp(res.ipReleasedAt))}</div>`;
+    } else {
+      releaseStatus.innerHTML = '<span style="color:var(--text-muted);">لم يُحرَّر IP بعد. الحذف أو التعديل يفتح إعادة الدخول للامتحان نفسه.</span>';
+    }
+  }
+}
+
+window.saveResultIpByTeacher = async function() {
+  const res = systemState.currentGradingResult;
+  if (!res) return;
+  const ipInput = document.getElementById("detail-result-ip-input");
+  const newIp = ipInput ? ipInput.value.trim() : "";
+  const msg = newIp
+    ? `تأكيد تعديل IP إلى "${newIp}"؟\n\nسيتمكن الطالب من إعادة أداء نفس الامتحان ببيانات مختلفة.`
+  : "تأكيد حذف IP؟ سيتمكن الطالب من إعادة أداء نفس الامتحان ببيانات مختلفة.";
+  if (!confirm(msg)) return;
+  const syncEl = document.getElementById("grading-sync-status");
+  await applyResultIpReleaseByStaff(res, newIp, syncEl);
+  alert(newIp ? "تم تحديث IP ومزامنة السجل." : "تم حذف IP وفتح إعادة الدخول للامتحان — تمت المزامنة.");
+};
+
+window.deleteResultIpByTeacher = async function() {
+  const res = systemState.currentGradingResult;
+  if (!res) return;
+  if (!confirm("هل تريد حذف عنوان IP لهذا السجل؟\n\nسيتمكن الطالب من إعادة أداء نفس الامتحان من نفس الجهاز ببيانات مختلفة (اسم/معرف/كود جديد).")) return;
+  const syncEl = document.getElementById("grading-sync-status");
+  if (document.getElementById("detail-result-ip-input")) {
+    document.getElementById("detail-result-ip-input").value = "";
+  }
+  await applyResultIpReleaseByStaff(res, "", syncEl);
+  alert("تم حذف IP وتحرير القفل — تم حفظ البيانات ومزامنتها مع Google Sheets.");
+};
 
 function formatTeacherDeviceInfoHtml(res) {
   const ip = (res?.clientIp || "").trim() || "غير متاح (حظر الشبكة أو بدون اتصال)";
