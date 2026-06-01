@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.5";
+const ARABYA_APP_VERSION = "2026.06.02.6";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -6552,10 +6552,6 @@ function runnerNextQuestion(isAuto = false) {
     startRunnerTimer();
     announceExamAccessibility(`السؤال ${systemState.currentQuestionIndex + 1} من ${systemState.shuffledQuestions.length}`);
   } else {
-    if (!isAuto && !confirm(buildExamSubmitSummaryText())) {
-      startRunnerTimer();
-      return;
-    }
     announceExamAccessibility("جاري تسليم الامتحان وحساب النتيجة.");
     submitFinishedExam();
   }
@@ -6673,15 +6669,25 @@ function submitFinishedExam() {
       systemState.currentExam.id
     );
   }
-  saveSystemState(true);
-  syncRetakeAffectedResultsToCloud(archivedAttempts);
-  sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  saveSystemState(false);
   systemState.currentExamRuntime = null;
   showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
+  if (archivedAttempts && archivedAttempts.length) {
+    syncRetakeAffectedResultsToCloud(archivedAttempts);
+  }
+  void sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("exam_submit");
+  }
 }
 
 function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore) {
   navigateToView("student-result-view");
+
+  const syncEl = document.getElementById("runner-res-sync-status");
+  if (syncEl) {
+    syncEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري حفظ ومزامنة نتيجتك مع Google Sheets...`;
+  }
   
   const scoreNumEl = document.getElementById("runner-res-score");
   const totalEl = document.getElementById("runner-res-total");
@@ -6708,8 +6714,59 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   }
 }
 
+function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", resultObj = null) {
+  const exam = systemState.currentExam;
+  const payload = {
+    action: "add_result",
+    recordId: resultRecordId,
+    timestamp: resultObj?.timestamp || new Date().toLocaleString("ar-EG"),
+    name: systemState.currentStudent.name,
+    id: systemState.currentStudent.id,
+    subscriptionCode: systemState.currentStudent.accessCode,
+    studentLookupKey: resultObj?.studentLookupKey || getStudentLookupKey(systemState.currentStudent),
+    email: resultObj?.email || systemState.currentStudent.email || "",
+    mobile: resultObj?.mobile || systemState.currentStudent.mobile || "",
+    examTitle: exam ? exam.title : "امتحان",
+    examId: exam ? exam.id : "",
+    university: exam ? (exam.university || "") : (resultObj?.university || ""),
+    faculty: exam ? (exam.faculty || "") : (resultObj?.faculty || ""),
+    level: exam ? (exam.level || "") : (resultObj?.level || ""),
+    examType: exam ? (exam.examType || "") : (resultObj?.examType || ""),
+    status: resultObj?.status || "completed",
+    score: scoreString,
+    details: details,
+    maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
+    attemptNumber: resultObj?.attemptNumber ?? "",
+    ...buildResultCloudRetakeFields(resultObj),
+    ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
+    ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
+    ...(resultObj ? buildCheatTrackingFieldsFromResult(resultObj) : buildCheatTrackingFields())
+  };
+  return buildSlimResultCloudPayload(payload);
+}
+
+async function postAddResultToAllCloudUrls(slimPayload) {
+  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  if (!urlList.length) return { ok: false, successCount: 0, total: 0 };
+  const outcomes = await Promise.all(urlList.map(async url => {
+    try {
+      await postToArabyaWebApp(url, slimPayload);
+      return true;
+    } catch (err) {
+      console.warn("[ARABYA] add_result failed, retry no-cors:", url, err);
+      try {
+        return await postToArabyaWebAppNoCors(url, slimPayload);
+      } catch (e2) {
+        return false;
+      }
+    }
+  }));
+  const successCount = outcomes.filter(Boolean).length;
+  return { ok: successCount > 0, successCount, total: urlList.length };
+}
+
 // المزامنة مع جوجل شيتس - ترسل نتيجة الطالب فور الانتهاء من الامتحان
-function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", resultObj = null) {
+async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", resultObj = null) {
   const exam = systemState.currentExam;
   const statusEl = document.getElementById("runner-res-sync-status");
   const urlList = Array.from(getArabyaWebAppUrls());
@@ -6739,67 +6796,40 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     return;
   }
 
-  if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري مزامنة نتيجتك مع Google Sheets...`;
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري مزامنة نتيجتك مع Google Sheets...`;
+  }
 
-  const payload = {
-    action: "add_result",
-    recordId: resultRecordId,
-    timestamp: resultObj?.timestamp || new Date().toLocaleString("ar-EG"),
-    name: systemState.currentStudent.name,
-    id: systemState.currentStudent.id,
-    subscriptionCode: systemState.currentStudent.accessCode,
-    studentLookupKey: resultObj?.studentLookupKey || getStudentLookupKey(systemState.currentStudent),
-    email: resultObj?.email || systemState.currentStudent.email || "",
-    mobile: resultObj?.mobile || systemState.currentStudent.mobile || "",
-    examTitle: exam ? exam.title : "امتحان",
-    examId: exam ? exam.id : "",
-    university: exam ? (exam.university || "") : (resultObj?.university || ""),
-    faculty: exam ? (exam.faculty || "") : (resultObj?.faculty || ""),
-    level: exam ? (exam.level || "") : (resultObj?.level || ""),
-    examType: exam ? (exam.examType || "") : (resultObj?.examType || ""),
-    status: resultObj?.status || "completed",
-    score: scoreString,
-    details: details,
-    maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
-    attemptNumber: resultObj?.attemptNumber ?? "",
-    ...buildResultCloudRetakeFields(resultObj),
-    ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
-    ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
-    ...(resultObj ? buildCheatTrackingFieldsFromResult(resultObj) : buildCheatTrackingFields())
-  };
-  const slimPayload = buildSlimResultCloudPayload(payload);
+  const slimPayload = buildAddResultCloudPayload(scoreString, details, resultRecordId, resultObj);
 
-  let successCount = 0, failCount = 0;
-  const total = urlList.length;
-
-  const finishSyncUi = (backupOk) => {
+  try {
+    const [postResult, backupOk] = await Promise.all([
+      postAddResultToAllCloudUrls(slimPayload),
+      pushCloudBackupNow("exam_submit")
+    ]);
     if (!statusEl) return;
-    if (successCount > 0 || backupOk) {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تمت مزامنة النتيجة مع Google Sheets بنجاح ✓`;
-    } else if (failCount === total) {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> فشلت المزامنة. تأكد من: (1) نشر Apps Script كـ Web App لـ <b>Anyone</b> (2) استخدام رابط ينتهي بـ <b>/exec</b> (3) لصق الكود النهائي من تبويب الربط. تم حفظ نتيجتك محلياً على هذا الجهاز.`;
+    if (postResult.ok || backupOk) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم حفظ نتيجتك ومزامنتها مع Google Sheets بنجاح ✓`;
+    } else if (postResult.successCount > 0) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> مزامنة جزئية (${postResult.successCount}/${postResult.total}). تم الحفظ محلياً.`;
     } else {
-      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> مزامنة جزئية (${successCount}/${total}).`;
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--error); vertical-align:middle;">error</span> تعذّرت المزامنة السحابية. نتيجتك محفوظة على هذا الجهاز — سيتم إعادة المحاولة عند عودة الاتصال.`;
+      if (window.ArabyaOfflineQueue) {
+        urlList.forEach(url => window.ArabyaOfflineQueue.enqueue(normalizeArabyaWebAppUrl(url), slimPayload));
+      }
     }
-  };
-
-  const backupPromise = pushCloudBackupNow();
-
-  urlList.forEach(url => {
-    postToArabyaWebApp(url, slimPayload).then(() => {
-      successCount++;
-      if (successCount + failCount === total) {
-        backupPromise.then(finishSyncUi);
-      }
-    }).catch(async err => {
-      console.error("Google Sheets sync error:", url, err);
-      const sent = await postToArabyaWebAppNoCors(url, slimPayload);
-      if (sent) successCount++; else failCount++;
-      if (successCount + failCount === total) {
-        backupPromise.then(finishSyncUi);
-      }
-    });
-  });
+  } catch (syncErr) {
+    console.error("[ARABYA] sendResultToGoogleSheets:", syncErr);
+    if (statusEl) {
+      statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">cloud_off</span> تم حفظ النتيجة محلياً. جاري إعادة محاولة المزامنة...`;
+    }
+    if (window.ArabyaOfflineQueue) {
+      urlList.forEach(url => window.ArabyaOfflineQueue.enqueue(normalizeArabyaWebAppUrl(url), slimPayload));
+    }
+    if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+      scheduleCloudBackupPush.immediate("exam_submit_retry");
+    }
+  }
 }
 
 // مزامنة نتيجة معدّلة يدوياً (من قبل المعلم) مع Google Sheets
@@ -9119,10 +9149,7 @@ function submitCheatedExam() {
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   systemState.currentExamRuntime = null;
-  saveSystemState(true);
-  syncRetakeAffectedResultsToCloud(archivedAttempts);
-
-  sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  saveSystemState(false);
 
   navigateToView("student-result-view");
   document.getElementById("runner-res-score").innerText = "0";
@@ -9134,6 +9161,18 @@ function submitCheatedExam() {
   const statusEl = document.getElementById("runner-res-status");
   statusEl.innerText = "تم إلغاء امتحانك بسبب اكتشاف محاولة للغش والخروج عن قواعد الامتحان. تواصل مع المعلم إذا لزم الأمر.";
   statusEl.style.color = "var(--error)";
+
+  const syncEl = document.getElementById("runner-res-sync-status");
+  if (syncEl) {
+    syncEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري مزامنة السجل مع Google Sheets...`;
+  }
+  if (archivedAttempts && archivedAttempts.length) {
+    syncRetakeAffectedResultsToCloud(archivedAttempts);
+  }
+  void sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("exam_submit_cheat");
+  }
 }
 
 function shuffle(array) {
