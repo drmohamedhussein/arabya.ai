@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.20";
+const ARABYA_APP_VERSION = "2026.05.31.21";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -78,8 +78,22 @@ function getTeacherRoleLabel(teacher) {
 }
 
 function updateTeacherAppVersionLabel() {
-  const versionEl = document.getElementById("teacher-app-version-label");
-  if (versionEl) versionEl.textContent = `إصدار التطبيق: ${ARABYA_APP_VERSION}`;
+  let versionEl = document.getElementById("teacher-app-version-label");
+  if (!versionEl) {
+    const sidebar = document.querySelector(".teacher-sidebar");
+    if (sidebar) {
+      versionEl = document.createElement("div");
+      versionEl.id = "teacher-app-version-label";
+      versionEl.className = "teacher-app-version-label";
+      versionEl.setAttribute("aria-live", "polite");
+      versionEl.setAttribute("aria-label", "إصدار التطبيق الحالي");
+      sidebar.appendChild(versionEl);
+    }
+  }
+  const label = `إصدار التطبيق: ${ARABYA_APP_VERSION}`;
+  if (versionEl) versionEl.textContent = label;
+  const headerBadge = document.getElementById("teacher-dashboard-version-badge");
+  if (headerBadge) headerBadge.textContent = ARABYA_APP_VERSION;
 }
 
 function updateTeacherDashboardAccessUI() {

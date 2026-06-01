@@ -408,8 +408,8 @@
           دخول سريع عبر الرمز <span class="material-icons" aria-hidden="true">bolt</span>
         </button>
 
-        <div id="teacher-public-register-link" style="text-align: center; margin-top: 1.5rem;">
-          <a href="#" onclick="navigateToView('teacher-register-view'); return false;" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً (مدير المنصة)</a>
+        <div style="text-align: center; margin-top: 1.5rem;">
+          <a href="#" onclick="navigateToView('teacher-register-view');" style="color: var(--accent); text-decoration: none; font-size: 0.95rem; font-weight: 600;">ليس لديك حساب معلم؟ سجل حساباً جديداً</a>
         </div>
       </div>
     </section>
@@ -509,10 +509,12 @@
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
             </li>
           </ul>
+          <div id="teacher-app-version-label" class="teacher-app-version-label" aria-live="polite" aria-label="إصدار التطبيق الحالي">إصدار التطبيق: —</div>
         </aside>
 
         <!-- اللوحة الرئيسية المتغيرة -->
         <div class="teacher-main-panel">
+          <div id="teacher-dashboard-version-badge" class="teacher-dashboard-version-badge" aria-hidden="true">—</div>
           
           <!-- تبويب الامتحانات (Exams Tab) -->
           <div id="teacher-tab-exams" class="teacher-tab-panel" role="tabpanel">
@@ -1196,7 +1198,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js"></script>
-  <script src="app.js"></script>
+  <script src="questions.js?v=2026.05.31.21"></script>
+  <script src="app.js?v=2026.05.31.21"></script>
 </body>
 </html>
