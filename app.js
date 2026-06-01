@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.2";
+const ARABYA_APP_VERSION = "2026.06.02.3";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -601,6 +601,8 @@ let systemState = {
   
   // قاعدة بيانات الطلاب وأكواد اشتراكاتهم
   students: [],
+  /** مفاتيح طلاب محذوفين — لا يُعاد إنشاؤهم من النتائج أو السحابة */
+  deletedStudentKeys: [],
   
   // حالة الطالب والاختبار الحالي
   currentStudent: {
@@ -666,7 +668,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
-  applyStudentBindTokenFromUrl();
+  loadDeletedStudentKeysFromStorage();
   setupArabyaLiveDataRefresh();
   setupMobileSiteNavigation();
   hydrateGoogleSheetsScriptBox();
@@ -937,6 +939,8 @@ function initDatabase() {
     ];
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
+  loadDeletedStudentKeysFromStorage();
+  systemState.students = filterOutDeletedStudents(systemState.students);
 }
 
 // حفظ قاعدة بيانات المعلمين محلياً (دون مزامنة سحابية)
@@ -1528,8 +1532,15 @@ function applyResultIpReleaseByStaff(res, newIpValue, syncStatusEl) {
   if (lookupKey && res.examId) {
     clearExamDeviceRegistryForStudentExam(lookupKey, res.examId);
   }
+  if (ip && res.examId) {
+    addAllowedRetakeIpToExam(res.examId, ip);
+  }
   return persistResultRecordWithCloudSync(res, syncStatusEl).then(() => {
     renderTeacherResultDeviceIpPanel(res);
+    if (res.examId && currentEditingExamId === res.examId) {
+      const exam = systemState.exams.find(e => e.id === res.examId);
+      if (exam) renderExamAllowedIpsList(exam);
+    }
     if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === res.recordId) {
       renderResultRetakeManagementPanel(res);
     }
@@ -1898,6 +1909,8 @@ function getCurrentExamTotalScore() {
 }
 
 function upsertStudentRecord(source, fallbackKey = "") {
+  const previewKey = fallbackKey || getStudentLookupKey(source) || "";
+  if (previewKey && isStudentKeyDeleted(previewKey)) return null;
   const normalizedId = normalizeStudentId(source.id || "");
   const normalizedCode = sanitizeStudentCodeInput(source.code || source.accessCode || "");
   const normalizedStudent = {
@@ -1932,7 +1945,6 @@ function upsertStudentRecord(source, fallbackKey = "") {
     existingStudent.mobile = normalizedStudent.mobile;
     existingStudent.timestamp = existingStudent.timestamp || new Date().toLocaleDateString("ar-EG");
     existingStudent.studentKey = existingStudent.studentKey || getStudentLookupKey(existingStudent) || fallbackKey || createRecordId("student");
-    if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.ensureStudentDeviceBindToken(existingStudent);
     return ensureStudentAccountType(existingStudent);
   }
 
@@ -1946,7 +1958,6 @@ function upsertStudentRecord(source, fallbackKey = "") {
     studentKey: fallbackKey || getStudentLookupKey(normalizedStudent) || createRecordId("student"),
     accountType: ARABYA_ACCOUNT_ROLES.STUDENT
   };
-  if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.ensureStudentDeviceBindToken(newStudent);
   systemState.students.push(newStudent);
   return ensureStudentAccountType(newStudent);
 }
@@ -2671,10 +2682,65 @@ function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
   });
 }
 
+const DELETED_STUDENT_KEYS_STORAGE = "arabya_deleted_student_keys";
+
+function loadDeletedStudentKeysFromStorage() {
+  if (!Array.isArray(systemState.deletedStudentKeys)) systemState.deletedStudentKeys = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(DELETED_STUDENT_KEYS_STORAGE) || "[]");
+    if (Array.isArray(raw)) {
+      systemState.deletedStudentKeys = [...new Set(raw.map(String).filter(Boolean))];
+    }
+  } catch (e) {}
+  return systemState.deletedStudentKeys;
+}
+
+function persistDeletedStudentKeys() {
+  loadDeletedStudentKeysFromStorage();
+  try {
+    localStorage.setItem(DELETED_STUDENT_KEYS_STORAGE, JSON.stringify(systemState.deletedStudentKeys));
+  } catch (e) {}
+}
+
+function isStudentKeyDeleted(key) {
+  if (!key) return false;
+  const k = String(key).trim();
+  return loadDeletedStudentKeysFromStorage().includes(k);
+}
+
+function isStudentRecordDeleted(student) {
+  if (!student) return false;
+  return isStudentKeyDeleted(student.studentKey || getStudentLookupKey(student));
+}
+
+function addDeletedStudentKey(student) {
+  loadDeletedStudentKeysFromStorage();
+  const keys = new Set(systemState.deletedStudentKeys);
+  const primary = student.studentKey || getStudentLookupKey(student);
+  if (primary) keys.add(String(primary));
+  if (student.id) keys.add(`id:${normalizeStudentId(student.id)}`);
+  if (student.code) keys.add(`code:${sanitizeStudentCodeInput(student.code)}`);
+  systemState.deletedStudentKeys = [...keys];
+  persistDeletedStudentKeys();
+}
+
+function filterOutDeletedStudents(students) {
+  return (students || []).filter(s => !isStudentRecordDeleted(s));
+}
+
+function mergeDeletedStudentKeysFromRemote(remoteKeys) {
+  loadDeletedStudentKeysFromStorage();
+  if (!Array.isArray(remoteKeys)) return;
+  const set = new Set([...systemState.deletedStudentKeys, ...remoteKeys.map(String).filter(Boolean)]);
+  systemState.deletedStudentKeys = [...set];
+  persistDeletedStudentKeys();
+}
+
 function hydrateStudentsFromResults(results) {
   if (!Array.isArray(results)) return;
   results.forEach(res => {
     if (!res || (!res.name && !res.id && !res.accessCode && !res.code)) return;
+    if (res.studentLookupKey && isStudentKeyDeleted(res.studentLookupKey)) return;
     upsertStudentRecord({
       name: res.name,
       id: res.id,
@@ -2698,8 +2764,14 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
       }
     }
   }
+  if (Array.isArray(remoteData.deletedStudentKeys)) {
+    mergeDeletedStudentKeysFromRemote(remoteData.deletedStudentKeys);
+  }
   if (Array.isArray(remoteData.students)) {
-    systemState.students = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
+    const mergedStudents = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
+    systemState.students = filterOutDeletedStudents(mergedStudents);
+  } else {
+    systemState.students = filterOutDeletedStudents(systemState.students);
   }
   if (Array.isArray(remoteData.exams)) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
@@ -3092,19 +3164,6 @@ async function syncDatabaseFromCloud(options = {}) {
   return { ok: false };
 }
 
-function applyStudentBindTokenFromUrl() {
-  try {
-    const hash = window.location.hash || "";
-    const q = hash.includes("?") ? hash.split("?").slice(1).join("?") : "";
-    const params = new URLSearchParams(q);
-    const token = params.get("token");
-    if (token) {
-      const el = document.getElementById("student-device-bind-token");
-      if (el) el.value = decodeURIComponent(token);
-    }
-  } catch (e) {}
-}
-
 function setupArabyaLiveDataRefresh() {
   const refreshTeacherViews = () => {
     if (systemState.activeView !== "teacher-dashboard-view") return;
@@ -3283,8 +3342,11 @@ function applyCloudBackupData(data) {
       if (restoredTeacher) void loginTeacherObject(restoredTeacher);
     }
   }
+  if (data.deletedStudentKeys && Array.isArray(data.deletedStudentKeys)) {
+    mergeDeletedStudentKeysFromRemote(data.deletedStudentKeys);
+  }
   if (data.students && Array.isArray(data.students)) {
-    systemState.students = data.students;
+    systemState.students = filterOutDeletedStudents(data.students);
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
   if (data.exams && Array.isArray(data.exams)) {
@@ -4929,6 +4991,7 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-entry-score").value = exam.entryScore || "";
   document.getElementById("edit-meta-entry-details").value = exam.entryDetails || "";
   if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.applyHallModeToEditor(exam);
+  renderExamAllowedIpsList(exam);
 
   // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
   const examUrl = getExamDirectLink(exam);
@@ -5172,6 +5235,7 @@ window.saveExamMetaSettingsOnly = function() {
   if (!applyExamMetaFromEditor(exam, { requireAcademic: true })) return;
   saveSystemState(true);
   document.getElementById("editor-exam-title").innerText = exam.title;
+  renderExamAllowedIpsList(exam);
   alert("تم حفظ إعدادات الامتحان بنجاح.");
   renderExamsList();
 };
@@ -5896,15 +5960,6 @@ async function validateStudentAndStart() {
       return;
     }
     deviceProfile = deviceCheck.profile;
-    const bindTokenInput = document.getElementById("student-device-bind-token")?.value?.trim() || "";
-    if (window.ArabyaPlatformSync) {
-      const bindOk = window.ArabyaPlatformSync.validateStudentDeviceBinding(studentRecord, bindTokenInput, deviceProfile);
-      if (!bindOk.ok) {
-        alert(bindOk.message);
-        return;
-      }
-      saveStudentsToLocalStorage();
-    }
     mergeDeviceProfileIntoStudent(studentRecord, deviceProfile);
     systemState.currentStudent.deviceId = deviceProfile.deviceId;
     systemState.currentStudent.lastKnownIp = deviceProfile.clientIp || "";
@@ -9075,25 +9130,61 @@ function setupStudentsTablePaginationControls() {
   });
 }
 
-window.showStudentBindQrModal = function (student) {
-  if (!student || !window.ArabyaPlatformSync) return;
-  const token = window.ArabyaPlatformSync.ensureStudentDeviceBindToken(student);
-  saveStudentsToLocalStorage();
-  const imgUrl = window.ArabyaPlatformSync.getStudentBindQrImageUrl(student);
-  const w = window.open("", "_blank", "noopener,noreferrer,width=340,height=420");
-  if (!w) {
-    alert(`رمز ربط الجهاز لـ ${student.name}:\n${token}`);
+function parseIpLinesText(text) {
+  return String(text || "")
+    .split(/[\n,;]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function normalizeExamIpLists(exam) {
+  if (!exam) return;
+  if (!exam.hallMode) exam.hallMode = { enabled: false };
+  if (!Array.isArray(exam.hallMode.allowedIps)) {
+    const legacy = exam.hallMode.allowedIp ? [exam.hallMode.allowedIp] : [];
+    exam.hallMode.allowedIps = legacy;
+  }
+  if (!Array.isArray(exam.allowedRetakeIps)) exam.allowedRetakeIps = [];
+}
+
+function collectExamAllowedIps(exam) {
+  if (!exam) return [];
+  normalizeExamIpLists(exam);
+  const set = new Set();
+  (exam.hallMode.allowedIps || []).forEach(ip => { if (ip) set.add(String(ip).trim()); });
+  (exam.allowedRetakeIps || []).forEach(ip => { if (ip) set.add(String(ip).trim()); });
+  (systemState.results || []).forEach(res => {
+    if (res.examId !== exam.id && res.examTitle !== exam.title) return;
+    if (res.ipReleasedByTeacher && res.clientIp) set.add(String(res.clientIp).trim());
+  });
+  return [...set].filter(Boolean);
+}
+
+function renderExamAllowedIpsList(exam) {
+  const el = document.getElementById("exam-allowed-ips-list");
+  if (!el || !exam) return;
+  const ips = collectExamAllowedIps(exam);
+  if (!ips.length) {
+    el.innerHTML = '<span style="color:var(--text-muted);">لا توجد عناوين IP مسجّلة بعد. أضفها في الحقول أعلاه أو حرّر/احذف IP من نتيجة طالب لفتح إعادة الدخول.</span>';
     return;
   }
-  w.document.write(
-    `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><title>QR ربط جهاز</title></head><body style="font-family:Tahoma;text-align:center;padding:1rem;">` +
-    `<h3 style="margin:0 0 0.5rem;">${escapeHtml(student.name || "")}</h3>` +
-    `<img src="${imgUrl}" width="180" height="180" alt="QR" style="border:1px solid #ccc;border-radius:8px;"/>` +
-    `<p style="font-size:0.9rem;">الرمز: <code>${escapeHtml(token)}</code></p>` +
-    `<p style="font-size:0.8rem;color:#666;">يُدخل الطالب الرمز مرة واحدة عند أول امتحان.</p></body></html>`
-  );
-  w.document.close();
-};
+  el.innerHTML =
+    `<ul style="margin:0; padding-right:1.2rem; font-size:0.88rem;">` +
+    ips.map(ip => `<li style="margin-bottom:0.25rem;"><code dir="ltr">${escapeHtml(ip)}</code></li>`).join("") +
+    `</ul>`;
+}
+
+function addAllowedRetakeIpToExam(examId, ip) {
+  const clean = String(ip || "").trim();
+  if (!clean || !examId) return;
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return;
+  normalizeExamIpLists(exam);
+  if (!exam.allowedRetakeIps.includes(clean)) {
+    exam.allowedRetakeIps.push(clean);
+    saveSystemState(true);
+  }
+}
 
 window.pullTeacherStudentsFromCloud = async function() {
   const el = document.getElementById("teacher-students-sync-status");
@@ -9177,15 +9268,6 @@ function renderTeacherStudentsTable() {
     `;
 
     const actionsCell = row.querySelector(".teacher-students-actions");
-    const qrBtn = document.createElement("button");
-    qrBtn.type = "button";
-    qrBtn.className = "btn btn-outline btn-sm";
-    qrBtn.style.cssText = "padding:0.25rem 0.5rem;";
-    qrBtn.textContent = "QR";
-    qrBtn.title = "رمز ربط الجهاز";
-    qrBtn.addEventListener("click", () => showStudentBindQrModal(s));
-    actionsCell.appendChild(qrBtn);
-
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "btn btn-outline btn-sm";
@@ -9354,12 +9436,20 @@ window.deleteStudentByTeacher = async function(studentKey) {
     alert("لم يتم العثور على الطالب!");
     return;
   }
-  if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟`)) return;
+  if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟\n\nلن يُعاد من السحابة أو من نتائج الامتحانات بعد المزامنة.`)) return;
+  addDeletedStudentKey(student);
   systemState.students = systemState.students.filter(s => s.studentKey !== studentKey);
-  saveSystemState(false);
+  saveSystemState(true);
   renderTeacherStudentsTable();
   const synced = await syncLocalDatabaseToCloud();
-  alert(synced ? `تم حذف الطالب "${student.name}" ومزامنة التغيير مع Google Sheets.` : `تم حذف الطالب "${student.name}" محلياً.`);
+  if (window.ArabyaToast) {
+    window.ArabyaToast.showToast(
+      synced ? `تم حذف «${student.name}» ومزامنة الحذف مع السحابة` : `تم حذف «${student.name}» محلياً — تحقق من الربط`,
+      synced ? "success" : "warning"
+    );
+  } else {
+    alert(synced ? `تم حذف الطالب "${student.name}" ومزامنة التغيير مع Google Sheets.` : `تم حذف الطالب "${student.name}" محلياً.`);
+  }
 };
 
 // تصدير الطلاب كملف JSON (الصفوف المفلترة)

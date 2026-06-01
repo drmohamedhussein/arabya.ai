@@ -6,7 +6,7 @@
 | `arabya-question-bank.js` | بنوك أسئلة مشتركة: حفظ، دمج، استيراد/تصدير JSON و CSV |
 | `arabya-toast.js` | إشعارات نجاح/فشل المزامنة |
 | `arabya-offline-queue.js` | طابور رفع عند انقطاع الشبكة |
-| `arabya-platform-sync.js` | صحة المزامنة، تعارضات، QR جهاز، قاعة امتحان |
+| `arabya-platform-sync.js` | صحة المزامنة، تعارضات، قاعة امتحان، قائمة IP |
 | `arabya-realtime-bridge.js` | جسر Firebase/Supabase (اختياري — افتراضي polling) |
 | `arabya-analytics.js` | تحليلات: متوسط الدرجات، أصعب الأسئلة، معدل الغش، تصدير CSV |
 

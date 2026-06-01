@@ -110,6 +110,7 @@
         ? global.loadExamDeviceRegistry()
         : { bindings: [] },
       questionBanks: collectAllQuestionBanksForCloud(),
+      deletedStudentKeys: Array.isArray(state.deletedStudentKeys) ? state.deletedStudentKeys : [],
       config: state.config ? { ...state.config, teacherCode: undefined } : {}
     };
   }

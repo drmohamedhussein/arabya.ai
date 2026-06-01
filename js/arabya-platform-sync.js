@@ -268,55 +268,23 @@
     return false;
   }
 
-  function ensureStudentDeviceBindToken(student) {
-    if (!student) return "";
-    if (student.deviceBindToken) return student.deviceBindToken;
-    const token = `bind_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-    student.deviceBindToken = token;
-    return token;
+  function parseIpLines(text) {
+    return String(text || "")
+      .split(/[\n,;]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
   }
 
-  function buildStudentBindQrUrl(student) {
-    const key = student?.studentKey || student?.id || "";
-    const token = ensureStudentDeviceBindToken(student);
-    const base = String(global.location?.origin || "https://arabya.net").replace(/\/$/, "");
-    return `${base}/#student-login-view?bind=${encodeURIComponent(key)}&token=${encodeURIComponent(token)}`;
-  }
-
-  function getStudentBindQrImageUrl(student) {
-    const url = buildStudentBindQrUrl(student);
-    return `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(url)}`;
-  }
-
-  function validateStudentDeviceBinding(student, bindTokenInput, deviceProfile) {
-    if (!student || !deviceProfile) return { ok: true };
-    const token = String(bindTokenInput || "").trim();
-    const expected = student.deviceBindToken || "";
-    const boundFp = student.deviceFingerprint || "";
-    const currentFp = deviceProfile.deviceFingerprint || "";
-
-    if (boundFp && currentFp && boundFp === currentFp) return { ok: true };
-    if (!expected) {
-      if (currentFp) student.deviceFingerprint = currentFp;
-      if (deviceProfile.deviceId) student.deviceId = deviceProfile.deviceId;
-      return { ok: true };
-    }
-    if (token && token === expected) {
-      student.deviceFingerprint = currentFp;
-      student.deviceId = deviceProfile.deviceId || "";
-      student.deviceBoundAt = new Date().toISOString();
-      return { ok: true };
-    }
-    if (!boundFp) {
-      return {
-        ok: false,
-        message: "أدخل رمز ربط الجهاز من QR الخاص بك (مرة واحدة) قبل بدء الامتحان."
-      };
-    }
-    return {
-      ok: false,
-      message: "هذا الجهاز غير مطابق لجهازك المسجّل. استخدم جهازك أو اطلب من المعلم إعادة ربط الجهاز."
-    };
+  function ipMatchesAllowedList(clientIp, allowedList) {
+    const ip = String(clientIp || "").trim();
+    if (!ip || !allowedList || !allowedList.length) return false;
+    return allowedList.some(allowed => {
+      const a = String(allowed || "").trim();
+      if (!a) return false;
+      if (ip === a) return true;
+      const prefix = a.split(".").slice(0, 3).join(".");
+      return prefix.length >= 7 && ip.startsWith(prefix + ".");
+    });
   }
 
   function countStudentDevices(studentLookupKey) {
@@ -342,25 +310,32 @@
     return { ok: true };
   }
 
+  function getExamHallAllowedIps(exam) {
+    const hall = exam?.hallMode || {};
+    if (Array.isArray(hall.allowedIps) && hall.allowedIps.length) return hall.allowedIps;
+    if (hall.allowedIp) return [hall.allowedIp];
+    return [];
+  }
+
   function isExamHallIpLockActive(exam) {
     const hall = exam?.hallMode;
     if (!hall || !hall.enabled) return false;
     const until = Date.parse(hall.untilIso || "");
     if (until && Date.now() > until) return false;
-    return !!hall.allowedIp;
+    return getExamHallAllowedIps(exam).length > 0;
   }
 
   function checkExamHallIp(exam, clientIp) {
     if (!isExamHallIpLockActive(exam)) return { ok: true };
-    const allowed = String(exam.hallMode.allowedIp || "").trim();
+    const allowedList = getExamHallAllowedIps(exam);
     const ip = String(clientIp || "").trim();
     if (!ip) {
       return { ok: false, message: "وضع قاعة الامتحان مفعّل — تعذّر التحقق من عنوان IP." };
     }
-    if (ip !== allowed && !ip.startsWith(allowed.split(".").slice(0, 3).join("."))) {
+    if (!ipMatchesAllowedList(ip, allowedList)) {
       return {
         ok: false,
-        message: `الامتحان مقفول على IP القاعة (${allowed}). عنوانك الحالي: ${ip}`
+        message: `الامتحان مقفول على عناوين IP محددة فقط. المسموح: ${allowedList.join(" ، ")} — عنوانك: ${ip}`
       };
     }
     return { ok: true };
@@ -368,28 +343,42 @@
 
   function readHallModeFromEditor() {
     const enabled = !!document.getElementById("edit-meta-hall-mode")?.checked;
-    const allowedIp = document.getElementById("edit-meta-hall-ip")?.value?.trim() || "";
+    const hallIpsEl = document.getElementById("edit-meta-hall-ips");
+    const retakeIpsEl = document.getElementById("edit-meta-allowed-retake-ips");
+    const allowedIps = parseIpLines(hallIpsEl ? hallIpsEl.value : "");
+    const allowedRetakeIps = parseIpLines(retakeIpsEl ? retakeIpsEl.value : "");
     const hours = parseFloat(document.getElementById("edit-meta-hall-hours")?.value) || 2;
     const untilIso = enabled ? new Date(Date.now() + hours * 3600000).toISOString() : "";
-    return { enabled, allowedIp, untilIso, hours };
+    return { enabled, allowedIps, allowedRetakeIps, untilIso, hours };
   }
 
   function applyHallModeToEditor(exam) {
     const hall = exam?.hallMode || {};
+    const retakeIps = exam?.allowedRetakeIps || [];
     const en = document.getElementById("edit-meta-hall-mode");
-    const ip = document.getElementById("edit-meta-hall-ip");
+    const ipsEl = document.getElementById("edit-meta-hall-ips");
+    const retakeEl = document.getElementById("edit-meta-allowed-retake-ips");
     const hrs = document.getElementById("edit-meta-hall-hours");
+    const allowedIps = getExamHallAllowedIps(exam);
     if (en) en.checked = !!hall.enabled;
-    if (ip) ip.value = hall.allowedIp || "";
+    if (ipsEl) ipsEl.value = allowedIps.join("\n");
+    if (retakeEl) retakeEl.value = (retakeIps || []).join("\n");
     if (hrs) hrs.value = hall.hours != null ? hall.hours : 2;
   }
 
   function saveHallModeToExam(exam) {
     if (!exam) return;
     const hall = readHallModeFromEditor();
+    exam.allowedRetakeIps = hall.allowedRetakeIps || [];
     exam.hallMode = hall.enabled
-      ? { enabled: true, allowedIp: hall.allowedIp, untilIso: hall.untilIso, hours: hall.hours }
-      : { enabled: false };
+      ? {
+        enabled: true,
+        allowedIps: hall.allowedIps || [],
+        allowedIp: (hall.allowedIps && hall.allowedIps[0]) || "",
+        untilIso: hall.untilIso,
+        hours: hall.hours
+      }
+      : { enabled: false, allowedIps: [] };
   }
 
   global.ArabyaPlatformSync = {
@@ -406,10 +395,8 @@
     importAllPlatformQuestionBanks,
     getCloudSyncActor,
     logDeviceRejectToCloud,
-    ensureStudentDeviceBindToken,
-    buildStudentBindQrUrl,
-    getStudentBindQrImageUrl,
-    validateStudentDeviceBinding,
+    parseIpLines,
+    ipMatchesAllowedList,
     countStudentDevices,
     checkMaxStudentDevices,
     isExamHallIpLockActive,

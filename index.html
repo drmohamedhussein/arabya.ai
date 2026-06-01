@@ -192,12 +192,8 @@
         <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
           انتقل لبدء الامتحان <span class="material-icons" aria-hidden="true">arrow_back</span>
         </button>
-        <div class="form-group" style="margin-top:0.85rem;">
-          <label class="form-label" for="student-device-bind-token">رمز ربط الجهاز (من QR المعلم — مرة واحدة)</label>
-          <input type="text" id="student-device-bind-token" class="form-control" placeholder="امسح QR أو الصق الرمز هنا" autocomplete="off">
-        </div>
         <p style="margin-top:0.65rem; font-size:0.82rem; color:var(--text-muted); line-height:1.5;">
-          عند الضغط يُتحقَّق من بصمة الجهاز وIP ورمز الربط — يُمنع استخدام نفس الجهاز لطالبين مختلفين (يُسجَّل الرفض في الشيت).
+          عند الضغط يُتحقَّق من بصمة الجهاز وعنوان IP — يُمنع استخدام نفس الجهاز لطالبين مختلفين (يُسجَّل الرفض في الشيت).
         </p>
 
         <div style="text-align: center; margin-top: 1.5rem;">
@@ -775,19 +771,27 @@
                   </div>
                 </div>
                 <div class="exam-builder-card" style="margin-bottom:1rem; border-color:rgba(245,158,11,0.25); background:rgba(245,158,11,0.04); padding:1rem;">
-                  <h4 style="color:var(--accent); font-weight:700; margin:0 0 0.75rem; font-size:0.95rem;">وضع قاعة الامتحان (قفل IP)</h4>
+                  <h4 style="color:var(--accent); font-weight:700; margin:0 0 0.75rem; font-size:0.95rem;">قاعة الامتحان وعناوين IP المسموحة</h4>
                   <label style="display:flex; align-items:center; gap:0.5rem; cursor:pointer; margin-bottom:0.75rem;">
                     <input type="checkbox" id="edit-meta-hall-mode" style="width:1.1rem;height:1.1rem;">
-                    <span>تفعيل قفل IP القاعة للمدة المحددة</span>
+                    <span>تفعيل قفل دخول الامتحان على عناوين IP محددة فقط</span>
                   </label>
-                  <div style="display:grid; grid-template-columns:1fr 120px; gap:0.75rem;">
-                    <div class="form-group" style="margin:0;">
-                      <label class="form-label" for="edit-meta-hall-ip">عنوان IP المسموح</label>
-                      <input type="text" id="edit-meta-hall-ip" class="form-control" placeholder="مثال: 41.32.10.5">
-                    </div>
-                    <div class="form-group" style="margin:0;">
-                      <label class="form-label" for="edit-meta-hall-hours">المدة (ساعات)</label>
-                      <input type="number" id="edit-meta-hall-hours" class="form-control" min="0.5" max="12" step="0.5" value="2">
+                  <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label class="form-label" for="edit-meta-hall-ips">عناوين IP المسموح بها (سطر لكل عنوان)</label>
+                    <textarea id="edit-meta-hall-ips" class="form-control" rows="3" dir="ltr" placeholder="41.32.10.5&#10;41.32.10.6" style="font-family:monospace;font-size:0.85rem;"></textarea>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0.75rem;">
+                    <label class="form-label" for="edit-meta-allowed-retake-ips">IP مسموح بإعادة الدخول يدوياً (سطر لكل عنوان — اختياري)</label>
+                    <textarea id="edit-meta-allowed-retake-ips" class="form-control" rows="2" dir="ltr" placeholder="عناوين إضافية لإعادة المحاولة" style="font-family:monospace;font-size:0.85rem;"></textarea>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0.75rem; max-width:140px;">
+                    <label class="form-label" for="edit-meta-hall-hours">مدة القفل (ساعات)</label>
+                    <input type="number" id="edit-meta-hall-hours" class="form-control" min="0.5" max="12" step="0.5" value="2">
+                  </div>
+                  <div style="font-size:0.85rem;">
+                    <strong style="color:var(--secondary);">قائمة IP الفعّالة لهذا الامتحان:</strong>
+                    <div id="exam-allowed-ips-list" style="margin-top:0.5rem; padding:0.65rem; background:rgba(0,0,0,0.2); border-radius:8px; min-height:2rem;" aria-live="polite">
+                      <span style="color:var(--text-muted);">احفظ الإعدادات أو حرّر IP نتيجة لتحديث القائمة.</span>
                     </div>
                   </div>
                 </div>
@@ -1685,16 +1689,16 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-security.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-toast.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-offline-queue.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-platform-sync.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.2"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.02.2"></script>
-  <script src="app.js?v=2026.06.02.2"></script>
+  <script src="questions.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-security.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-toast.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.3"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.02.3"></script>
+  <script src="app.js?v=2026.06.02.3"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");
