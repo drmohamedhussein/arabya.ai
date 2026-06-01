@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.4";
+const ARABYA_APP_VERSION = "2026.06.01.5";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -672,6 +672,8 @@ document.addEventListener("DOMContentLoaded", () => {
     window.ArabyaSecurity.setupTeacherIdleSessionGuard(window.logoutTeacher);
   }
   window.loadExamDeviceRegistry = loadExamDeviceRegistry;
+  window.getArabyaWebAppUrls = getArabyaWebAppUrls;
+  window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
 
   // ===== تشخيص ما تم تحميله =====
   console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
@@ -2425,6 +2427,9 @@ function refreshCloudSyncStatusUI(liveMessage, state) {
   if (lastLine) {
     const parts = [];
     if (okMeta?.at) parts.push(`<span style="color:var(--success);">آخر مزامنة ناجحة: ${escapeHtml(formatCloudSyncTimestamp(okMeta.at))}</span>`);
+    if (urlConfigured) {
+      parts.push(`<span style="color:var(--text-muted);">جلب تلقائي كل 30 ث · مراقبة تعديل الشيت كل 12 ث</span>`);
+    }
     if (failMeta?.at) parts.push(`<span style="color:var(--error);">آخر فشل: ${escapeHtml(formatCloudSyncTimestamp(failMeta.at))}${failMeta.detail ? ` (${escapeHtml(failMeta.detail)})` : ""}</span>`);
     if (localMeta?.at && !okMeta?.at) parts.push(`<span style="color:var(--warning);">محلي فقط منذ: ${escapeHtml(formatCloudSyncTimestamp(localMeta.at))}</span>`);
     lastLine.innerHTML = parts.join(" · ") || "";
@@ -3028,8 +3033,12 @@ async function syncDatabaseFromCloud(options = {}) {
         if (!silent) {
           refreshTeacherDashboardViews({ all: true });
         }
+        if (response.cloudRevision && window.ArabyaCloudSync) {
+          window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
+        }
         return {
           ok: true,
+          cloudRevision: response.cloudRevision ?? null,
           sheetResultRows: response.sheetResultRows ?? null,
           sheetTotalRows: response.sheetTotalRows ?? null,
           sheetSkippedRows: response.sheetSkippedRows ?? null,
@@ -4503,7 +4512,7 @@ function loadTeacherDashboardData() {
   });
 
   if (window.ArabyaCloudSync) {
-    window.ArabyaCloudSync.startPullLoop(90000);
+    window.ArabyaCloudSync.startPullLoop();
   }
 }
 

@@ -30,10 +30,12 @@
     }
   }
 
-  function saveSharedBanks(banks, username) {
+  function saveSharedBanks(banks, username, options) {
     localStorage.setItem(storageKeyForTeacher(username), JSON.stringify(banks || []));
-    if (typeof global.scheduleCloudBackupPush === "function") {
-      global.scheduleCloudBackupPush("question-bank");
+    if (!options || !options.skipCloudPush) {
+      if (typeof global.scheduleCloudBackupPush === "function") {
+        global.scheduleCloudBackupPush("question-bank");
+      }
     }
   }
 

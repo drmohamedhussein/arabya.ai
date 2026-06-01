@@ -79,6 +79,7 @@ function doPost(e) {
         status: "success",
         action: action,
         counts: countArabya_(merged),
+        cloudRevision: getArabyaCloudRevision_(),
         githubSynced: !merged._githubSyncSkipped
       });
     }
@@ -100,6 +101,14 @@ function doPost(e) {
 function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
+    if (action === "get_sync_meta") {
+      return jsonArabya_({
+        status: "success",
+        cloudRevision: getArabyaCloudRevision_(),
+        service: "ARABYA.NET backend bridge"
+      });
+    }
+
     if (action === "get_backup") {
       var db = readArabyaDatabase_();
       var sheetResults = readArabyaResultsFromSheet_();
@@ -107,9 +116,11 @@ function doGet(e) {
         db.results = mergeArabyaCollection_(db.results || [], sheetResults, "results");
       }
       var resultCount = (db.results || []).length;
+      var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
         status: "success",
         data: db,
+        cloudRevision: cloudRevision,
         counts: countArabya_(db),
         sheetResultRows: sheetResults.length,
         sheetTotalRows: sheetResults.length,
@@ -181,12 +192,14 @@ function upsertArabyaResult_(data) {
     for (var i = 0; i < ids.length; i++) {
       if (String(ids[i][0] || "").trim() === recordId) {
         sheet.getRange(i + 2, 1, 1, rowValues.length).setValues([rowValues]);
+        touchArabyaSyncRevision_("upsert_result");
         return;
       }
     }
   }
 
   sheet.appendRow(rowValues);
+  touchArabyaSyncRevision_("append_result");
 }
 
 function buildArabyaResultRow_(data) {
@@ -295,6 +308,7 @@ function mergeArabyaDatabase_(patch, reason) {
   });
   if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
   writeArabyaBackupSheet_(db);
+  touchArabyaSyncRevision_(reason || "merge_db");
   try {
     writeArabyaDatabaseToGitHub_(db);
   } catch (githubErr) {
@@ -524,6 +538,58 @@ function readArabyaResultsFromSheet_() {
     });
   });
   return out.map(normaliseArabyaResult_);
+}
+
+/**
+ * يُستدعى تلقائياً عند تعديل خلايا الشيت (مشغّل بسيط مرتبط بالجدول).
+ * يحدّث مؤشر التغيير ليجلب الموقع التحديث فوراً عبر get_sync_meta.
+ */
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    var sheetName = e.range.getSheet().getName();
+    if (sheetName === "نتائج الطلاب" || sheetName === "ARABYA_BACKUP" || sheetName === "ARABYA_SYNC") {
+      touchArabyaSyncRevision_("onEdit:" + sheetName);
+    }
+  } catch (err) {}
+}
+
+function touchArabyaSyncRevision_(reason) {
+  var ts = new Date().toISOString();
+  try {
+    PropertiesService.getScriptProperties().setProperty("ARABYA_CLOUD_REVISION", ts);
+  } catch (err) {}
+  try {
+    var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = spreadsheet.getSheetByName("ARABYA_SYNC");
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet("ARABYA_SYNC");
+      try {
+        sheet.hideSheet();
+      } catch (hideErr) {}
+    }
+    sheet.getRange(1, 1, 1, 2).setValues([[ts, String(reason || "")]]);
+  } catch (err2) {}
+  return ts;
+}
+
+function getArabyaCloudRevision_() {
+  try {
+    var prop = PropertiesService.getScriptProperties().getProperty("ARABYA_CLOUD_REVISION");
+    if (prop) return prop;
+  } catch (err) {}
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_SYNC");
+    if (sheet) {
+      var cell = sheet.getRange(1, 1).getValue();
+      if (cell) return String(cell);
+    }
+  } catch (err2) {}
+  try {
+    var db = readArabyaDatabase_();
+    if (db && db.updatedAt) return String(db.updatedAt);
+  } catch (err3) {}
+  return "";
 }
 
 function cloneArabyaDefaultDb_() {

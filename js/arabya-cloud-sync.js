@@ -1,11 +1,20 @@
 /**
- * مزامنة سحابية موحّدة: رفع فوري (مع تأخير قصير) وجلب دوري.
+ * مزامنة سحابية موحّدة: رفع فوري (مع تأخير قصير) وجلب دوري + مراقبة تعديلات الشيت.
  */
 (function (global) {
   const QB_PREFIX = "arabya_question_banks_teacher_";
+  const PULL_INTERVAL_MS = 30000;
+  const WATCH_INTERVAL_MS = 12000;
+  const REVISION_STORAGE_KEY = "arabya_cloud_revision";
+  const MIN_PULL_GAP_MS = 8000;
+
   let pushTimer = null;
   let pushInFlight = false;
   let pendingPush = false;
+  let pullTimer = null;
+  let watchTimer = null;
+  let pullInFlight = false;
+  let lastFullPullAt = 0;
 
   function collectAllQuestionBanksForCloud() {
     const banks = {};
@@ -33,7 +42,7 @@
     Object.keys(cloudBanks).forEach(username => {
       const rows = cloudBanks[username];
       if (Array.isArray(rows) && rows.length) {
-        global.ArabyaQuestionBank.saveSharedBanks(rows, username);
+        global.ArabyaQuestionBank.saveSharedBanks(rows, username, { skipCloudPush: true });
       }
     });
     if (global.systemState?.activeTeacher?.username) {
@@ -71,6 +80,93 @@
       questionBanks: collectAllQuestionBanksForCloud(),
       config: state.config ? { ...state.config, teacherCode: undefined } : {}
     };
+  }
+
+  function getCloudWebAppUrls() {
+    if (typeof global.getArabyaWebAppUrls !== "function") return [];
+    return global.getArabyaWebAppUrls()
+      .map(u => (typeof global.normalizeArabyaWebAppUrl === "function" ? global.normalizeArabyaWebAppUrl(u) : String(u || "").trim()))
+      .filter(Boolean);
+  }
+
+  function getStoredCloudRevision() {
+    try {
+      return localStorage.getItem(REVISION_STORAGE_KEY) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  function setStoredCloudRevision(revision) {
+    if (!revision) return;
+    try {
+      localStorage.setItem(REVISION_STORAGE_KEY, String(revision));
+    } catch (e) {}
+  }
+
+  function rememberCloudRevisionFromResponse(response) {
+    if (response && response.cloudRevision) {
+      setStoredCloudRevision(response.cloudRevision);
+    }
+  }
+
+  async function fetchRemoteCloudRevision() {
+    const urls = getCloudWebAppUrls();
+    for (const rawUrl of urls) {
+      const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_sync_meta";
+      try {
+        const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+        if (!res.ok) continue;
+        const body = await res.json();
+        if (body && body.status === "success" && body.cloudRevision) {
+          return String(body.cloudRevision);
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  function runPullFromCloud(reason) {
+    if (global.systemState?.activeView !== "teacher-dashboard-view") {
+      return Promise.resolve(null);
+    }
+    if (typeof global.syncDatabaseFromCloud !== "function") {
+      return Promise.resolve(null);
+    }
+    const now = Date.now();
+    if (pullInFlight) return Promise.resolve(null);
+    if (now - lastFullPullAt < MIN_PULL_GAP_MS && reason !== "sheet-edit") {
+      return Promise.resolve(null);
+    }
+    pullInFlight = true;
+    return global.syncDatabaseFromCloud({ silent: true })
+      .then(res => {
+        lastFullPullAt = Date.now();
+        if (res && res.cloudRevision) setStoredCloudRevision(res.cloudRevision);
+        if (res && res.ok && typeof global.refreshTeacherDashboardViews === "function") {
+          global.refreshTeacherDashboardViews({ all: true });
+        }
+        return res;
+      })
+      .finally(() => {
+        pullInFlight = false;
+      });
+  }
+
+  async function watchCloudRevision() {
+    if (global.systemState?.activeView !== "teacher-dashboard-view") return;
+    if (!getCloudWebAppUrls().length) return;
+    const remoteRevision = await fetchRemoteCloudRevision();
+    if (!remoteRevision) return;
+    const localRevision = getStoredCloudRevision();
+    if (!localRevision) {
+      setStoredCloudRevision(remoteRevision);
+      return;
+    }
+    if (remoteRevision !== localRevision) {
+      setStoredCloudRevision(remoteRevision);
+      await runPullFromCloud("sheet-edit");
+    }
   }
 
   async function pushNow(reason) {
@@ -112,42 +208,36 @@
     return true;
   }
 
-  let pullTimer = null;
-
   function startPullLoop(intervalMs) {
     stopPullLoop();
-    const ms = intervalMs || 90000;
+    const ms = intervalMs || PULL_INTERVAL_MS;
     pullTimer = setInterval(() => {
-      if (global.systemState?.activeView !== "teacher-dashboard-view") return;
-      if (typeof global.syncDatabaseFromCloud !== "function") return;
-      global.syncDatabaseFromCloud({ silent: true }).then(res => {
-        if (res && res.ok && typeof global.refreshTeacherDashboardViews === "function") {
-          global.refreshTeacherDashboardViews({ all: true });
-        }
-      });
+      runPullFromCloud("interval").catch(() => {});
     }, ms);
+    watchTimer = setInterval(() => {
+      watchCloudRevision().catch(() => {});
+    }, WATCH_INTERVAL_MS);
     document.addEventListener("visibilitychange", onVisibilityPull);
+    watchCloudRevision().catch(() => {});
   }
 
   function stopPullLoop() {
     if (pullTimer) clearInterval(pullTimer);
+    if (watchTimer) clearInterval(watchTimer);
     pullTimer = null;
+    watchTimer = null;
     document.removeEventListener("visibilitychange", onVisibilityPull);
   }
 
   function onVisibilityPull() {
     if (document.visibilityState !== "visible") return;
-    if (global.systemState?.activeView !== "teacher-dashboard-view") return;
-    if (typeof global.syncDatabaseFromCloud === "function") {
-      global.syncDatabaseFromCloud({ silent: true }).then(res => {
-        if (res && res.ok && typeof global.refreshTeacherDashboardViews === "function") {
-          global.refreshTeacherDashboardViews({ all: true });
-        }
-      });
-    }
+    watchCloudRevision().catch(() => {});
+    runPullFromCloud("visibility").catch(() => {});
   }
 
   global.ArabyaCloudSync = {
+    PULL_INTERVAL_MS,
+    WATCH_INTERVAL_MS,
     collectAllQuestionBanksForCloud,
     applyQuestionBanksFromCloud,
     sanitizeTeacherForCloud,
@@ -157,7 +247,11 @@
     pushNow,
     applyRemoteDatabase,
     startPullLoop,
-    stopPullLoop
+    stopPullLoop,
+    fetchRemoteCloudRevision,
+    rememberCloudRevisionFromResponse,
+    setStoredCloudRevision,
+    getStoredCloudRevision
   };
 
   global.buildFullCloudBackupData = buildFullCloudBackupData;
