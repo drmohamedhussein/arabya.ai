@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.22";
+const ARABYA_APP_VERSION = "2026.05.31.23";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -16,6 +16,7 @@ const ARABYA_SUPER_ADMIN_SEEDS = new Set(["TEACHER2026"]);
 
 function inferTeacherRole(teacher) {
   if (!teacher) return ARABYA_ACCOUNT_ROLES.TEACHER;
+  if (teacher.role === ARABYA_ACCOUNT_ROLES.STUDENT) return ARABYA_ACCOUNT_ROLES.STUDENT;
   if (teacher.role === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) return ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
   const username = String(teacher.username || "").trim();
   const password = String(teacher.password || "").trim();
@@ -74,7 +75,57 @@ function canUsePublicTeacherRegistration() {
 }
 
 function getTeacherRoleLabel(teacher) {
-  return isSuperAdminTeacher(teacher) ? "مدير المنصة (سوبر أدمن)" : "حساب معلم";
+  const role = getActiveDashboardAccountRole(teacher);
+  if (role === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) return "مدير المنصة (سوبر أدمن)";
+  if (role === ARABYA_ACCOUNT_ROLES.STUDENT) return "حساب طالب";
+  return "حساب معلم";
+}
+
+function getActiveDashboardAccountRole(account) {
+  const teacher = account || systemState.activeTeacher;
+  if (teacher) {
+    if (teacher.role === ARABYA_ACCOUNT_ROLES.STUDENT || teacher.accountType === ARABYA_ACCOUNT_ROLES.STUDENT) {
+      return ARABYA_ACCOUNT_ROLES.STUDENT;
+    }
+    const inferred = inferTeacherRole(teacher);
+    if (inferred === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) return ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
+    if (inferred === ARABYA_ACCOUNT_ROLES.STUDENT) return ARABYA_ACCOUNT_ROLES.STUDENT;
+    return ARABYA_ACCOUNT_ROLES.TEACHER;
+  }
+  const student = systemState.currentStudent;
+  if (student && (student.name || student.id)) return ARABYA_ACCOUNT_ROLES.STUDENT;
+  return ARABYA_ACCOUNT_ROLES.TEACHER;
+}
+
+function getProfileTabLabelForRole(role) {
+  if (role === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) return "الملف الشخصي للمدير";
+  if (role === ARABYA_ACCOUNT_ROLES.STUDENT) return "الملف الشخصي للطالب";
+  return "الملف الشخصي للمعلم";
+}
+
+function updateTeacherProfileTabLabels() {
+  const role = getActiveDashboardAccountRole();
+  const label = getProfileTabLabelForRole(role);
+  const menuLabel = document.getElementById("teacher-profile-tab-menu-label");
+  if (menuLabel) menuLabel.textContent = label;
+  const menuItem = document.getElementById("teacher-profile-tab-menu-item");
+  if (menuItem) menuItem.setAttribute("aria-label", label);
+  const panelTitle = document.getElementById("teacher-profile-panel-title");
+  if (panelTitle) panelTitle.textContent = label;
+  const panelSubtitle = document.getElementById("teacher-profile-panel-subtitle");
+  if (panelSubtitle) {
+    if (role === ARABYA_ACCOUNT_ROLES.STUDENT) {
+      panelSubtitle.textContent = "بيانات الطالب المسجل والاشتراك في الامتحانات";
+    } else if (role === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) {
+      panelSubtitle.textContent = "بيانات مدير المنصة، المادة التعليمية، ورابط الدخول المباشر";
+    } else {
+      panelSubtitle.textContent = "الملف الشخصي واسم المادة التعليمية المخصصة للطلاب ورابط الدخول المباشر";
+    }
+  }
+  const saveBtnLabel = document.getElementById("save-teacher-profile-btn-label");
+  if (saveBtnLabel) {
+    saveBtnLabel.textContent = role === ARABYA_ACCOUNT_ROLES.STUDENT ? "حفظ بيانات الطالب" : "حفظ الملف الشخصي";
+  }
 }
 
 function updateTeacherAppVersionLabel() {
@@ -96,6 +147,7 @@ function updateTeacherAppVersionLabel() {
 
 function updateTeacherDashboardAccessUI() {
   updateTeacherAppVersionLabel();
+  updateTeacherProfileTabLabels();
   const subtitle = document.getElementById("teacher-sidebar-subtitle");
   if (subtitle && systemState.activeTeacher) {
     subtitle.textContent = `${getTeacherRoleLabel()} · ${systemState.activeTeacher.name || ""}`;

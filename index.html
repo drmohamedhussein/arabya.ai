@@ -502,8 +502,9 @@
             <li class="teacher-menu-item" data-tab="integration" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">sync</span> الربط بـ Google Sheets
             </li>
-            <li class="teacher-menu-item" data-tab="profile" role="tab" aria-selected="false">
-              <span class="material-icons" aria-hidden="true">manage_accounts</span> الملف الشخصي للمعلم
+            <li id="teacher-profile-tab-menu-item" class="teacher-menu-item" data-tab="profile" role="tab" aria-selected="false" aria-label="الملف الشخصي للمعلم">
+              <span class="material-icons" aria-hidden="true">manage_accounts</span>
+              <span id="teacher-profile-tab-menu-label">الملف الشخصي للمعلم</span>
             </li>
             <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" onclick="logoutTeacher();" role="none">
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
@@ -1109,8 +1110,8 @@ function doGet(e) {
           <!-- تبويب الملف الشخصي للمعلم -->
           <div id="teacher-tab-profile" class="teacher-tab-panel hidden" role="tabpanel">
             <div class="panel-header">
-              <div class="panel-title">تعديل البيانات الشخصية</div>
-              <div style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب ورابط الدخول المباشر</div>
+              <div class="panel-title" id="teacher-profile-panel-title">الملف الشخصي للمعلم</div>
+              <div id="teacher-profile-panel-subtitle" style="font-size:0.85rem; color:var(--text-muted);">الملف الشخصي واسم المادة التعليمية المخصصة للطلاب ورابط الدخول المباشر</div>
             </div>
 
             <div class="form-group">
@@ -1138,7 +1139,8 @@ function doGet(e) {
             </div>
 
             <button id="save-teacher-profile-btn" class="btn btn-primary" style="margin-top: 1rem;">
-              <span class="material-icons" aria-hidden="true">save</span> حفظ الملف الشخصي
+              <span class="material-icons" aria-hidden="true">save</span>
+              <span id="save-teacher-profile-btn-label">حفظ الملف الشخصي</span>
             </button>
 
             <!-- رابط الدخول التلقائي لوحة التحكم الخاصة بالمعلم -->
@@ -1197,7 +1199,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.22"></script>
-  <script src="app.js?v=2026.05.31.22"></script>
+  <script src="questions.js?v=2026.05.31.23"></script>
+  <script src="app.js?v=2026.05.31.23"></script>
 </body>
 </html>
