@@ -1487,3 +1487,371 @@ tr:hover td {
 }
 
 .teacher-sortable-th:hover {
+
+/* تجاوب جداول لوحة المعلم — responsive tables */
+.teacher-search-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+}
+
+.teacher-search-row .input-wrapper {
+  flex: 1 1 280px;
+  min-width: min(100%, 280px);
+}
+
+.teacher-pagination-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.teacher-pagination-controls {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.teacher-filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: flex-end;
+  margin-bottom: 1rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  width: 100%;
+  max-width: 100%;
+}
+
+.teacher-filter-toolbar .form-group {
+  margin: 0;
+  flex: 1 1 150px;
+  min-width: min(100%, 150px);
+}
+
+.teacher-filter-toolbar > div:first-child {
+  flex: 1 1 100%;
+  min-width: 100%;
+}
+
+.teacher-filter-toolbar .btn-group-wrap,
+.teacher-filter-toolbar > div:first-child > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.form-grid-auto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 1rem;
+}
+
+.table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+.table-container table {
+  min-width: 720px;
+}
+
+.table-container--compact table {
+  min-width: 560px;
+}
+
+.table-container--wide table {
+  min-width: 880px;
+}
+
+.table-scroll-hint {
+  display: none;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.teacher-accounts-actions,
+.exam-actions-row,
+.teacher-pagination-controls .btn,
+table .btn,
+.teacher-filter-toolbar .btn {
+  width: auto;
+}
+
+.teacher-sortable-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.teacher-sortable-th.is-sorted {
+  color: var(--secondary);
+}
+
+.teacher-sortable-th:hover {
+  color: var(--accent);
+}
+
+#teacher-stats-date-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+@media (max-width: 1100px) {
+  .teacher-grid {
+    grid-template-columns: 260px 1fr;
+    gap: 1.25rem;
+  }
+
+  .teacher-main-panel {
+    padding: 1.75rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .teacher-menu {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    justify-content: flex-start;
+    gap: 0.35rem;
+    padding-bottom: 0.35rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+
+  .teacher-menu-item {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-width: max-content;
+  }
+
+  .form-grid-2,
+  .form-grid-3,
+  .teacher-main-panel div[style*="grid-template-columns"],
+  .exam-builder-card div[style*="grid-template-columns"],
+  .config-card-box div[style*="grid-template-columns"],
+  #teacher-account-editor-panel div[style*="grid-template-columns"],
+  #teacher-stats-date-range {
+    grid-template-columns: 1fr !important;
+  }
+
+  .form-grid-2,
+  .form-grid-3 {
+    display: grid !important;
+  }
+
+  .table-scroll-hint {
+    display: block;
+  }
+
+  .teacher-stats-two-col {
+    grid-template-columns: 1fr;
+  }
+
+  .panel-header-actions {
+    width: 100%;
+  }
+
+  .panel-header-actions .btn {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .teacher-menu-item {
+    min-width: max-content;
+    font-size: 0.8rem;
+    padding: 0.45rem 0.65rem;
+  }
+
+  .teacher-main-panel {
+    padding: 1rem;
+  }
+
+  .teacher-sidebar {
+    padding: 1rem;
+  }
+
+  .panel-header-actions .btn.btn-sm,
+  .teacher-pagination-controls .btn,
+  .teacher-search-row .btn,
+  .teacher-filter-toolbar .btn {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: fit-content;
+  }
+
+  .panel-header-actions > .btn:not(.btn-sm) {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .hero-cta > .btn,
+  .card > .btn.btn-primary {
+    width: 100%;
+  }
+
+  th,
+  td {
+    padding: 0.65rem 0.75rem;
+    font-size: 0.82rem;
+  }
+
+  .teacher-filter-toolbar .form-group {
+    flex: 1 1 100%;
+    min-width: 100%;
+  }
+
+  .teacher-pagination-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .teacher-pagination-controls {
+    justify-content: center;
+  }
+
+  .teacher-pagination-controls .form-control {
+    flex: 1 1 auto;
+    min-width: 4.5rem;
+  }
+
+  .exam-info-card {
+    padding: 1rem;
+  }
+
+  details.config-card-box summary {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 400px) {
+  .table-container table {
+    min-width: 640px;
+  }
+
+  .panel-title {
+    font-size: 1.05rem;
+  }
+}
+
+
+/* تحسين محاذاة أزرار الإجراءات داخل الجداول */
+.teacher-students-actions,
+.teacher-results-actions,
+.teacher-accounts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+
+
+/* حزمة تمرير أفقي للجدول (شريط علوي + جدول) */
+.teacher-table-scroll-stack {
+  width: 100%;
+  max-width: 100%;
+  clear: both;
+  margin: 0.5rem 0 1rem;
+}
+
+.table-hscroll-top {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 16px;
+  margin-bottom: 0.35rem;
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-hscroll-top-inner {
+  height: 1px;
+}
+
+.teacher-table-scroll-stack .table-container {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 10px;
+}
+
+.teacher-table-scroll-stack .table-container table {
+  width: max-content;
+  min-width: 100%;
+  table-layout: auto;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+#teacher-tab-results .teacher-table-scroll-stack table th,
+#teacher-tab-results .teacher-table-scroll-stack table td,
+#teacher-tab-students .teacher-table-scroll-stack table th,
+#teacher-tab-students .teacher-table-scroll-stack table td {
+  white-space: nowrap;
+  vertical-align: middle;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#teacher-tab-results .teacher-table-scroll-stack table td:first-child,
+#teacher-tab-students .teacher-table-scroll-stack table td:first-child {
+  white-space: normal;
+  min-width: 160px;
+  max-width: 240px;
+}
+
+.table-scroll-hint {
+  display: block;
+}
+
+#teacher-results-pagination,
+#teacher-students-pagination {
+  position: relative;
+  z-index: 1;
+  background: rgba(13, 20, 38, 0.98);
+  border-top: 1px solid var(--border-color);
+  padding: 0.75rem 0;
+  margin-top: 0.5rem;
