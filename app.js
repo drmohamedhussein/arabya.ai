@@ -6495,34 +6495,6 @@ function updateRunnerTimerUI() {
   }
 }
 
-function buildExamSubmitSummaryText() {
-  const total = systemState.shuffledQuestions.length;
-  let answered = 0;
-  let estimated = 0;
-  let maxScore = 0;
-  systemState.shuffledQuestions.forEach(q => {
-    const pts = q.points !== undefined ? q.points : 10;
-    maxScore += pts;
-    const ans = systemState.studentAnswers[q.id];
-    if (ans !== undefined && ans !== -1 && ans !== -2) answered++;
-    if (q.type === "essay") return;
-    if (ans === q.correctAnswer) estimated += pts;
-  });
-  const remaining = Math.max(0, total - answered);
-  const minutes = Math.floor((systemState.timer.timeRemaining || 0) / 60);
-  const seconds = (systemState.timer.timeRemaining || 0) % 60;
-  const cheatCount = Number(systemState.cheatViolations) || 0;
-  return (
-    `ملخص قبل التسليم:\n\n` +
-    `• أسئلة مجاب عنها: ${answered} من ${total}` +
-    (remaining ? ` (متبقي ${remaining} بدون إجابة)` : "") +
-    `\n• الوقت المتبقي تقريباً: ${minutes}:${String(seconds).padStart(2, "0")}` +
-    `\n• درجة تقديرية (موضوعي فقط): ${estimated} من ${maxScore}` +
-    (cheatCount ? `\n• مخالفات غش مسجلة: ${cheatCount}` : "") +
-    `\n\nهل تريد تسليم الامتحان نهائياً؟`
-  );
-}
-
 function announceExamAccessibility(message) {
   const live = document.getElementById("runner-voice-announcement");
   if (live) {
