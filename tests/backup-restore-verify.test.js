@@ -43,3 +43,10 @@ const restored = merged.find(e => e.id === "arabic_grammar");
 assert.strictEqual(restored.questions.length, grammar.questions.length);
 
 console.log("Backup restore verify OK:", grammar.title, "→", restored.questions.length, "questions");
+
+function isLikelyDefaultGrammarExam(exam) {
+  const qs = exam.questions || [];
+  if (qs.length !== 10) return false;
+  return String(qs[0]?.question || "").includes("الفعل المرفوع");
+}
+assert.strictEqual(isLikelyDefaultGrammarExam(grammar), true, "bundled file is default 10-question template");
