@@ -808,7 +808,8 @@ body {
 }
 
 table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   text-align: right;
   font-size: 0.9rem;
@@ -1766,4 +1767,16 @@ table .btn,
   .panel-title {
     font-size: 1.05rem;
   }
+}
+
+
+/* تحسين محاذاة أزرار الإجراءات داخل الجداول */
+.teacher-students-actions,
+.teacher-results-actions,
+.teacher-accounts-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
+  justify-content: flex-start;
 }

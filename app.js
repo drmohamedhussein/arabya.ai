@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.32";
+const ARABYA_APP_VERSION = "2026.05.31.33";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -6857,6 +6857,13 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
   const sizeSelect = document.getElementById("teacher-results-page-size");
+
+  const infoBottom = document.getElementById("teacher-results-page-info-bottom");
+  const pageNumBottom = document.getElementById("teacher-results-page-number-bottom");
+  const prevBtnBottom = document.getElementById("teacher-results-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-results-next-page-bottom");
+  const sizeSelectBottom = document.getElementById("teacher-results-page-size-bottom");
+
   const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
@@ -6911,8 +6918,11 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
 
 function setupResultsTablePaginationControls() {
   const sizeSelect = document.getElementById("teacher-results-page-size");
+  const sizeSelectBottom = document.getElementById("teacher-results-page-size-bottom");
   const prevBtn = document.getElementById("teacher-results-prev-page");
   const nextBtn = document.getElementById("teacher-results-next-page");
+  const prevBtnBottom = document.getElementById("teacher-results-prev-page-bottom");
+  const nextBtnBottom = document.getElementById("teacher-results-next-page-bottom");
 
   if (sizeSelect && !sizeSelect.dataset.bound) {
     sizeSelect.dataset.bound = "1";

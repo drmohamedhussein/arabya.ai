@@ -909,6 +909,29 @@
               </table>
             </div>
 
+            <!-- شريط تحكم إضافي أسفل جدول النتائج لضمان ظهوره على كل الشاشات -->
+            <div id="teacher-results-pagination" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem; margin-top:1rem; padding:0.75rem 0; border-top:1px solid var(--border-color);">
+              <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <span style="font-size:0.85rem; color:var(--text-muted);">عرض</span>
+                <select id="teacher-results-page-size-bottom" class="form-control" style="width:auto; min-width:5.5rem; padding:0.35rem 0.75rem;" aria-label="عدد النتائج في الصفحة">
+                  <option value="25">25</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="500">500</option>
+                  <option value="0">الكل</option>
+                </select>
+                <span style="font-size:0.85rem; color:var(--text-muted);">سجل في الصفحة</span>
+              </div>
+              <div id="teacher-results-page-info-bottom" style="font-size:0.85rem; color:var(--text-muted);"></div>
+              <div style="display:flex; gap:0.5rem; align-items:center;">
+                <button type="button" id="teacher-results-prev-page-bottom" class="btn btn-outline btn-sm">السابق</button>
+                <span id="teacher-results-page-number-bottom" style="font-size:0.85rem; color:var(--text-muted); min-width:4rem; text-align:center;"></span>
+                <button type="button" id="teacher-results-next-page-bottom" class="btn btn-outline btn-sm">التالي</button>
+              </div>
+            </div>
+
+
             <!-- لوحة تفاصيل وتعديل إجابات ونتيجة الطالب الفردية -->
             <div id="teacher-result-detail-panel" class="exam-builder-card hidden" style="margin-top: 2rem; border-color: var(--secondary);">
               <div class="panel-header" style="border-bottom: 1px solid var(--border-color); padding-bottom: 1rem; margin-bottom: 1.5rem;">
@@ -1538,7 +1561,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.32"></script>
-  <script src="app.js?v=2026.05.31.32"></script>
+  <script src="questions.js?v=2026.05.31.33"></script>
+  <script src="app.js?v=2026.05.31.33"></script>
 </body>
 </html>
