@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.3";
+const ARABYA_APP_VERSION = "2026.06.02.5";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2752,9 +2752,10 @@ function hydrateStudentsFromResults(results) {
   ensureStudentsDataShape();
 }
 
-function mergeRemoteDatabaseIntoLocal(remoteData) {
+function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   if (!remoteData || typeof remoteData !== "object") return false;
-  if (Array.isArray(remoteData.teachers)) {
+  const examStartOnly = mergeOptions.scope === "exam_start";
+  if (!examStartOnly && Array.isArray(remoteData.teachers)) {
     systemState.teachers = mergeTeachersPreservingLocalAuth_(systemState.teachers, remoteData.teachers);
     if (systemState.activeTeacher) {
       const refreshedTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username);
@@ -2767,11 +2768,13 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
   if (Array.isArray(remoteData.deletedStudentKeys)) {
     mergeDeletedStudentKeysFromRemote(remoteData.deletedStudentKeys);
   }
-  if (Array.isArray(remoteData.students)) {
-    const mergedStudents = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
-    systemState.students = filterOutDeletedStudents(mergedStudents);
-  } else {
-    systemState.students = filterOutDeletedStudents(systemState.students);
+  if (!examStartOnly) {
+    if (Array.isArray(remoteData.students)) {
+      const mergedStudents = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
+      systemState.students = filterOutDeletedStudents(mergedStudents);
+    } else {
+      systemState.students = filterOutDeletedStudents(systemState.students);
+    }
   }
   if (Array.isArray(remoteData.exams)) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
@@ -2782,13 +2785,18 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
       return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
     }, "نتيجة");
   }
-  hydrateStudentsFromResults(systemState.results);
-  ensureResultRecordIds();
-  hydratePresentedQuestionsForResults();
+  if (!examStartOnly) {
+    hydrateStudentsFromResults(systemState.results);
+    systemState.students = filterOutDeletedStudents(systemState.students);
+    ensureResultRecordIds();
+    hydratePresentedQuestionsForResults();
+  } else {
+    ensureResultRecordIds();
+  }
   if (remoteData.examDeviceRegistry) {
     saveExamDeviceRegistry(mergeRemoteExamDeviceRegistry_(loadExamDeviceRegistry(), remoteData.examDeviceRegistry));
   }
-  if (remoteData.questionBanks && typeof remoteData.questionBanks === "object" && window.ArabyaCloudSync) {
+  if (!examStartOnly && remoteData.questionBanks && typeof remoteData.questionBanks === "object" && window.ArabyaCloudSync) {
     const banks = window.ArabyaCloudSync.normalizeCloudQuestionBanks
       ? window.ArabyaCloudSync.normalizeCloudQuestionBanks(remoteData.questionBanks)
       : remoteData.questionBanks;
@@ -3121,8 +3129,178 @@ window.pullTeacherResultsFromCloud = async function() {
   return syncResult.ok;
 };
 
+const PRE_EXAM_SYNC_ESTIMATE_KEY = "arabya_pre_exam_sync_estimate_ms";
+const PRE_EXAM_SYNC_AT_KEY = "arabya_pre_exam_sync_at";
+const DEFAULT_PRE_EXAM_SYNC_MS = 6000;
+const MIN_PRE_EXAM_SYNC_MS = 3000;
+const MAX_PRE_EXAM_SYNC_MS = 15000;
+const PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS = 25000;
+let studentExamGatePrefetchPromise = null;
+
+function getPreExamSyncEstimateMs() {
+  try {
+    const stored = parseInt(localStorage.getItem(PRE_EXAM_SYNC_ESTIMATE_KEY) || "", 10);
+    if (Number.isFinite(stored) && stored >= MIN_PRE_EXAM_SYNC_MS) {
+      return Math.min(MAX_PRE_EXAM_SYNC_MS, stored);
+    }
+  } catch (e) {}
+  return DEFAULT_PRE_EXAM_SYNC_MS;
+}
+
+function recordPreExamSyncDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+  const prev = getPreExamSyncEstimateMs();
+  const blended = Math.round(prev * 0.65 + durationMs * 0.35);
+  const clamped = Math.max(MIN_PRE_EXAM_SYNC_MS, Math.min(MAX_PRE_EXAM_SYNC_MS, blended));
+  try {
+    localStorage.setItem(PRE_EXAM_SYNC_ESTIMATE_KEY, String(clamped));
+    localStorage.setItem(PRE_EXAM_SYNC_AT_KEY, String(Date.now()));
+  } catch (e) {}
+}
+
+async function fetchCloudBackupResponse_(timeoutMs) {
+  const urlList = getArabyaWebAppUrls();
+  for (const rawUrl of urlList) {
+    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller && timeoutMs > 0
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+    try {
+      const res = await fetch(fetchUrl, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: controller ? controller.signal : undefined
+      });
+      if (!res.ok) continue;
+      const response = await res.json();
+      if (response && response.status === "success" && response.data) {
+        return response;
+      }
+    } catch (err) {
+      if (err && err.name === "AbortError") {
+        console.warn("[ARABYA] cloud backup fetch timed out", timeoutMs, "ms");
+      } else {
+        console.warn("fetchCloudBackupResponse_ failed for", fetchUrl, err);
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
+function prefetchStudentExamGateData() {
+  if (getArabyaWebAppUrls().length === 0) return;
+  try {
+    const lastAt = parseInt(localStorage.getItem(PRE_EXAM_SYNC_AT_KEY) || "0", 10);
+    if (Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS) return;
+  } catch (e) {}
+  if (studentExamGatePrefetchPromise) return;
+  const started = performance.now();
+  studentExamGatePrefetchPromise = syncDatabaseFromCloud({
+    silent: true,
+    scope: "exam_start",
+    timeoutMs: 8000
+  }).then(result => {
+    recordPreExamSyncDuration(performance.now() - started);
+    return result;
+  }).finally(() => {
+    studentExamGatePrefetchPromise = null;
+  });
+}
+
+function getStudentExamPrepareOverlay() {
+  return document.getElementById("student-exam-prepare-overlay");
+}
+
+function showStudentExamPrepareOverlay(estimatedMs) {
+  const overlay = getStudentExamPrepareOverlay();
+  if (!overlay) return { close() {} };
+  const countdownEl = document.getElementById("student-exam-prepare-countdown");
+  const messageEl = document.getElementById("student-exam-prepare-message");
+  const progressEl = document.getElementById("student-exam-prepare-progress-bar");
+  const totalMs = Math.max(MIN_PRE_EXAM_SYNC_MS, estimatedMs || DEFAULT_PRE_EXAM_SYNC_MS);
+  const initialSecs = Math.max(1, Math.ceil(totalMs / 1000));
+  if (countdownEl) countdownEl.textContent = String(initialSecs);
+  if (messageEl) {
+    messageEl.textContent = "مزامنة سريعة مع السحابة للتحقق من محاولاتك السابقة وإعدادات الامتحان...";
+  }
+  if (progressEl) progressEl.style.width = "0%";
+  overlay.classList.remove("hidden");
+  overlay.setAttribute("aria-hidden", "false");
+  return {
+    update(remainingSeconds, progressPercent, message) {
+      if (countdownEl) countdownEl.textContent = String(Math.max(0, remainingSeconds));
+      if (progressEl && Number.isFinite(progressPercent)) {
+        progressEl.style.width = `${Math.min(100, Math.max(0, progressPercent))}%`;
+      }
+      if (message && messageEl) messageEl.textContent = message;
+    },
+    close() {
+      overlay.classList.add("hidden");
+      overlay.setAttribute("aria-hidden", "true");
+    }
+  };
+}
+
+function waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs) {
+  const totalMs = Math.max(MIN_PRE_EXAM_SYNC_MS, estimateMs || DEFAULT_PRE_EXAM_SYNC_MS);
+  const startedAt = performance.now();
+  let syncFinished = false;
+  let syncOk = false;
+  syncPromise.then(result => {
+    syncFinished = true;
+    syncOk = !!(result && result.ok);
+  }).catch(() => {
+    syncFinished = true;
+    syncOk = false;
+  });
+
+  return new Promise(resolve => {
+    const tick = () => {
+      const elapsed = performance.now() - startedAt;
+      let remainingMs = Math.max(0, totalMs - elapsed);
+      if (syncFinished && remainingMs > 1200) {
+        remainingMs = Math.max(0, remainingMs - 900);
+      }
+      const remainingSecs = Math.ceil(remainingMs / 1000);
+      const progress = Math.min(100, (elapsed / totalMs) * 100);
+      overlay.update(
+        remainingSecs,
+        progress,
+        syncFinished && remainingSecs <= 1
+          ? "اكتملت المزامنة — جاري فتح الامتحان..."
+          : remainingSecs <= 0 && !syncFinished
+            ? "جاري إنهاء المزامنة..."
+            : undefined
+      );
+
+      if (remainingSecs <= 0) {
+        const finalize = () => {
+          overlay.close();
+          resolve(syncOk);
+        };
+        if (syncFinished) {
+          finalize();
+          return;
+        }
+        Promise.race([
+          syncPromise,
+          new Promise(r => setTimeout(() => r({ ok: false }), 1200))
+        ]).finally(finalize);
+        return;
+      }
+      setTimeout(tick, syncFinished ? 280 : 1000);
+    };
+    tick();
+  });
+}
+
 async function syncDatabaseFromCloud(options = {}) {
   const silent = !!options.silent;
+  const scope = options.scope || "full";
+  const timeoutMs = options.timeoutMs > 0 ? options.timeoutMs : 0;
   const urlList = getArabyaWebAppUrls();
   if (urlList.length === 0) {
     markCloudSyncLocalOnly("لا يوجد رابط Web App");
@@ -3130,34 +3308,45 @@ async function syncDatabaseFromCloud(options = {}) {
   }
   if (!silent) refreshCloudSyncStatusUI("جاري جلب البيانات من Google Sheets...", "syncing");
 
-  for (const rawUrl of urlList) {
-    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
-    try {
-      const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
-      if (!res.ok) continue;
-      const response = await res.json();
-      if (response && response.status === "success" && response.data) {
-        mergeRemoteDatabaseIntoLocal(response.data);
-        saveSystemState(false);
-        recordCloudSyncOutcome(true, "جلب من السحابة");
-        if (!silent) {
-          refreshTeacherDashboardViews({ all: true });
+  const response = timeoutMs > 0
+    ? await fetchCloudBackupResponse_(timeoutMs)
+    : await (async () => {
+      for (const rawUrl of urlList) {
+        const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+        try {
+          const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+          if (!res.ok) continue;
+          const json = await res.json();
+          if (json && json.status === "success" && json.data) return json;
+        } catch (err) {
+          console.warn("syncDatabaseFromCloud failed for", fetchUrl, err);
         }
-        if (response.cloudRevision && window.ArabyaCloudSync) {
-          window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
-        }
-        return {
-          ok: true,
-          cloudRevision: response.cloudRevision ?? null,
-          sheetResultRows: response.sheetResultRows ?? null,
-          sheetTotalRows: response.sheetTotalRows ?? null,
-          sheetSkippedRows: response.sheetSkippedRows ?? null,
-          backupResultRows: response.backupResultRows ?? null,
-          totalResults: systemState.results.length
-        };
       }
+      return null;
+    })();
+
+  if (response && response.data) {
+    try {
+      mergeRemoteDatabaseIntoLocal(response.data, scope === "exam_start" ? { scope: "exam_start" } : {});
+      saveSystemState(false);
+      recordCloudSyncOutcome(true, "جلب من السحابة");
+      if (!silent) {
+        refreshTeacherDashboardViews({ all: true });
+      }
+      if (response.cloudRevision && window.ArabyaCloudSync) {
+        window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
+      }
+      return {
+        ok: true,
+        cloudRevision: response.cloudRevision ?? null,
+        sheetResultRows: response.sheetResultRows ?? null,
+        sheetTotalRows: response.sheetTotalRows ?? null,
+        sheetSkippedRows: response.sheetSkippedRows ?? null,
+        backupResultRows: response.backupResultRows ?? null,
+        totalResults: systemState.results.length
+      };
     } catch (err) {
-      console.warn("syncDatabaseFromCloud failed for", fetchUrl, err);
+      console.warn("syncDatabaseFromCloud merge failed:", err);
     }
   }
   recordCloudSyncOutcome(false, "تعذّر الجلب من السحابة");
@@ -3665,6 +3854,7 @@ function navigateToView(viewId) {
 
   if (viewId === "student-login-view") {
     populateExamSelectionList();
+    prefetchStudentExamGateData();
   } else if (viewId === "teacher-login-view") {
     const pendingSyncUrl = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
     const syncInput = document.getElementById("teacher-login-sync-url");
@@ -5848,14 +6038,8 @@ function populateExamSelectionList() {
 
 async function validateStudentAndStart() {
   reloadSystemStateFromLocalStorage();
-  if (getArabyaWebAppUrls().length > 0) {
-    try {
-      await syncDatabaseFromCloud({ silent: true });
-    } catch (cloudErr) {
-      console.warn("[ARABYA] pre-exam cloud sync failed:", cloudErr);
-    }
-    reloadSystemStateFromLocalStorage();
-  }
+  const startBtn = document.getElementById("student-start-exam-btn");
+  const prevBtnText = startBtn ? startBtn.innerHTML : "";
 
   const name = document.getElementById("student-fullname-input").value.trim();
   const id = document.getElementById("student-id-input").value.trim();
@@ -5880,7 +6064,7 @@ async function validateStudentAndStart() {
     return;
   }
 
-  const selectedExam = systemState.exams.find(e => e.id === examId);
+  let selectedExam = systemState.exams.find(e => e.id === examId);
   if (!selectedExam) {
     alert("الامتحان المختار غير متوفر!");
     return;
@@ -5945,8 +6129,66 @@ async function validateStudentAndStart() {
     if (!retakeConfirm) return;
   }
 
-  const startBtn = document.getElementById("student-start-exam-btn");
-  const prevBtnText = startBtn ? startBtn.innerHTML : "";
+  if (getArabyaWebAppUrls().length > 0) {
+    if (startBtn) {
+      startBtn.disabled = true;
+      startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري التجهيز...`;
+    }
+    const estimateMs = getPreExamSyncEstimateMs();
+    const overlay = showStudentExamPrepareOverlay(estimateMs);
+    const syncStarted = performance.now();
+    const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
+      silent: true,
+      scope: "exam_start",
+      timeoutMs: 8000
+    });
+    try {
+      await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
+    } catch (prepErr) {
+      console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
+      overlay.close();
+    }
+    recordPreExamSyncDuration(performance.now() - syncStarted);
+    studentExamGatePrefetchPromise = null;
+    reloadSystemStateFromLocalStorage();
+
+    selectedExam = systemState.exams.find(e => e.id === examId);
+    if (!selectedExam) {
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = prevBtnText;
+      }
+      alert("الامتحان المختار غير متوفر بعد المزامنة!");
+      return;
+    }
+    sanitizeQuestionConfig(selectedExam);
+    if (selectedExam.questions.length === 0) {
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = prevBtnText;
+      }
+      alert("عذراً، هذا الامتحان لا يحتوي على أي أسئلة مضافة بعد!");
+      return;
+    }
+    if (isExamPastDeadline(selectedExam)) {
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = prevBtnText;
+      }
+      alert(getExamDeadlineBlockMessage(selectedExam));
+      return;
+    }
+    const blockingAfterSync = findBlockingExamResult(studentLookupKey, examId, studentMatchContext);
+    if (blockingAfterSync) {
+      if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.innerHTML = prevBtnText;
+      }
+      alert(getExamBlockingMessage(blockingAfterSync));
+      return;
+    }
+  }
+
   if (startBtn) {
     startBtn.disabled = true;
     startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">hourglass_top</span> جاري التحقق من الجهاز...`;

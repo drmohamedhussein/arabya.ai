@@ -1542,4 +1542,54 @@ tr:hover td {
   margin-bottom: 0.2rem;
 }
 
+.student-exam-prepare-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.25rem;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(6px);
+}
+
+.student-exam-prepare-overlay.hidden {
+  display: none !important;
+}
+
+.student-exam-prepare-card {
+  width: min(420px, 100%);
+  text-align: center;
+  padding: 1.75rem 1.5rem;
+  border-radius: var(--border-radius);
+  border: 1px solid rgba(20, 184, 166, 0.35);
+  background: linear-gradient(145deg, rgba(13, 20, 38, 0.95), rgba(23, 37, 72, 0.92));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.student-exam-prepare-countdown {
+  font-size: 3.25rem;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--accent);
+  text-shadow: 0 0 24px var(--accent-glow);
+}
+
+.student-exam-prepare-progress {
+  margin-top: 1.25rem;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.student-exam-prepare-progress-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--secondary), var(--accent));
+  transition: width 0.35s ease;
+}
+
 .teacher-sortable-th:hover {
