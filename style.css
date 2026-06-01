@@ -47,6 +47,30 @@ input, textarea, select, [contenteditable="true"] {
   -webkit-user-select: text !important;
 }
 
+/* تمكين اختيار النصوص العربية في الصفحات التعليمية (ما عدا واجهة الامتحان النشط) */
+.view-section p,
+.view-section h1,
+.view-section h2,
+.view-section h3,
+.view-section h4,
+.view-section li,
+.view-section label,
+.hero-desc,
+.service-card-desc,
+.footer-desc,
+.card-title,
+.card-header,
+.panel-title {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+#exam-runner-view.view-section,
+#exam-runner-view.view-section *:not(input):not(textarea):not(select):not([contenteditable="true"]) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 body {
   background-color: var(--bg-dark);
   background-image: 
@@ -1053,6 +1077,53 @@ tr:hover td {
   
   .teacher-sidebar {
     padding: 1.25rem;
+    min-height: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .teacher-app-version-label {
+    margin-top: 1rem;
+    width: 100%;
+    flex-shrink: 0;
+  }
+
+  .teacher-main-panel {
+    padding: 1.5rem;
+  }
+
+  .panel-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .exam-runner-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .table-container {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .nav-container {
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .nav-links {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .main-content {
+    padding: 1.5rem 1rem 4rem;
+  }
+
+  .services-grid {
+    grid-template-columns: 1fr;
   }
   
   .teacher-menu {
@@ -1093,6 +1164,32 @@ tr:hover td {
 }
 
 @media (max-width: 600px) {
+  .logo {
+    font-size: 1.25rem;
+  }
+
+  .logo-img-tag {
+    width: 30px;
+    height: 30px;
+  }
+
+  .teacher-main-panel {
+    padding: 1.15rem;
+  }
+
+  .teacher-app-version-label {
+    font-size: 0.72rem;
+  }
+
+  .panel-title {
+    font-size: 1.2rem;
+  }
+
+  .exam-direct-link-box {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .hero-title {
     font-size: 2rem;
   }

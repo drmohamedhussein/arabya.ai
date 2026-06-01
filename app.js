@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.21";
+const ARABYA_APP_VERSION = "2026.05.31.22";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -92,8 +92,6 @@ function updateTeacherAppVersionLabel() {
   }
   const label = `إصدار التطبيق: ${ARABYA_APP_VERSION}`;
   if (versionEl) versionEl.textContent = label;
-  const headerBadge = document.getElementById("teacher-dashboard-version-badge");
-  if (headerBadge) headerBadge.textContent = ARABYA_APP_VERSION;
 }
 
 function updateTeacherDashboardAccessUI() {
