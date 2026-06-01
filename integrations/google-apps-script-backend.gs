@@ -21,6 +21,7 @@ var ARABYA_DEFAULT_DB = {
   examDeviceRegistry: { bindings: [] },
   questionBanks: {},
   deletedStudentKeys: [],
+  deletedResultKeys: [],
   auditLog: []
 };
 
@@ -134,10 +135,8 @@ function doGet(e) {
 
     if (action === "get_backup") {
       var db = readArabyaDatabase_();
-      var sheetResults = readArabyaResultsFromSheet_();
-      if (sheetResults.length) {
-        db.results = mergeArabyaCollection_(db.results || [], sheetResults, "results");
-      }
+      var sheetRowCount = readArabyaResultsFromSheet_().length;
+      db.results = buildArabyaResultsForClient_(db);
       var resultCount = (db.results || []).length;
       var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
@@ -145,8 +144,8 @@ function doGet(e) {
         data: db,
         cloudRevision: cloudRevision,
         counts: countArabya_(db),
-        sheetResultRows: sheetResults.length,
-        sheetTotalRows: sheetResults.length,
+        sheetResultRows: resultCount,
+        sheetTotalRows: sheetRowCount,
         backupResultRows: resultCount
       });
     }
@@ -239,6 +238,12 @@ function deleteArabyaResultFromSheet_(data) {
 
 function applyDeleteResultToDatabase_(data) {
   var db = readArabyaDatabase_();
+  if (!Array.isArray(db.deletedResultKeys)) db.deletedResultKeys = [];
+  var tombstones = [data.recordId || ""];
+  if (data.id && data.examId) {
+    tombstones.push("legacy:" + [data.id, data.examId, data.timestamp || ""].join(":"));
+  }
+  db.deletedResultKeys = unionArabyaDeletedResultKeys_(db.deletedResultKeys, tombstones);
   var recordId = String(data.recordId || "").trim();
   var targetId = String(data.id || "").trim().toUpperCase();
   var targetExamId = String(data.examId || "").trim();
@@ -255,6 +260,7 @@ function applyDeleteResultToDatabase_(data) {
     }
     return true;
   });
+  db.results = filterArabyaResultsByDeletedKeys_(db.results, db.deletedResultKeys);
   db.updatedAt = new Date().toISOString();
   writeArabyaBackupSheet_(db);
   touchArabyaSyncRevision_("delete_result_db");
@@ -373,13 +379,21 @@ function mergeArabyaExamDeviceRegistry_(localRegistry, incomingRegistry) {
 function mergeArabyaDatabase_(patch, reason, actor) {
   var db = readArabyaDatabase_();
   if (!Array.isArray(db.deletedStudentKeys)) db.deletedStudentKeys = [];
+  if (!Array.isArray(db.deletedResultKeys)) db.deletedResultKeys = [];
   if (Array.isArray(patch.deletedStudentKeys)) {
     db.deletedStudentKeys = unionArabyaDeletedStudentKeys_(db.deletedStudentKeys, patch.deletedStudentKeys);
+  }
+  if (Array.isArray(patch.deletedResultKeys)) {
+    db.deletedResultKeys = unionArabyaDeletedResultKeys_(db.deletedResultKeys, patch.deletedResultKeys);
   }
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
     if (!Array.isArray(patch[collection])) return;
     if (reason === "save_backup" && collection === "students") {
       db.students = patch.students.map(function(item) {
+        return JSON.parse(JSON.stringify(item || {}));
+      });
+    } else if (reason === "save_backup" && collection === "results") {
+      db.results = patch.results.map(function(item) {
         return JSON.parse(JSON.stringify(item || {}));
       });
     } else {
@@ -388,6 +402,9 @@ function mergeArabyaDatabase_(patch, reason, actor) {
   });
   if (db.deletedStudentKeys.length) {
     db.students = filterArabyaStudentsByDeletedKeys_(db.students || [], db.deletedStudentKeys);
+  }
+  if (db.deletedResultKeys.length) {
+    db.results = filterArabyaResultsByDeletedKeys_(db.results || [], db.deletedResultKeys);
   }
   if (patch.examDeviceRegistry) {
     db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, patch.examDeviceRegistry);
@@ -424,6 +441,55 @@ function unionArabyaDeletedStudentKeys_(current, incoming) {
     if (key) set[String(key)] = true;
   });
   return Object.keys(set);
+}
+
+function unionArabyaDeletedResultKeys_(current, incoming) {
+  return unionArabyaDeletedStudentKeys_(current, incoming);
+}
+
+function buildArabyaResultTombstoneSet_(deletedKeys) {
+  var set = {};
+  (deletedKeys || []).forEach(function(key) {
+    if (key) set[String(key)] = true;
+  });
+  return set;
+}
+
+function getArabyaResultTombstoneKey_(result) {
+  if (!result) return "";
+  var recordId = String(result.recordId || "").trim();
+  if (recordId) return recordId;
+  return "legacy:" + [result.id || "", result.examId || result.examTitle || "", result.timestamp || ""].join(":");
+}
+
+function isArabyaResultDeleted_(result, deletedKeys) {
+  if (!result || !deletedKeys || !deletedKeys.length) return false;
+  var set = buildArabyaResultTombstoneSet_(deletedKeys);
+  if (set[getArabyaResultTombstoneKey_(result)]) return true;
+  var recordId = String(result.recordId || "").trim();
+  return !!(recordId && set[recordId]);
+}
+
+function filterArabyaResultsByDeletedKeys_(results, deletedKeys) {
+  return (results || []).filter(function(result) {
+    return !isArabyaResultDeleted_(result, deletedKeys);
+  });
+}
+
+/** نتائج للعميل: ورقة الشيت مصدر الحقيقة — لا تُعاد صفوف محذوفة من JSON القديم */
+function buildArabyaResultsForClient_(db) {
+  var deletedKeys = db.deletedResultKeys || [];
+  var sheetResults = readArabyaResultsFromSheet_();
+  if (sheetResults.length > 0) {
+    var map = {};
+    sheetResults.forEach(function(result) {
+      if (isArabyaResultDeleted_(result, deletedKeys)) return;
+      var key = getArabyaRecordKey_(result, "results");
+      map[key] = result;
+    });
+    return Object.keys(map).map(function(key) { return map[key]; });
+  }
+  return filterArabyaResultsByDeletedKeys_(db.results || [], deletedKeys);
 }
 
 function normalizeArabyaStudentId_(studentId) {

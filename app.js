@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.7";
+const ARABYA_APP_VERSION = "2026.06.02.8";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -607,6 +607,8 @@ let systemState = {
   students: [],
   /** مفاتيح طلاب محذوفين — لا يُعاد إنشاؤهم من النتائج أو السحابة */
   deletedStudentKeys: [],
+  /** معرفات نتائج محذوفة — لا تُعاد من السحابة أو ورقة الشيت */
+  deletedResultKeys: [],
   
   // حالة الطالب والاختبار الحالي
   currentStudent: {
@@ -944,7 +946,9 @@ function initDatabase() {
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
   loadDeletedStudentKeysFromStorage();
+  loadDeletedResultKeysFromStorage();
   systemState.students = filterOutDeletedStudents(systemState.students);
+  systemState.results = filterOutDeletedResults(systemState.results);
 }
 
 // حفظ قاعدة بيانات المعلمين محلياً (دون مزامنة سحابية)
@@ -990,9 +994,7 @@ function saveStudentsToLocalStorage() {
 // دالة موحدة لحفظ حالة النظام بالكامل ومزامنتها سحابياً
 function saveSystemState(syncToCloud = true) {
   try {
-    loadDeletedStudentKeysFromStorage();
-    systemState.students = filterOutDeletedStudents(systemState.students);
-    persistDeletedStudentKeys();
+    applyDeletionTombstonesToLocalState();
     if (Array.isArray(systemState.teachers)) {
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     }
@@ -2605,7 +2607,10 @@ function reloadSystemStateFromLocalStorage() {
     const results = localStorage.getItem("arabya_results_db");
     if (results) systemState.results = JSON.parse(results);
   } catch (e) { console.error("reloadSystemStateFromLocalStorage: results", e); }
+  loadDeletedStudentKeysFromStorage();
+  loadDeletedResultKeysFromStorage();
   ensureResultRecordIds();
+  applyDeletionTombstonesToLocalState();
   ensureStudentsDataShape();
   ensureExamsDataShape();
 }
@@ -2768,12 +2773,94 @@ function mergeDeletedStudentKeysFromRemote(remoteKeys) {
   persistDeletedStudentKeys();
 }
 
+const DELETED_RESULT_KEYS_STORAGE = "arabya_deleted_result_keys";
+
+function getResultTombstoneKey(res) {
+  if (!res) return "";
+  if (res.recordId) return String(res.recordId);
+  return `legacy:${[res.id || "", res.examId || res.examTitle || "", res.timestamp || ""].join(":")}`;
+}
+
+function loadDeletedResultKeysFromStorage() {
+  if (!Array.isArray(systemState.deletedResultKeys)) systemState.deletedResultKeys = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(DELETED_RESULT_KEYS_STORAGE) || "[]");
+    if (Array.isArray(raw)) {
+      systemState.deletedResultKeys = [...new Set(raw.map(String).filter(Boolean))];
+    }
+  } catch (e) {}
+  return systemState.deletedResultKeys;
+}
+
+function persistDeletedResultKeys() {
+  loadDeletedResultKeysFromStorage();
+  try {
+    localStorage.setItem(DELETED_RESULT_KEYS_STORAGE, JSON.stringify(systemState.deletedResultKeys));
+  } catch (e) {}
+}
+
+function isResultKeyDeleted(key) {
+  if (!key) return false;
+  return loadDeletedResultKeysFromStorage().includes(String(key).trim());
+}
+
+function isResultRecordDeleted(res) {
+  if (!res) return false;
+  return isResultKeyDeleted(getResultTombstoneKey(res));
+}
+
+function addDeletedResultKey(resOrKey) {
+  loadDeletedResultKeysFromStorage();
+  const keys = new Set(systemState.deletedResultKeys);
+  if (typeof resOrKey === "string") {
+    if (resOrKey) keys.add(String(resOrKey));
+  } else if (resOrKey) {
+    const primary = getResultTombstoneKey(resOrKey);
+    if (primary) keys.add(primary);
+    if (resOrKey.recordId) keys.add(String(resOrKey.recordId));
+  }
+  systemState.deletedResultKeys = [...keys];
+  persistDeletedResultKeys();
+}
+
+function mergeDeletedResultKeysFromRemote(remoteKeys) {
+  loadDeletedResultKeysFromStorage();
+  if (!Array.isArray(remoteKeys)) return;
+  const set = new Set([...systemState.deletedResultKeys, ...remoteKeys.map(String).filter(Boolean)]);
+  systemState.deletedResultKeys = [...set];
+  persistDeletedResultKeys();
+}
+
+function filterOutDeletedResults(results) {
+  return (results || []).filter(r => !isResultRecordDeleted(r));
+}
+
+function tombstoneResultsForDeletedStudent(student) {
+  if (!student) return;
+  const ctx = buildStudentMatchContext(student);
+  (systemState.results || []).forEach(res => {
+    if (resultMatchesStudentIdentity(res, ctx)) {
+      addDeletedResultKey(res);
+    }
+  });
+  systemState.results = filterOutDeletedResults(systemState.results);
+}
+
+function applyDeletionTombstonesToLocalState() {
+  loadDeletedStudentKeysFromStorage();
+  loadDeletedResultKeysFromStorage();
+  systemState.students = filterOutDeletedStudents(systemState.students);
+  systemState.results = filterOutDeletedResults(systemState.results);
+  persistDeletedStudentKeys();
+  persistDeletedResultKeys();
+}
+
 function hydrateStudentsFromResults(results) {
   if (!Array.isArray(results)) return;
   loadDeletedStudentKeysFromStorage();
   results.forEach(res => {
     if (!res || (!res.name && !res.id && !res.accessCode && !res.code)) return;
-    if (isResultFromDeletedStudent(res)) return;
+    if (isResultFromDeletedStudent(res) || isResultRecordDeleted(res)) return;
     upsertStudentRecord({
       name: res.name,
       id: res.id,
@@ -2788,6 +2875,10 @@ function hydrateStudentsFromResults(results) {
 function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   if (!remoteData || typeof remoteData !== "object") return false;
   const examStartOnly = mergeOptions.scope === "exam_start";
+  loadDeletedStudentKeysFromStorage();
+  loadDeletedResultKeysFromStorage();
+  const preserveDeletedStudents = [...systemState.deletedStudentKeys];
+  const preserveDeletedResults = [...systemState.deletedResultKeys];
   if (!examStartOnly && Array.isArray(remoteData.teachers)) {
     systemState.teachers = mergeTeachersPreservingLocalAuth_(systemState.teachers, remoteData.teachers);
     if (systemState.activeTeacher) {
@@ -2800,8 +2891,14 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   if (Array.isArray(remoteData.deletedStudentKeys)) {
     mergeDeletedStudentKeysFromRemote(remoteData.deletedStudentKeys);
-    systemState.students = filterOutDeletedStudents(systemState.students);
   }
+  if (Array.isArray(remoteData.deletedResultKeys)) {
+    mergeDeletedResultKeysFromRemote(remoteData.deletedResultKeys);
+  }
+  systemState.deletedStudentKeys = [...new Set([...preserveDeletedStudents, ...systemState.deletedStudentKeys])];
+  systemState.deletedResultKeys = [...new Set([...preserveDeletedResults, ...systemState.deletedResultKeys])];
+  persistDeletedStudentKeys();
+  persistDeletedResultKeys();
   if (!examStartOnly) {
     if (Array.isArray(remoteData.students)) {
       const mergedStudents = mergeRemoteCollection_(systemState.students, remoteData.students, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
@@ -2814,10 +2911,13 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
   }
   if (Array.isArray(remoteData.results)) {
-    systemState.results = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
+    const mergedResults = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
       if (item.recordId) return String(item.recordId);
       return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
     }, "نتيجة");
+    systemState.results = filterOutDeletedResults(mergedResults);
+  } else {
+    systemState.results = filterOutDeletedResults(systemState.results);
   }
   if (!examStartOnly) {
     hydrateStudentsFromResults(systemState.results);
@@ -2838,6 +2938,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   ensureStudentsDataShape();
   ensureExamsDataShape();
+  applyDeletionTombstonesToLocalState();
   return true;
 }
 
@@ -3362,11 +3463,21 @@ async function syncDatabaseFromCloud(options = {}) {
   if (response && response.data) {
     try {
       mergeRemoteDatabaseIntoLocal(response.data, scope === "exam_start" ? { scope: "exam_start" } : {});
+      applyDeletionTombstonesToLocalState();
+      try {
+        localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+        localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+      } catch (storageErr) {
+        console.warn("[ARABYA] syncDatabaseFromCloud localStorage:", storageErr);
+      }
       saveSystemState(false);
       recordCloudSyncOutcome(true, "جلب من السحابة");
-      if (!silent) {
+      if (systemState.activeView === "teacher-dashboard-view" && typeof refreshTeacherDashboardViews === "function") {
         refreshTeacherDashboardViews({ all: true });
       }
+      try {
+        window.dispatchEvent(new CustomEvent("arabya-data-changed"));
+      } catch (evtErr) {}
       if (response.cloudRevision && window.ArabyaCloudSync) {
         window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
       }
@@ -3568,6 +3679,9 @@ function applyCloudBackupData(data) {
   if (data.deletedStudentKeys && Array.isArray(data.deletedStudentKeys)) {
     mergeDeletedStudentKeysFromRemote(data.deletedStudentKeys);
   }
+  if (data.deletedResultKeys && Array.isArray(data.deletedResultKeys)) {
+    mergeDeletedResultKeysFromRemote(data.deletedResultKeys);
+  }
   if (data.students && Array.isArray(data.students)) {
     systemState.students = filterOutDeletedStudents(data.students);
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
@@ -3577,7 +3691,7 @@ function applyCloudBackupData(data) {
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
   }
   if (data.results && Array.isArray(data.results)) {
-    systemState.results = data.results;
+    systemState.results = filterOutDeletedResults(data.results);
     localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
     ensureResultRecordIds();
     hydrateStudentsFromResults(systemState.results);
@@ -3590,6 +3704,7 @@ function applyCloudBackupData(data) {
   if (data.questionBanks && window.ArabyaCloudSync) {
     window.ArabyaCloudSync.applyQuestionBanksFromCloud(data.questionBanks);
   }
+  applyDeletionTombstonesToLocalState();
   markTeacherHasCustomData();
 }
 
@@ -8169,7 +8284,11 @@ window.deleteTeacherResultByRecordId = async function(recordId) {
     syncEl.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري حذف السجل ومزامنته مع Google Sheets...`;
   }
 
-  systemState.results = systemState.results.filter(r => String(r.recordId || "") !== String(recordId));
+  addDeletedResultKey(res);
+  systemState.results = filterOutDeletedResults(
+    systemState.results.filter(r => String(r.recordId || "") !== String(recordId))
+  );
+  persistDeletedResultKeys();
   localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
 
   if (systemState.currentGradingResult && systemState.currentGradingResult.recordId === recordId) {
@@ -8194,7 +8313,16 @@ window.deleteTeacherResultByRecordId = async function(recordId) {
     scheduleCloudBackupPush.immediate("delete_result");
   }
 
+  if (cloudOk && typeof syncDatabaseFromCloud === "function") {
+    try {
+      await syncDatabaseFromCloud({ silent: true });
+    } catch (pullErr) {
+      console.warn("[ARABYA] post-delete pull:", pullErr);
+    }
+  }
+
   renderStudentResultsTable();
+  renderTeacherStudentsTable();
   if (typeof renderTeacherStatsDashboard === "function") {
     try { renderTeacherStatsDashboard(); } catch (e) {}
   }
@@ -9867,10 +9995,22 @@ window.deleteStudentByTeacher = async function(studentKey) {
   }
   if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟\n\nلن يُعاد من السحابة أو من نتائج الامتحانات بعد المزامنة.`)) return;
   addDeletedStudentKey(student);
+  tombstoneResultsForDeletedStudent(student);
   systemState.students = systemState.students.filter(s => s.studentKey !== studentKey);
-  saveSystemState(true);
+  applyDeletionTombstonesToLocalState();
+  saveSystemState(false);
   renderTeacherStudentsTable();
-  const synced = await syncLocalDatabaseToCloud();
+  renderStudentResultsTable();
+  let synced = false;
+  try {
+    synced = await pushCloudBackupNow("delete_student");
+  } catch (e) {}
+  if (!synced) {
+    try { synced = await syncLocalDatabaseToCloud(); } catch (e2) {}
+  }
+  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("delete_student");
+  }
   if (window.ArabyaToast) {
     window.ArabyaToast.showToast(
       synced ? `تم حذف «${student.name}» ومزامنة الحذف مع السحابة` : `تم حذف «${student.name}» محلياً — تحقق من الربط`,

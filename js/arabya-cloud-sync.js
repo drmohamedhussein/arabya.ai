@@ -111,6 +111,7 @@
         : { bindings: [] },
       questionBanks: collectAllQuestionBanksForCloud(),
       deletedStudentKeys: Array.isArray(state.deletedStudentKeys) ? state.deletedStudentKeys : [],
+      deletedResultKeys: Array.isArray(state.deletedResultKeys) ? state.deletedResultKeys : [],
       config: state.config ? { ...state.config, teacherCode: undefined } : {}
     };
   }
@@ -168,7 +169,7 @@
     }
     const now = Date.now();
     if (pullInFlight) return Promise.resolve(null);
-    if (now - lastFullPullAt < MIN_PULL_GAP_MS && reason !== "sheet-edit") {
+    if (now - lastFullPullAt < MIN_PULL_GAP_MS && reason !== "sheet-edit" && reason !== "after-delete") {
       return Promise.resolve(null);
     }
     pullInFlight = true;
@@ -176,8 +177,13 @@
       .then(res => {
         lastFullPullAt = Date.now();
         if (res && res.cloudRevision) setStoredCloudRevision(res.cloudRevision);
-        if (res && res.ok && typeof global.refreshTeacherDashboardViews === "function") {
-          global.refreshTeacherDashboardViews({ all: true });
+        if (res && res.ok) {
+          if (typeof global.refreshTeacherDashboardViews === "function") {
+            global.refreshTeacherDashboardViews({ all: true });
+          }
+          try {
+            global.dispatchEvent(new CustomEvent("arabya-data-changed"));
+          } catch (evtErr) {}
         }
         return res;
       })
