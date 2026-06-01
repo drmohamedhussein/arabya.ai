@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.9";
+const ARABYA_APP_VERSION = "2026.06.02.11";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -4126,6 +4126,92 @@ function getAppBaseUrl() {
   return `${origin}${basePath}`;
 }
 
+function extractDirectLinkExamIdFromLocation() {
+  const fromQuery = getUrlParameter("exam");
+  if (fromQuery) return String(fromQuery).trim();
+
+  const pathSegments = window.location.pathname
+    .split("/")
+    .filter(s => s.length > 0 && s !== "index.html" && s !== "online_exam_portal");
+  if (pathSegments.length > 0) {
+    const lastSegment = pathSegments[pathSegments.length - 1];
+    const matchedExam = (systemState.exams || []).find(
+      e => String(e.id).toLowerCase() === lastSegment.toLowerCase()
+    );
+    if (matchedExam) return matchedExam.id;
+    if (/^[a-z0-9_]{4,32}$/i.test(lastSegment)) return lastSegment;
+  }
+
+  const hash = window.location.hash;
+  if (hash && hash.startsWith("#/")) {
+    const route = hash.substring(2);
+    const cleanRoute = route.includes("?") ? route.split("?")[0] : route;
+    if (!cleanRoute) return "";
+    const matchedExam = (systemState.exams || []).find(
+      e => String(e.id).toLowerCase() === cleanRoute.toLowerCase()
+    );
+    return matchedExam ? matchedExam.id : String(cleanRoute).trim();
+  }
+
+  return "";
+}
+
+function rememberDirectLinkExamIntent(examId) {
+  const normalized = String(examId || "").trim();
+  if (!normalized) return;
+  systemState.directLinkExamId = normalized;
+  systemState.lockedExamId = normalized;
+}
+
+function resolveDirectExamLock(options = {}) {
+  const requestedId = String(
+    options.examId ||
+    systemState.directLinkExamId ||
+    systemState.lockedExamId ||
+    extractDirectLinkExamIdFromLocation() ||
+    ""
+  ).trim();
+  if (!requestedId) return { found: false, exam: null };
+
+  rememberDirectLinkExamIntent(requestedId);
+  const targetExam = (systemState.exams || []).find(
+    e => String(e.id).toLowerCase() === requestedId.toLowerCase()
+  );
+  if (!targetExam) {
+    return { found: false, exam: null, requestedId };
+  }
+
+  if (isExamPastDeadline(targetExam)) {
+    if (options.alertOnExpired !== false) {
+      alert(getExamDeadlineBlockMessage(targetExam));
+    }
+    return { found: false, exam: null, expired: true, requestedId };
+  }
+
+  systemState.lockedExamId = targetExam.id;
+  systemState.directLinkExamId = targetExam.id;
+
+  const select = document.getElementById("student-exam-select");
+  if (select) {
+    select.value = targetExam.id;
+    select.disabled = true;
+    select.setAttribute("aria-describedby", "direct-exam-lock-note");
+  }
+
+  if (options.navigate) {
+    navigateToView("student-login-view");
+  }
+
+  try { populateExamSelectionList(); } catch (e) {}
+  return { found: true, exam: targetExam, requestedId };
+}
+
+function applyDirectExamLockAfterStudentCloudSync() {
+  if (!getUrlParameter("s")) return;
+  reloadSystemStateFromLocalStorage();
+  resolveDirectExamLock();
+}
+
 // دالة موحدة لتوليد الرابط المباشر للامتحان (تدعم المسارات الحقيقية بدون هاش على خوادم الويب)
 function getExamDirectLink(exam) {
   const params = new URLSearchParams();
@@ -4197,93 +4283,49 @@ async function checkUrlParameters() {
     setTimeout(function() {
       if (typeof syncDatabaseFromCloud === "function") {
         syncDatabaseFromCloud({ silent: true }).then(function(ok) {
-          if (ok) {
-            try { populateExamSelectionList(); } catch (e) {}
-            if (systemState.lockedExamId) {
-              const sel = document.getElementById("student-exam-select");
-              if (sel) { sel.value = systemState.lockedExamId; sel.disabled = true; }
-            }
-          }
+          if (ok) applyDirectExamLockAfterStudentCloudSync();
         });
       }
     }, 50);
   }
 
-  // 4. فتح امتحان مخصص للطالب (عبر البارامتر ?exam=... أو عبر المسار الفرعي الحقيقي في pathname)
-  let examId = getUrlParameter("exam");
-  
-  // التحقق من المسار الحقيقي في pathname (مثال: /876KHK أو /online_exam_portal/876KHK)
-  if (!examId) {
-    const pathName = window.location.pathname;
-    const pathSegments = pathName.split('/').filter(s => s.length > 0 && s !== "index.html" && s !== "online_exam_portal");
-    if (pathSegments.length > 0) {
-      const lastSegment = pathSegments[pathSegments.length - 1];
-      const matchedExam = systemState.exams.find(e => e.id.toLowerCase() === lastSegment.toLowerCase());
-      if (matchedExam) {
-        examId = matchedExam.id;
-      }
-    }
-  }
-  
-  // 5. التحقق من وجود مسار هاش مخصص للامتحان (مثال: #/876KHK)
+  // 4–5. فتح امتحان مخصص للطالب (exam أو pathname أو #/رمز)
   const hash = window.location.hash;
-  if (!examId && hash && hash.startsWith("#/")) {
-    const route = hash.substring(2); // ما بعد "#/"
-    let cleanRoute = route;
-    let queryInHash = "";
-    if (route.includes("?")) {
-      const parts = route.split("?");
-      cleanRoute = parts[0];
-      queryInHash = parts[1];
-    }
-    
-    // البحث عن الامتحان المطابق للرمز العشوائي المولد
-    const targetExam = systemState.exams.find(e => e.id.toLowerCase() === cleanRoute.toLowerCase());
-    if (targetExam) {
-      examId = targetExam.id;
-      
-      // تحليل معامل المعلم من داخل الهاش إن وجد
-      if (queryInHash) {
-        const hashParams = new URLSearchParams(queryInHash);
-        const teacherVal = hashParams.get("teacher");
-        if (teacherVal) {
-          const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-          const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
-          if (matchedTeacher) {
-            systemState.config = {
-              teacherCode: matchedTeacher.password,
-              googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
-              entryName: matchedTeacher.integrationConfig?.entryName || "",
-              entryId: matchedTeacher.integrationConfig?.entryId || "",
-              entryCode: matchedTeacher.integrationConfig?.entryCode || "",
-              entryScore: matchedTeacher.integrationConfig?.entryScore || "",
-              entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
-              autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
-            };
-            systemState.targetTeacherUsername = matchedTeacher.username;
-          }
+  if (hash && hash.startsWith("#/")) {
+    const route = hash.substring(2);
+    const queryInHash = route.includes("?") ? route.split("?")[1] : "";
+    if (queryInHash) {
+      const hashParams = new URLSearchParams(queryInHash);
+      const teacherVal = hashParams.get("teacher");
+      if (teacherVal) {
+        const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+        const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
+        if (matchedTeacher) {
+          systemState.config = {
+            teacherCode: matchedTeacher.password,
+            googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+            entryName: matchedTeacher.integrationConfig?.entryName || "",
+            entryId: matchedTeacher.integrationConfig?.entryId || "",
+            entryCode: matchedTeacher.integrationConfig?.entryCode || "",
+            entryScore: matchedTeacher.integrationConfig?.entryScore || "",
+            entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
+            autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
+          };
+          systemState.targetTeacherUsername = matchedTeacher.username;
         }
       }
     }
   }
 
+  const examId = extractDirectLinkExamIdFromLocation();
   if (examId) {
-    const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
-    if (targetExam) {
-      if (isExamPastDeadline(targetExam)) {
-        alert(getExamDeadlineBlockMessage(targetExam));
-        return redirected;
-      }
-      systemState.lockedExamId = targetExam.id;
+    rememberDirectLinkExamIntent(examId);
+    const lockResult = resolveDirectExamLock({ navigate: true, alertOnExpired: true });
+    if (lockResult.found) {
+      redirected = true;
+    } else if (!lockResult.expired) {
       navigateToView("student-login-view");
-      setTimeout(() => {
-        const select = document.getElementById("student-exam-select");
-        if (select) {
-          select.value = targetExam.id;
-          select.disabled = true;
-          select.setAttribute("aria-describedby", "direct-exam-lock-note");
-        }
-      }, 100);
+      try { populateExamSelectionList(); } catch (e) {}
       redirected = true;
     }
   }
@@ -5224,7 +5266,7 @@ function renderExamsList() {
           <button class="btn btn-primary btn-sm" onclick="editExamQuestions('${exam.id}')">تعديل الامتحان والأسئلة</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="testExamSync('${exam.id}')">اختبار المزامنة</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--accent); color:var(--accent);" onclick="setTeacherResultsExamFilter('${exam.id}')">عرض النتائج</button>
-          <button class="btn btn-outline btn-sm" onclick="copyExamLink('${examUrl}')">نسخ الرابط</button>
+          <button class="btn btn-outline btn-sm" onclick="copyExamLinkForExam('${exam.id}')">نسخ الرابط</button>
           <button class="btn btn-outline btn-sm" onclick="generateGoogleFormScript('${exam.id}')">تصدير لجوجل فورم</button>
           <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteExam('${exam.id}')">حذف</button>
         </div>
@@ -6220,10 +6262,18 @@ function populateExamSelectionList() {
     opt.value = "";
     opt.disabled = true;
     opt.selected = true;
-    opt.innerText = "لا توجد امتحانات متاحة حالياً. يرجى الرجوع للمعلم.";
+    if (systemState.lockedExamId) {
+      const hasSyncInLink = !!getUrlParameter("s");
+      opt.innerText = hasSyncInLink
+        ? "جاري تحميل الامتحان من الرابط... انتظر قليلاً ثم أعد المحاولة."
+        : "الامتحان المطلوب غير متوفر على هذا الجهاز. اطلب من المعلم رابطاً محدثاً يتضمن المزامنة، أو استعد النسخة الاحتياطية.";
+      select.setAttribute("aria-describedby", "direct-exam-lock-note");
+    } else {
+      opt.innerText = "لا توجد امتحانات متاحة حالياً. يرجى الرجوع للمعلم.";
+      select.removeAttribute("aria-describedby");
+    }
     select.appendChild(opt);
     select.disabled = true;
-    select.removeAttribute("aria-describedby");
     return;
   }
 
@@ -6249,6 +6299,9 @@ function populateExamSelectionList() {
 
 async function validateStudentAndStart() {
   reloadSystemStateFromLocalStorage();
+  if (systemState.lockedExamId || systemState.directLinkExamId) {
+    resolveDirectExamLock();
+  }
   const startBtn = document.getElementById("student-start-exam-btn");
   const prevBtnText = startBtn ? startBtn.innerHTML : "";
 
@@ -6257,7 +6310,10 @@ async function validateStudentAndStart() {
   const rawCode = document.getElementById("student-access-code").value.trim();
   const email = document.getElementById("student-email-input")?.value.trim() || "";
   const mobile = document.getElementById("student-mobile-input")?.value.trim() || "";
-  const examId = document.getElementById("student-exam-select").value;
+  let examId = document.getElementById("student-exam-select").value;
+  if (systemState.lockedExamId) {
+    examId = systemState.lockedExamId;
+  }
   const normalizedId = normalizeStudentId(id);
   const inputCode = sanitizeStudentCodeInput(rawCode);
   const hasCodeInput = rawCode !== "";
@@ -6275,7 +6331,13 @@ async function validateStudentAndStart() {
     return;
   }
 
-  let selectedExam = systemState.exams.find(e => e.id === examId);
+  let selectedExam = systemState.exams.find(
+    e => String(e.id).toLowerCase() === String(examId).toLowerCase()
+  );
+  if (!selectedExam && systemState.lockedExamId) {
+    alert("لم يُحمَّل الامتحان من الرابط بعد. إن كان الرابط قديماً، اطلب رابطاً جديداً من المعلم بعد حفظ نسخة احتياطية سحابية.");
+    return;
+  }
   if (!selectedExam) {
     alert("الامتحان المختار غير متوفر!");
     return;
@@ -10231,6 +10293,15 @@ function buildExamShareLink(rawUrl) {
     return rawUrl;
   }
 }
+
+window.copyExamLinkForExam = function(examId) {
+  const exam = (systemState.exams || []).find(e => String(e.id) === String(examId));
+  if (!exam) {
+    alert("تعذّر العثور على الامتحان لنسخ الرابط.");
+    return;
+  }
+  copyExamLink(getExamDirectLink(exam));
+};
 
 window.copyExamLink = function(url) {
   if (!url) {

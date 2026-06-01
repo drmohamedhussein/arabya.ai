@@ -236,7 +236,6 @@ if (typeof window !== 'undefined') {
       ensureArabyaStudentProfileView();
       enhanceArabyaTeacherDashboard();
       ensureArabyaDefaultExamsSeeded();
-      patchArabyaDirectLinks();
       enforceArabyaUniqueStudentCodes();
       applyArabyaTeacherSafeMode();
       repairArabyaTeacherPanels();
@@ -508,20 +507,6 @@ function getArabyaBaseUrl() {
     return window.location.href.split("?")[0].split("#")[0];
   }
   return window.location.origin + "/";
-}
-
-function patchArabyaDirectLinks() {
-  window.getExamDirectLink = function(exam) {
-    var params = new URLSearchParams();
-    params.set("exam", exam.id);
-    try {
-      var teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-      var activeUsername = localStorage.getItem("arabya_active_teacher_username");
-      var teacher = teachers.find(function(t) { return t.username === activeUsername; });
-      if (teacher && teacher.username) params.set("teacher", teacher.username);
-    } catch(e) {}
-    return getArabyaBaseUrl() + "?" + params.toString();
-  };
 }
 
 function arabyaEscape(value) {
