@@ -15,11 +15,61 @@
 
   function resolveBankUsername(canonOrRaw) {
     const canon = canonicalBankOwnerKey(canonOrRaw);
-    const active = global.systemState?.activeTeacher?.username;
+    const session = resolveTeacherSession();
+    const active = session.username;
     if (active && canonicalBankOwnerKey(active) === canon) return active;
-    const teachers = global.systemState?.teachers || [];
+    const teachers = session.state?.teachers || [];
     const hit = teachers.find(t => canonicalBankOwnerKey(t.username) === canon);
     return hit ? hit.username : String(canonOrRaw || canon);
+  }
+
+  /** جلسة المعلم/سوبر أدمن — يعتمد على window.systemState (يُعرَّض من app.js) */
+  function resolveTeacherSession() {
+    const state = global.systemState || null;
+    if (state?.activeTeacher?.username) {
+      return { state, username: state.activeTeacher.username, teacher: state.activeTeacher };
+    }
+    let storedUsername = "";
+    try {
+      storedUsername = localStorage.getItem("arabya_active_teacher_username") || "";
+    } catch (e) {}
+    if (storedUsername && state?.teachers?.length) {
+      const matched = state.teachers.find(t => t.username === storedUsername);
+      if (matched) {
+        state.activeTeacher = matched;
+        return { state, username: matched.username, teacher: matched };
+      }
+    }
+    if (storedUsername && !state) {
+      return { state: null, username: storedUsername, teacher: { username: storedUsername } };
+    }
+    return { state, username: null, teacher: null };
+  }
+
+  function requireTeacherSession(actionLabel) {
+    const session = resolveTeacherSession();
+    if (!session.username) {
+      const onDashboard = stateActiveViewIsTeacherDashboard();
+      alert(
+        onDashboard
+          ? "تعذّر تحديد حسابك. حدّث الصفحة (Ctrl+Shift+R) ثم سجّل الدخول مرة أخرى."
+          : `يجب تسجيل الدخول إلى لوحة المعلم أو سوبر أدمن أولاً${actionLabel ? " (" + actionLabel + ")" : ""}.`
+      );
+      return null;
+    }
+    if (!session.state) {
+      alert("تعذّر تحميل حالة المنصة. حدّث الصفحة بقوة (Ctrl+Shift+R) ثم أعد المحاولة.");
+      return null;
+    }
+    return session;
+  }
+
+  function stateActiveViewIsTeacherDashboard() {
+    try {
+      return global.systemState?.activeView === "teacher-dashboard-view";
+    } catch (e) {
+      return false;
+    }
   }
 
   /** دمج مفاتيح بنك مكررة (TEACHER2026 vs teacher2026) في مفتاح واحد */
@@ -154,7 +204,7 @@
 
   function saveBankFromExam(exam, bankName, teacherUsername) {
     if (!teacherUsername) {
-      alert("يجب تسجيل دخول المعلم لحفظ بنك الأسئلة.");
+      alert("يجب تسجيل الدخول إلى لوحة المعلم أو سوبر أدمن لحفظ بنك الأسئلة.");
       return false;
     }
     if (!exam || !Array.isArray(exam.questions) || !exam.questions.length) {
@@ -240,6 +290,8 @@
     QB_PREFIX,
     canonicalBankOwnerKey,
     resolveBankUsername,
+    resolveTeacherSession,
+    requireTeacherSession,
     consolidateQuestionBankStorage,
     storageKeyForTeacher,
     loadSharedBanks,
@@ -255,13 +307,11 @@
   };
 
   global.saveSharedBankFromCurrentExam = function () {
+    const session = requireTeacherSession("حفظ بنك الأسئلة");
+    if (!session) return;
     const examId = global.currentEditingExamId;
-    const state = global.systemState;
-    const username = state?.activeTeacher?.username;
-    if (!username) {
-      alert("يجب تسجيل دخول المعلم.");
-      return;
-    }
+    const state = session.state;
+    const username = session.username;
     if (!examId || !state) return;
     const exam = state.exams.find(e => e.id === examId);
     const name = prompt("اسم بنك الأسئلة (خاص بك فقط):", exam?.title || "");
@@ -270,15 +320,13 @@
   };
 
   global.importSharedBankIntoCurrentExam = function () {
+    const session = requireTeacherSession("دمج بنك الأسئلة");
+    if (!session) return;
     const examId = global.currentEditingExamId;
-    const state = global.systemState;
-    const username = state?.activeTeacher?.username;
+    const state = session.state;
+    const username = session.username;
     const select = document.getElementById("shared-question-bank-select");
     const modeEl = document.getElementById("shared-bank-import-mode");
-    if (!username) {
-      alert("يجب تسجيل دخول المعلم.");
-      return;
-    }
     if (!examId || !state || !select) return;
     const bankId = select.value;
     if (!bankId) {
@@ -301,7 +349,9 @@
   };
 
   global.exportSelectedSharedBankJson = function () {
-    const username = global.systemState?.activeTeacher?.username;
+    const session = requireTeacherSession("تصدير بنك");
+    if (!session) return;
+    const username = session.username;
     const select = document.getElementById("shared-question-bank-select");
     if (!username || !select || !select.value) {
       alert("اختر بنكاً من بنوكك أولاً.");
@@ -312,7 +362,9 @@
   };
 
   global.exportSelectedSharedBankCsv = function () {
-    const username = global.systemState?.activeTeacher?.username;
+    const session = requireTeacherSession("تصدير بنك");
+    if (!session) return;
+    const username = session.username;
     const select = document.getElementById("shared-question-bank-select");
     if (!username || !select || !select.value) {
       alert("اختر بنكاً من بنوكك أولاً.");
@@ -323,9 +375,11 @@
   };
 
   global.importQuestionBankFile = function (event) {
-    const username = global.systemState?.activeTeacher?.username;
+    const session = requireTeacherSession("استيراد بنك");
+    if (!session) return;
+    const username = session.username;
     if (!username) {
-      alert("يجب تسجيل دخول المعلم لاستيراد بنك أسئلة.");
+      alert("يجب تسجيل الدخول إلى لوحة المعلم أو سوبر أدمن لاستيراد بنك أسئلة.");
       event.target.value = "";
       return;
     }

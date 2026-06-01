@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.1";
+const ARABYA_APP_VERSION = "2026.06.02.2";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -641,6 +641,8 @@ let systemState = {
   }
 };
 
+window.systemState = systemState;
+
 // ==========================================
 // 1. تهيئة النظام عند التحميل
 // ==========================================
@@ -672,11 +674,13 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.ArabyaSecurity) {
     window.ArabyaSecurity.setupTeacherIdleSessionGuard(window.logoutTeacher);
   }
+  window.systemState = systemState;
   window.loadExamDeviceRegistry = loadExamDeviceRegistry;
   window.getArabyaWebAppUrls = getArabyaWebAppUrls;
   window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
   window.isSuperAdminTeacher = isSuperAdminTeacher;
   window.inferTeacherRole = inferTeacherRole;
+  window.isTeacherStaffAccount = isTeacherStaffAccount;
   if (window.ArabyaOfflineQueue) window.ArabyaOfflineQueue.installListeners();
   if (window.ArabyaRealtimeBridge) window.ArabyaRealtimeBridge.startRealtimeSync();
 
@@ -3842,7 +3846,7 @@ async function loginTeacherObject(teacher, loginCredential) {
   if (window.ArabyaSecurity) window.ArabyaSecurity.touchTeacherActivity();
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
-  localStorage.setItem("arabya_active_teacher_username", teacher.username);
+  localStorage.setItem("arabya_active_teacher_username", normalized.username || teacher.username);
   
   systemState.teacherProfile = { name: teacher.name, subject: teacher.subject };
   systemState.config = {
