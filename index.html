@@ -16,7 +16,7 @@
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2026.06.01.3">
+  <link rel="stylesheet" href="style.css?v=2026.06.01.4">
 </head>
 <body>
 
@@ -891,25 +891,30 @@
               </div>
             </div>
 
-            <p class="table-scroll-hint" aria-hidden="true">اسحب الجدول أفقياً لعرض جميع الأعمدة على الشاشات الصغيرة.</p>
-            <div class="table-container table-container--wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>اسم الطالب</th>
-                    <th>رقم ID</th>
-                    <th>كود الاشتراك</th>
-                    <th>الامتحان</th>
-                    <th>النتيجة</th>
-                    <th>IP / الجهاز</th>
-                    <th>التاريخ والوقت</th>
-                    <th>الإجراء</th>
-                  </tr>
-                </thead>
-                <tbody id="teacher-results-table-body">
-                  <!-- تعبأ ديناميكياً -->
-                </tbody>
-              </table>
+            <p class="table-scroll-hint">اسحب شريط التمرير العلوي أو السفلي يميناً ويساراً لعرض جميع الأعمدة.</p>
+            <div id="teacher-results-table-scroll" class="teacher-table-scroll-stack">
+              <div class="table-hscroll-top" aria-label="تمرير الجدول أفقياً (أعلى)" title="تمرير يمين ويسار">
+                <div class="table-hscroll-top-inner"></div>
+              </div>
+              <div class="table-container table-container--wide">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>اسم الطالب</th>
+                      <th>رقم ID</th>
+                      <th>كود الاشتراك</th>
+                      <th>الامتحان</th>
+                      <th>النتيجة</th>
+                      <th>IP / الجهاز</th>
+                      <th>التاريخ والوقت</th>
+                      <th>الإجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody id="teacher-results-table-body">
+                    <!-- تعبأ ديناميكياً -->
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <!-- شريط تحكم إضافي أسفل جدول النتائج لضمان ظهوره على كل الشاشات -->
@@ -1429,25 +1434,30 @@ function doGet(e) {
               </div>
             </div>
 
-            <p class="table-scroll-hint" aria-hidden="true">اسحب الجدول أفقياً لعرض جميع الأعمدة على الشاشات الصغيرة.</p>
-            <div class="table-container table-container--wide">
-              <table>
-                <thead>
-                  <tr>
-                    <th>اسم الطالب</th>
-                    <th>رقم الـ ID</th>
-                    <th>كود الاشتراك</th>
-                    <th>آخر IP</th>
-                    <th>البريد</th>
-                    <th>الموبايل</th>
-                    <th>تاريخ التسجيل</th>
-                    <th>الإجراء</th>
-                  </tr>
-                </thead>
-                <tbody id="teacher-students-table-body">
-                  <!-- تعبأ ديناميكياً -->
-                </tbody>
-              </table>
+            <p class="table-scroll-hint">اسحب شريط التمرير العلوي أو السفلي يميناً ويساراً لعرض جميع الأعمدة.</p>
+            <div id="teacher-students-table-scroll" class="teacher-table-scroll-stack">
+              <div class="table-hscroll-top" aria-label="تمرير الجدول أفقياً (أعلى)" title="تمرير يمين ويسار">
+                <div class="table-hscroll-top-inner"></div>
+              </div>
+              <div class="table-container table-container--wide">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>اسم الطالب</th>
+                      <th>رقم الـ ID</th>
+                      <th>كود الاشتراك</th>
+                      <th>آخر IP</th>
+                      <th>البريد</th>
+                      <th>الموبايل</th>
+                      <th>تاريخ التسجيل</th>
+                      <th>الإجراء</th>
+                    </tr>
+                  </thead>
+                  <tbody id="teacher-students-table-body">
+                    <!-- تعبأ ديناميكياً -->
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <!-- شريط تحكم إضافي أسفل الجدول لضمان ظهوره على كل الشاشات -->
@@ -1565,7 +1575,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.01.3"></script>
-  <script src="app.js?v=2026.06.01.3"></script>
+  <script src="questions.js?v=2026.06.01.4"></script>
+  <script src="app.js?v=2026.06.01.4"></script>
 </body>
 </html>

@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.3";
+const ARABYA_APP_VERSION = "2026.06.01.4";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2240,14 +2240,51 @@ function saveTeacherActiveTab(tabId) {
 }
 
 
+
+function setupTeacherTableHorizontalScroll(stackId) {
+  const stack = typeof stackId === "string" ? document.getElementById(stackId) : stackId;
+  if (!stack) return;
+  const topBar = stack.querySelector(".table-hscroll-top");
+  const topInner = stack.querySelector(".table-hscroll-top-inner");
+  const body = stack.querySelector(".table-container");
+  if (!topBar || !topInner || !body) return;
+
+  const syncWidths = () => {
+    const table = body.querySelector("table");
+    if (!table) return;
+    topInner.style.width = `${Math.max(table.scrollWidth, body.clientWidth)}px`;
+  };
+
+  if (!stack.dataset.hscrollBound) {
+    stack.dataset.hscrollBound = "1";
+    let syncing = false;
+    const linkScroll = (source, target) => {
+      source.addEventListener("scroll", () => {
+        if (syncing) return;
+        syncing = true;
+        target.scrollLeft = source.scrollLeft;
+        syncing = false;
+      }, { passive: true });
+    };
+    linkScroll(topBar, body);
+    linkScroll(body, topBar);
+    window.addEventListener("resize", syncWidths);
+    const table = body.querySelector("table");
+    if (table && typeof ResizeObserver !== "undefined") {
+      new ResizeObserver(syncWidths).observe(table);
+    }
+  }
+  syncWidths();
+}
+
 function focusTeacherTableControls(tabId) {
-  const toolbarId = tabId === "results" ? "teacher-results-toolbar" : "teacher-students-toolbar";
-  const toolbar = document.getElementById(toolbarId);
-  if (!toolbar) return;
+  const stackId = tabId === "results" ? "teacher-results-table-scroll" : "teacher-students-table-scroll";
+  setupTeacherTableHorizontalScroll(stackId);
+  const stack = document.getElementById(stackId);
+  if (!stack) return;
   requestAnimationFrame(() => {
-    toolbar.scrollIntoView({ behavior: "smooth", block: "start" });
-    toolbar.classList.add("teacher-controls-flash");
-    setTimeout(() => toolbar.classList.remove("teacher-controls-flash"), 1400);
+    const topBar = stack.querySelector(".table-hscroll-top");
+    (topBar || stack).scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 }
 
@@ -7019,6 +7056,7 @@ function renderStudentResultsTable() {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-results-table-scroll");
     return;
   }
 
@@ -7036,6 +7074,7 @@ function renderStudentResultsTable() {
       : "لا توجد نتائج تطابق الفلاتر المحددة";
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} سجل.</td></tr>`;
     updateResultsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-results-table-scroll");
     return;
   }
 
@@ -7076,6 +7115,7 @@ function renderStudentResultsTable() {
   });
 
   updateResultsPaginationUI(totalItems, view.page, view.pageSize, totalAll, filtersActive);
+  setupTeacherTableHorizontalScroll("teacher-results-table-scroll");
 }
 
 window.viewTeacherResultDetail = function(recordId, studentId, examId) {
@@ -8737,6 +8777,7 @@ function renderTeacherStudentsTable() {
     const hasCloud = getArabyaWebAppUrls().length > 0;
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا يوجد طلاب محلياً.${hasCloud ? " اضغط «مزامنة من السحابة» لجلب الطلاب من نتائج Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
     updateStudentsPaginationUI(0, 1, getStudentsTableViewSettings().pageSize, 0, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-students-table-scroll");
     return;
   }
 
@@ -8754,6 +8795,7 @@ function renderTeacherStudentsTable() {
       : "لا يوجد طلاب يطابقون الفلاتر المحددة";
     tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} طالب.</td></tr>`;
     updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
+    setupTeacherTableHorizontalScroll("teacher-students-table-scroll");
     return;
   }
 
@@ -8804,6 +8846,7 @@ function renderTeacherStudentsTable() {
   });
 
   updateStudentsPaginationUI(totalItems, view.page, view.pageSize, totalAll, filtersActive);
+  setupTeacherTableHorizontalScroll("teacher-students-table-scroll");
 }
 
 // إظهار بطاقة إضافة طالب جديد
