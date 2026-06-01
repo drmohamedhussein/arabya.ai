@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.23";
+const ARABYA_APP_VERSION = "2026.05.31.24";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -342,7 +342,8 @@ document.addEventListener("DOMContentLoaded", () => {
           systemState.currentStudent = session.student;
           const matchedExam = systemState.exams.find(e => e.id === session.examId);
           const resumeKey = session.student?.studentKey || getStudentLookupKey(session.student || {});
-          const blocking = findBlockingExamResult(resumeKey, session.examId);
+          const resumeContext = buildStudentMatchContext(session.student || { studentKey: resumeKey });
+          const blocking = findBlockingExamResult(resumeKey, session.examId, resumeContext);
           if (blocking) {
             localStorage.removeItem("arabya_active_student_session");
             alert(blocking.status === "canceled"
@@ -639,6 +640,17 @@ function ensureResultRecordIds() {
     if (!res.recordId) {
       res.recordId = createRecordId("result");
       changed = true;
+    }
+    if (!res.studentLookupKey) {
+      const inferredKey = getStudentLookupKey({
+        id: res.id,
+        name: res.name,
+        code: res.accessCode || res.code || ""
+      });
+      if (inferredKey) {
+        res.studentLookupKey = inferredKey;
+        changed = true;
+      }
     }
     if (!Number.isFinite(res.savedAt)) {
       const match = String(res.recordId || "").match(/(?:result|incomplete|record)_(\d{10,})_/i);
@@ -1107,18 +1119,16 @@ window.revokeStudentExamRetake = function(recordId) {
 
 function findBlockingExamResult(studentLookupKey, examId, studentContext) {
   if (!examId) return null;
-  const keys = studentContext
-    ? getStudentLookupKeysForMatch(studentContext)
-    : (studentLookupKey ? [studentLookupKey] : []);
-  if (!keys.length) return null;
-  if (keys.some(key => findActiveRetakeGrant(key, examId))) return null;
+  const ctx = studentContext || buildStudentMatchContext({ studentKey: studentLookupKey || "" });
+  if (!ctx || (!ctx.studentKey && !ctx.id && !ctx.name && !ctx.accessCode)) return null;
+  if (findActiveRetakeGrant(studentLookupKey, examId, ctx)) return null;
   return systemState.results.find(r =>
-    keys.includes(r.studentLookupKey) &&
     r.examId === examId &&
     !isSupersededResult(r) &&
     r.status !== "incomplete" &&
     r.allowRetake !== true &&
-    (r.status === "completed" || r.status === "canceled")
+    (r.status === "completed" || r.status === "canceled") &&
+    resultMatchesStudentIdentity(r, ctx)
   ) || null;
 }
 
@@ -1440,6 +1450,17 @@ function upsertStudentRecord(source, fallbackKey = "") {
 }
 
 
+function buildStudentMatchContext(student) {
+  if (!student) return null;
+  return {
+    studentKey: student.studentKey || "",
+    id: student.id || "",
+    name: student.name || "",
+    accessCode: student.accessCode || student.code || "",
+    code: student.code || student.accessCode || ""
+  };
+}
+
 function getStudentLookupKeysForMatch(student) {
   const keys = new Set();
   if (!student) return [];
@@ -1449,7 +1470,48 @@ function getStudentLookupKeysForMatch(student) {
   if (isPrivateStudentCode(code)) keys.add(`code:${code}`);
   const id = normalizeStudentId(student.id || "");
   if (id) keys.add(`id:${id}`);
+  const normalizedName = normalizeStudentName(student.name || "");
+  if (normalizedName) keys.add(`name:${normalizedName}`);
   return [...keys];
+}
+
+function deviceProfileMatchesResult(profile, result) {
+  if (!profile || !result) return false;
+  if (profile.deviceFingerprint && result.deviceFingerprint && profile.deviceFingerprint === result.deviceFingerprint) {
+    return true;
+  }
+  return !!(profile.deviceId && result.deviceId && profile.deviceId === result.deviceId);
+}
+
+function resultMatchesStudentIdentity(result, student) {
+  if (!result || !student) return false;
+  const keys = getStudentLookupKeysForMatch(student);
+  if (result.studentLookupKey && keys.includes(result.studentLookupKey)) return true;
+  if (result.studentKey && keys.includes(result.studentKey)) return true;
+
+  const resultId = normalizeStudentId(result.id || "");
+  const studentId = normalizeStudentId(student.id || "");
+  const resultCode = sanitizeStudentCodeInput(result.accessCode || result.code || "");
+  const studentCode = sanitizeStudentCodeInput(student.accessCode || student.code || "");
+
+  if (isSharedStudentCode(studentCode) || isSharedStudentCode(resultCode)) {
+    const resultName = normalizeStudentName(result.name || "");
+    const studentName = normalizeStudentName(student.name || "");
+    if (resultId && studentId && resultId === studentId) return true;
+    if (resultName && studentName && resultName === studentName && resultCode === studentCode) return true;
+    return false;
+  }
+
+  if (isPrivateStudentCode(studentCode) && studentCode && resultCode === studentCode) return true;
+  if (resultId && studentId && resultId === studentId) return true;
+
+  const resultName = normalizeStudentName(result.name || "");
+  const studentName = normalizeStudentName(student.name || "");
+  if (resultName && studentName && resultName === studentName) {
+    if (!resultId && !studentId) return true;
+    if (resultId && studentId && resultId === studentId) return true;
+  }
+  return false;
 }
 
 function validateStudentIdentityInput(id, code, options = {}) {
@@ -4880,6 +4942,8 @@ function populateExamSelectionList() {
 }
 
 async function validateStudentAndStart() {
+  reloadSystemStateFromLocalStorage();
+
   const name = document.getElementById("student-fullname-input").value.trim();
   const id = document.getElementById("student-id-input").value.trim();
   const rawCode = document.getElementById("student-access-code").value.trim();
@@ -4955,13 +5019,14 @@ async function validateStudentAndStart() {
   };
 
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
-  const blockingResult = findBlockingExamResult(studentLookupKey, examId, systemState.currentStudent);
+  const studentMatchContext = buildStudentMatchContext(systemState.currentStudent);
+  const blockingResult = findBlockingExamResult(studentLookupKey, examId, studentMatchContext);
   if (blockingResult) {
     alert(getExamBlockingMessage(blockingResult));
     return;
   }
 
-  const activeRetakeGrant = findActiveRetakeGrant(studentLookupKey, examId);
+  const activeRetakeGrant = findActiveRetakeGrant(studentLookupKey, examId, studentMatchContext);
   if (activeRetakeGrant) {
     const retakeConfirm = confirm(`المعلم سمح لك بإعادة أداء امتحان "${selectedExam.title}". هل تريد البدء الآن؟`);
     if (!retakeConfirm) return;
@@ -4976,7 +5041,7 @@ async function validateStudentAndStart() {
 
   let deviceProfile = null;
   try {
-    const deviceCheck = await enforceExamDeviceBinding(studentLookupKey, systemState.currentStudent.name, examId);
+    const deviceCheck = await enforceExamDeviceBinding(studentLookupKey, systemState.currentStudent.name, examId, studentMatchContext);
     if (!deviceCheck.ok) {
       alert(deviceCheck.message);
       return;
@@ -5361,6 +5426,14 @@ function submitFinishedExam() {
   resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
+  if (systemState.examDeviceProfile && studentLookupKey && systemState.currentExam?.id) {
+    registerExamDeviceBinding(
+      systemState.examDeviceProfile,
+      studentLookupKey,
+      systemState.currentStudent.name,
+      systemState.currentExam.id
+    );
+  }
   saveSystemState(true);
   syncRetakeAffectedResultsToCloud(archivedAttempts);
   sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
@@ -6867,6 +6940,32 @@ function deviceBindingMatchesEntry(profile, entry) {
   return !!(profile.deviceId && entry.deviceId && profile.deviceId === entry.deviceId);
 }
 
+function findDeviceExamAttemptConflict(profile, examId, studentContext) {
+  if (!profile || !examId || !studentContext) return null;
+  if (findActiveRetakeGrant(null, examId, studentContext)) return null;
+
+  let sameStudentBlock = null;
+  let otherStudentBlock = null;
+
+  (systemState.results || []).forEach(r => {
+    if (!r || r.examId !== examId || isSupersededResult(r)) return;
+    if (!deviceProfileMatchesResult(profile, r)) return;
+
+    const isFinished = r.status !== "incomplete" && r.allowRetake !== true && (r.status === "completed" || r.status === "canceled");
+    const isInProgress = r.status === "incomplete";
+
+    if (resultMatchesStudentIdentity(r, studentContext)) {
+      if (isFinished) sameStudentBlock = r;
+      return;
+    }
+    if (isFinished || isInProgress) otherStudentBlock = r;
+  });
+
+  if (sameStudentBlock) return { kind: "same_student", result: sameStudentBlock };
+  if (otherStudentBlock) return { kind: "other_student", result: otherStudentBlock };
+  return null;
+}
+
 function findDeviceBindingConflict(profile, examId, studentLookupKey) {
   if (!profile || !studentLookupKey) return null;
   if (!profile.deviceFingerprint && !profile.deviceId) return null;
@@ -6913,12 +7012,35 @@ function registerExamDeviceBinding(deviceProfile, studentLookupKey, studentName,
   saveExamDeviceRegistry(registry);
 }
 
-async function enforceExamDeviceBinding(studentLookupKey, studentName, examId) {
+async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, studentContext) {
   const profile = await collectExamDeviceProfile();
   if (!profile.deviceFingerprint) {
     return {
       ok: false,
       message: "تعذر إنشاء بصمة الجهاز في هذا المتصفح. جرّب متصفحاً حديثاً (Chrome / Edge / Firefox) ثم أعد المحاولة.",
+      profile
+    };
+  }
+  const ctx = studentContext || buildStudentMatchContext({
+    studentKey: studentLookupKey,
+    name: studentName || ""
+  });
+  const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
+  if (attemptConflict?.kind === "same_student") {
+    return {
+      ok: false,
+      message: getExamBlockingMessage(attemptConflict.result),
+      profile
+    };
+  }
+  if (attemptConflict?.kind === "other_student") {
+    const other = attemptConflict.result || {};
+    return {
+      ok: false,
+      message:
+        "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
+        `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
+        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.",
       profile
     };
   }
