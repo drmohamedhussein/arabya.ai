@@ -13,7 +13,7 @@
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2026.06.02.9">
+  <link rel="stylesheet" href="style.css?v=2026.06.02.12">
   <link rel="stylesheet" href="style.responsive-dashboard.css">
 </head>
 <body>
@@ -1427,6 +1427,10 @@ function doGet(e) {
                   <span class="material-icons" aria-hidden="true">download_for_offline</span> تحميل النسخة الاحتياطية الكاملة (JSON)
                 </button>
                 
+                <button class="btn btn-outline" style="border-color: var(--secondary); color: var(--secondary);" onclick="restoreDatabaseFromBundledBackup()">
+                  <span class="material-icons" aria-hidden="true">history</span> استعادة النسخة المحفوظة ٣١/٥/٢٠٢٦ (من المستودع)
+                </button>
+
                 <button class="btn btn-outline" style="border-color: var(--accent); color: var(--accent);" onclick="document.getElementById('db-restore-file-input').click()">
                   <span class="material-icons" aria-hidden="true">restore</span> استعادة قاعدة البيانات من ملف (JSON)
                 </button>
@@ -1436,9 +1440,9 @@ function doGet(e) {
                 <label class="form-label" for="db-restore-mode" style="font-size:0.85rem;">وضع استعادة الملف المحلي (JSON):</label>
                 <select id="db-restore-mode" class="form-control" style="max-width:320px;">
                   <option value="replace">استبدال كامل (يمسح البيانات الحالية)</option>
-                  <option value="merge">دمج آمن (إضافة السجلات الجديدة فقط)</option>
+                  <option value="merge">دمج (يستبدل الامتحان إذا كانت النسخة المستوردة تحتوي أسئلة أكثر)</option>
                 </select>
-                <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">الدمج يحافظ على الحسابات والنتائج الحالية ويضيف ما لا يتكرر (حسب recordId أو المفاتيح).</small>
+                <small style="display:block; margin-top:0.5rem; color:var(--text-muted); font-size:0.8rem;">لاستعادة ملفك من التنزيلات: اختر «استبدال كامل» ثم الملف <code style="color:var(--accent);">نسخة_احتياطية_كاملة_arabya_٣١__٥__٢٠٢٦.json</code></small>
               </div>
 
                 <button id="btn-cloud-backup" class="btn btn-accent" onclick="backupDatabaseToCloud()">
@@ -1707,16 +1711,16 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-security.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-toast.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-offline-queue.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-platform-sync.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.9"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.02.9"></script>
-  <script src="app.js?v=2026.06.02.9"></script>
+  <script src="questions.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-security.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-toast.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.02.12"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.02.12"></script>
+  <script src="app.js?v=2026.06.02.12"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");
