@@ -3,10 +3,11 @@
  */
 (function (global) {
   const QB_PREFIX = "arabya_question_banks_teacher_";
-  const PULL_INTERVAL_MS = 30000;
-  const WATCH_INTERVAL_MS = 12000;
+  const PULL_INTERVAL_MS = 20000;
+  const WATCH_INTERVAL_MS = 10000;
+  const PUSH_DEBOUNCE_MS = 350;
   const REVISION_STORAGE_KEY = "arabya_cloud_revision";
-  const MIN_PULL_GAP_MS = 8000;
+  const MIN_PULL_GAP_MS = 4000;
 
   let pushTimer = null;
   let pushInFlight = false;
@@ -16,34 +17,65 @@
   let pullInFlight = false;
   let lastFullPullAt = 0;
 
+  function canonicalBankOwner(username) {
+    if (global.ArabyaQuestionBank && global.ArabyaQuestionBank.canonicalBankOwnerKey) {
+      return global.ArabyaQuestionBank.canonicalBankOwnerKey(username);
+    }
+    return String(username || "local").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "local";
+  }
+
+  function normalizeCloudQuestionBanks(raw) {
+    const banks = {};
+    if (!raw || typeof raw !== "object") return banks;
+    Object.keys(raw).forEach(ownerKey => {
+      const rows = raw[ownerKey];
+      if (!Array.isArray(rows)) return;
+      const canon = canonicalBankOwner(ownerKey);
+      if (!banks[canon] || rows.length >= (banks[canon].length || 0)) {
+        banks[canon] = rows;
+      }
+    });
+    return banks;
+  }
+
   function collectAllQuestionBanksForCloud() {
+    if (global.ArabyaQuestionBank && global.ArabyaQuestionBank.consolidateQuestionBankStorage) {
+      global.ArabyaQuestionBank.consolidateQuestionBankStorage();
+    }
     const banks = {};
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (!key || !key.startsWith(QB_PREFIX)) continue;
-        const username = key.slice(QB_PREFIX.length);
+        const owner = key.slice(QB_PREFIX.length);
         const raw = localStorage.getItem(key);
         if (!raw) continue;
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) banks[username] = parsed;
+        if (!Array.isArray(parsed)) continue;
+        const canon = canonicalBankOwner(owner);
+        if (!banks[canon] || parsed.length >= (banks[canon].length || 0)) {
+          banks[canon] = parsed;
+        }
       }
     } catch (e) {}
     if (global.systemState?.activeTeacher?.username && global.ArabyaQuestionBank) {
       const u = global.systemState.activeTeacher.username;
       const active = global.ArabyaQuestionBank.loadSharedBanks(u);
-      if (active.length) banks[u] = active;
+      banks[canonicalBankOwner(u)] = active;
     }
     return banks;
   }
 
   function applyQuestionBanksFromCloud(cloudBanks) {
     if (!cloudBanks || typeof cloudBanks !== "object" || !global.ArabyaQuestionBank) return;
-    Object.keys(cloudBanks).forEach(username => {
-      const rows = cloudBanks[username];
-      if (Array.isArray(rows) && rows.length) {
-        global.ArabyaQuestionBank.saveSharedBanks(rows, username, { skipCloudPush: true });
-      }
+    const normalized = normalizeCloudQuestionBanks(cloudBanks);
+    Object.keys(normalized).forEach(canonKey => {
+      const rows = normalized[canonKey];
+      if (!Array.isArray(rows)) return;
+      const localUsername = global.ArabyaQuestionBank.resolveBankUsername
+        ? global.ArabyaQuestionBank.resolveBankUsername(canonKey)
+        : canonKey;
+      global.ArabyaQuestionBank.saveSharedBanks(rows, localUsername, { skipCloudPush: true });
     });
     if (global.systemState?.activeTeacher?.username) {
       global.ArabyaQuestionBank.refreshSharedBankSelect(global.systemState.activeTeacher.username);
@@ -188,12 +220,18 @@
     }
   }
 
-  function schedulePush(reason) {
+  function schedulePush(reason, options) {
+    if (options && options.immediate) {
+      if (pushTimer) clearTimeout(pushTimer);
+      pushTimer = null;
+      pushNow(reason || "auto").catch(() => {});
+      return;
+    }
     if (pushTimer) clearTimeout(pushTimer);
     pushTimer = setTimeout(() => {
       pushTimer = null;
       pushNow(reason || "auto").catch(() => {});
-    }, 700);
+    }, PUSH_DEBOUNCE_MS);
   }
 
   function applyRemoteDatabase(remoteData) {
@@ -201,7 +239,7 @@
     if (typeof global.mergeRemoteDatabaseIntoLocal === "function") {
       global.mergeRemoteDatabaseIntoLocal(remoteData);
     }
-    applyQuestionBanksFromCloud(remoteData.questionBanks);
+    applyQuestionBanksFromCloud(normalizeCloudQuestionBanks(remoteData.questionBanks));
     if (typeof global.saveSystemState === "function") {
       global.saveSystemState(false);
     }
@@ -238,6 +276,8 @@
   global.ArabyaCloudSync = {
     PULL_INTERVAL_MS,
     WATCH_INTERVAL_MS,
+    normalizeCloudQuestionBanks,
+    canonicalBankOwner,
     collectAllQuestionBanksForCloud,
     applyQuestionBanksFromCloud,
     sanitizeTeacherForCloud,
@@ -256,4 +296,8 @@
 
   global.buildFullCloudBackupData = buildFullCloudBackupData;
   global.scheduleCloudBackupPush = schedulePush;
+
+  global.scheduleCloudBackupPush.immediate = function (reason) {
+    schedulePush(reason, { immediate: true });
+  };
 })(window);

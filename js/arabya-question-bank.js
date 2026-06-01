@@ -3,13 +3,66 @@
  */
 (function (global) {
   const LEGACY_STORAGE_KEY = "arabya_shared_question_banks";
+  const QB_PREFIX = "arabya_question_banks_teacher_";
+
+  function canonicalBankOwnerKey(username) {
+    return String(username || "local").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "local";
+  }
 
   function storageKeyForTeacher(username) {
-    const safe = String(username || "local").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "local";
-    return `arabya_question_banks_teacher_${safe}`;
+    return `${QB_PREFIX}${canonicalBankOwnerKey(username)}`;
+  }
+
+  function resolveBankUsername(canonOrRaw) {
+    const canon = canonicalBankOwnerKey(canonOrRaw);
+    const active = global.systemState?.activeTeacher?.username;
+    if (active && canonicalBankOwnerKey(active) === canon) return active;
+    const teachers = global.systemState?.teachers || [];
+    const hit = teachers.find(t => canonicalBankOwnerKey(t.username) === canon);
+    return hit ? hit.username : String(canonOrRaw || canon);
+  }
+
+  /** دمج مفاتيح بنك مكررة (TEACHER2026 vs teacher2026) في مفتاح واحد */
+  function consolidateQuestionBankStorage() {
+    const merged = {};
+    const staleKeys = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith(QB_PREFIX)) continue;
+        const owner = key.slice(QB_PREFIX.length);
+        const canon = canonicalBankOwnerKey(owner);
+        let parsed = [];
+        try {
+          parsed = JSON.parse(localStorage.getItem(key) || "[]");
+        } catch (e) {
+          parsed = [];
+        }
+        if (!Array.isArray(parsed)) parsed = [];
+        if (!merged[canon]) merged[canon] = [];
+        if (parsed.length) {
+          const sig = new Set(merged[canon].map(b => b.id));
+          parsed.forEach(b => {
+            if (b && b.id && sig.has(b.id)) return;
+            if (b && b.id) sig.add(b.id);
+            merged[canon].push(b);
+          });
+        }
+        if (key !== `${QB_PREFIX}${canon}`) staleKeys.push(key);
+      }
+      Object.keys(merged).forEach(canon => {
+        localStorage.setItem(`${QB_PREFIX}${canon}`, JSON.stringify(merged[canon]));
+      });
+      staleKeys.forEach(k => {
+        try {
+          localStorage.removeItem(k);
+        } catch (e) {}
+      });
+    } catch (e) {}
   }
 
   function loadSharedBanks(username) {
+    consolidateQuestionBankStorage();
     const key = storageKeyForTeacher(username);
     try {
       const raw = JSON.parse(localStorage.getItem(key) || "[]");
@@ -30,12 +83,22 @@
     }
   }
 
+  function queueQuestionBankCloudSync(reason) {
+    if (typeof global.scheduleCloudBackupPush === "function") {
+      global.scheduleCloudBackupPush(reason || "question-bank", { immediate: true });
+    } else if (global.ArabyaCloudSync && typeof global.ArabyaCloudSync.pushNow === "function") {
+      global.ArabyaCloudSync.pushNow(reason || "question-bank").catch(() => {});
+    }
+    const hasUrl = typeof global.getArabyaWebAppUrls === "function" && global.getArabyaWebAppUrls().length > 0;
+    if (!hasUrl && typeof global.isSuperAdminTeacher === "function" && global.isSuperAdminTeacher()) {
+      console.warn("[ARABYA] بنك الأسئلة محفوظ محلياً — أضف رابط Web App في تبويب الربط للمزامنة السحابية.");
+    }
+  }
+
   function saveSharedBanks(banks, username, options) {
     localStorage.setItem(storageKeyForTeacher(username), JSON.stringify(banks || []));
     if (!options || !options.skipCloudPush) {
-      if (typeof global.scheduleCloudBackupPush === "function") {
-        global.scheduleCloudBackupPush("question-bank");
-      }
+      queueQuestionBankCloudSync("question-bank");
     }
   }
 
@@ -174,6 +237,10 @@
   }
 
   global.ArabyaQuestionBank = {
+    QB_PREFIX,
+    canonicalBankOwnerKey,
+    resolveBankUsername,
+    consolidateQuestionBankStorage,
     storageKeyForTeacher,
     loadSharedBanks,
     saveSharedBanks,

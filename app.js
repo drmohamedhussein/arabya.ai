@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.5";
+const ARABYA_APP_VERSION = "2026.06.01.6";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -674,6 +674,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.loadExamDeviceRegistry = loadExamDeviceRegistry;
   window.getArabyaWebAppUrls = getArabyaWebAppUrls;
   window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
+  window.isSuperAdminTeacher = isSuperAdminTeacher;
 
   // ===== تشخيص ما تم تحميله =====
   console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
@@ -991,7 +992,7 @@ function saveSystemState(syncToCloud = true) {
   
   if (syncToCloud) {
     if (typeof scheduleCloudBackupPush === "function") {
-      scheduleCloudBackupPush("saveSystemState");
+      scheduleCloudBackupPush("saveSystemState", { immediate: true });
     } else {
       autoSyncToCloud();
     }
@@ -2428,7 +2429,7 @@ function refreshCloudSyncStatusUI(liveMessage, state) {
     const parts = [];
     if (okMeta?.at) parts.push(`<span style="color:var(--success);">آخر مزامنة ناجحة: ${escapeHtml(formatCloudSyncTimestamp(okMeta.at))}</span>`);
     if (urlConfigured) {
-      parts.push(`<span style="color:var(--text-muted);">جلب تلقائي كل 30 ث · مراقبة تعديل الشيت كل 12 ث</span>`);
+      parts.push(`<span style="color:var(--text-muted);">جلب تلقائي كل 20 ث · مراقبة الشيت كل 10 ث · رفع فوري بعد الحفظ</span>`);
     }
     if (failMeta?.at) parts.push(`<span style="color:var(--error);">آخر فشل: ${escapeHtml(formatCloudSyncTimestamp(failMeta.at))}${failMeta.detail ? ` (${escapeHtml(failMeta.detail)})` : ""}</span>`);
     if (localMeta?.at && !okMeta?.at) parts.push(`<span style="color:var(--warning);">محلي فقط منذ: ${escapeHtml(formatCloudSyncTimestamp(localMeta.at))}</span>`);
@@ -2695,7 +2696,10 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
     saveExamDeviceRegistry(mergeRemoteExamDeviceRegistry_(loadExamDeviceRegistry(), remoteData.examDeviceRegistry));
   }
   if (remoteData.questionBanks && typeof remoteData.questionBanks === "object" && window.ArabyaCloudSync) {
-    window.ArabyaCloudSync.applyQuestionBanksFromCloud(remoteData.questionBanks);
+    const banks = window.ArabyaCloudSync.normalizeCloudQuestionBanks
+      ? window.ArabyaCloudSync.normalizeCloudQuestionBanks(remoteData.questionBanks)
+      : remoteData.questionBanks;
+    window.ArabyaCloudSync.applyQuestionBanksFromCloud(banks);
   }
   ensureStudentsDataShape();
   ensureExamsDataShape();
@@ -4473,6 +4477,14 @@ function renderTeacherStatsDashboard() {
 window.renderTeacherStatsDashboard = renderTeacherStatsDashboard;
 
 function loadTeacherDashboardData() {
+  if (window.ArabyaQuestionBank && window.ArabyaQuestionBank.consolidateQuestionBankStorage) {
+    window.ArabyaQuestionBank.consolidateQuestionBankStorage();
+  }
+  if (systemState.activeTeacher) {
+    normalizeTeacherAccount(systemState.activeTeacher);
+    const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+    if (idx !== -1) systemState.teachers[idx] = systemState.activeTeacher;
+  }
   if (!systemState.activeTeacher) return;
   normalizeTeacherAccount(systemState.activeTeacher);
   updateTeacherDashboardAccessUI();
