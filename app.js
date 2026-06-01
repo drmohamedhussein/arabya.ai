@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.33";
+const ARABYA_APP_VERSION = "2026.05.31.34";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -6874,15 +6874,13 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   }
 
   if (totalItems === 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `وُجد 0 من ${totalAll} سجلاً`
-        : "";
-    }
+    const emptyText = isFiltered ? `وُجد 0 من ${totalAll} سجلاً` : "";
+    if (info) info.textContent = emptyText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
-    if (infoBottom) infoBottom.textContent = info ? info.textContent : "";
+
+    if (infoBottom) infoBottom.textContent = emptyText;
     if (pageNumBottom) pageNumBottom.textContent = "";
     if (prevBtnBottom) prevBtnBottom.disabled = true;
     if (nextBtnBottom) nextBtnBottom.disabled = true;
@@ -6892,26 +6890,34 @@ function updateResultsPaginationUI(totalItems, page, pageSize, totalAll = totalI
   const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} سجل — ` : "";
 
   if (!pageSize || pageSize <= 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `${countPrefix}عرض الكل`
-        : `إجمالي ${totalItems} سجلاً — عرض الكل`;
-    }
+    const allText = isFiltered
+      ? `${countPrefix}عرض الكل`
+      : `إجمالي ${totalItems} سجلاً — عرض الكل`;
+    if (info) info.textContent = allText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = allText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} سجلاً`;
-  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  const rangeText = `${countPrefix}عرض ${start}–${end} من ${totalItems} سجلاً`;
+  const pageText = `${page} / ${totalPages}`;
+
+  if (info) info.textContent = rangeText;
+  if (pageNum) pageNum.textContent = pageText;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
-  if (infoBottom) infoBottom.textContent = info ? info.textContent : "";
-  if (pageNumBottom) pageNumBottom.textContent = pageNum ? pageNum.textContent : "";
+
+  if (infoBottom) infoBottom.textContent = rangeText;
+  if (pageNumBottom) pageNumBottom.textContent = pageText;
   if (prevBtnBottom) prevBtnBottom.disabled = page <= 1;
   if (nextBtnBottom) nextBtnBottom.disabled = page >= totalPages;
 }
@@ -6932,6 +6938,15 @@ function setupResultsTablePaginationControls() {
       renderStudentResultsTable();
     });
   }
+  if (sizeSelectBottom && !sizeSelectBottom.dataset.bound) {
+    sizeSelectBottom.dataset.bound = "1";
+    sizeSelectBottom.value = String(getResultsTableViewSettings().pageSize);
+    sizeSelectBottom.addEventListener("change", () => {
+      setResultsTablePageSize(parseInt(sizeSelectBottom.value, 10));
+      renderStudentResultsTable();
+    });
+  }
+
   if (prevBtn && !prevBtn.dataset.bound) {
     prevBtn.dataset.bound = "1";
     prevBtn.addEventListener("click", () => {
@@ -6942,9 +6957,28 @@ function setupResultsTablePaginationControls() {
       }
     });
   }
+  if (prevBtnBottom && !prevBtnBottom.dataset.bound) {
+    prevBtnBottom.dataset.bound = "1";
+    prevBtnBottom.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      if (view.page > 1) {
+        view.page -= 1;
+        renderStudentResultsTable();
+      }
+    });
+  }
+
   if (nextBtn && !nextBtn.dataset.bound) {
     nextBtn.dataset.bound = "1";
     nextBtn.addEventListener("click", () => {
+      const view = getResultsTableViewSettings();
+      view.page += 1;
+      renderStudentResultsTable();
+    });
+  }
+  if (nextBtnBottom && !nextBtnBottom.dataset.bound) {
+    nextBtnBottom.dataset.bound = "1";
+    nextBtnBottom.addEventListener("click", () => {
       const view = getResultsTableViewSettings();
       view.page += 1;
       renderStudentResultsTable();
@@ -8547,45 +8581,63 @@ function updateStudentsPaginationUI(totalItems, page, pageSize, totalAll = total
   const prevBtnBottom = document.getElementById("teacher-students-prev-page-bottom");
   const nextBtnBottom = document.getElementById("teacher-students-next-page-bottom");
   const sizeSelectBottom = document.getElementById("teacher-students-page-size-bottom");
+
   const isFiltered = filtersActive || totalAll !== totalItems;
 
   if (sizeSelect && String(sizeSelect.value) !== String(pageSize)) {
     sizeSelect.value = String(pageSize);
   }
+  if (sizeSelectBottom && String(sizeSelectBottom.value) !== String(pageSize)) {
+    sizeSelectBottom.value = String(pageSize);
+  }
 
   if (totalItems === 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `وُجد 0 من ${totalAll} طالب`
-        : "";
-    }
+    const emptyText = isFiltered ? `وُجد 0 من ${totalAll} طالب` : "";
+    if (info) info.textContent = emptyText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = emptyText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const countPrefix = isFiltered ? `وُجد ${totalItems} من ${totalAll} طالب — ` : "";
 
   if (!pageSize || pageSize <= 0) {
-    if (info) {
-      info.textContent = isFiltered
-        ? `${countPrefix}عرض الكل`
-        : `إجمالي ${totalItems} طالب — عرض الكل`;
-    }
+    const allText = isFiltered
+      ? `${countPrefix}عرض الكل`
+      : `إجمالي ${totalItems} طالب — عرض الكل`;
+    if (info) info.textContent = allText;
     if (pageNum) pageNum.textContent = "";
     if (prevBtn) prevBtn.disabled = true;
     if (nextBtn) nextBtn.disabled = true;
+
+    if (infoBottom) infoBottom.textContent = allText;
+    if (pageNumBottom) pageNumBottom.textContent = "";
+    if (prevBtnBottom) prevBtnBottom.disabled = true;
+    if (nextBtnBottom) nextBtnBottom.disabled = true;
     return;
   }
 
   const totalPages = Math.ceil(totalItems / pageSize);
   const start = (page - 1) * pageSize + 1;
   const end = Math.min(page * pageSize, totalItems);
-  if (info) info.textContent = `${countPrefix}عرض ${start}–${end} من ${totalItems} طالب`;
-  if (pageNum) pageNum.textContent = `${page} / ${totalPages}`;
+  const rangeText = `${countPrefix}عرض ${start}–${end} من ${totalItems} طالب`;
+  const pageText = `${page} / ${totalPages}`;
+
+  if (info) info.textContent = rangeText;
+  if (pageNum) pageNum.textContent = pageText;
   if (prevBtn) prevBtn.disabled = page <= 1;
   if (nextBtn) nextBtn.disabled = page >= totalPages;
+
+  if (infoBottom) infoBottom.textContent = rangeText;
+  if (pageNumBottom) pageNumBottom.textContent = pageText;
+  if (prevBtnBottom) prevBtnBottom.disabled = page <= 1;
+  if (nextBtnBottom) nextBtnBottom.disabled = page >= totalPages;
 }
 
 function setupStudentsTablePaginationControls() {
@@ -8612,6 +8664,7 @@ function setupStudentsTablePaginationControls() {
       renderTeacherStudentsTable();
     });
   }
+
   if (prevBtn && !prevBtn.dataset.bound) {
     prevBtn.dataset.bound = "1";
     prevBtn.addEventListener("click", () => {
@@ -8632,6 +8685,7 @@ function setupStudentsTablePaginationControls() {
       }
     });
   }
+
   if (nextBtn && !nextBtn.dataset.bound) {
     nextBtn.dataset.bound = "1";
     nextBtn.addEventListener("click", () => {
@@ -8649,25 +8703,6 @@ function setupStudentsTablePaginationControls() {
     });
   }
 }
-
-window.pullTeacherStudentsFromCloud = async function() {
-  const el = document.getElementById("teacher-students-sync-status");
-  if (el) {
-    el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب الطلاب والنتائج من Google Sheets...`;
-  }
-  const ok = await pullTeacherResultsFromCloud();
-  if (el) {
-    if (ok) {
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.students.length} طالب و ${systemState.results.length} نتيجة`;
-    } else if (!document.getElementById("teacher-results-sync-status")?.textContent?.includes("cloud_done")) {
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Apps Script كإصدار جديد.`;
-    } else {
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> ${systemState.students.length} طالب`;
-    }
-  }
-  refreshTeacherDashboardViews({ all: true });
-  return ok;
-};
 
 function renderTeacherStudentsTable() {
   const tbody = document.getElementById("teacher-students-table-body");
