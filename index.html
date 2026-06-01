@@ -774,7 +774,7 @@
 
                 <div class="exam-builder-card" style="margin-bottom:1.5rem; border-color:rgba(20,184,166,0.25); background:rgba(20,184,166,0.03); text-align:right;">
                   <h4 style="color:var(--secondary); font-weight:700; margin-bottom:0.75rem;">بنك أسئلة مشترك (بين الامتحانات)</h4>
-                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">احفظ أسئلة هذا الامتحان كبنك مشترك، أو ادمج بنكاً محفوظاً — مع تصدير JSON/CSV.</p>
+                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">بنوك الأسئلة <strong>خاصة بكل معلم</strong> على جهازه (localStorage) — لا يراها معلمون آخرون ولا الطلاب. احفظ أسئلة الامتحان أو ادمج بنكاً محفوظاً مع تصدير JSON/CSV.</p>
                   <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem;">
                     <label for="shared-question-bank-select" class="sr-only">بنك أسئلة محفوظ</label>
                     <select id="shared-question-bank-select" class="form-control" style="min-width:220px; max-width:100%;"></select>
@@ -1238,7 +1238,8 @@
 
               <div id="apps-script-deploy-notice" class="config-card-box" style="margin-bottom:1rem; text-align:right; border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.04);">
                 <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.7; margin:0;">
-                  <strong style="color:var(--accent);">بعد كل تعديل على كود Apps Script:</strong> انسخ الكود أدناه (يُحمَّل تلقائياً من ملف <code>integrations/google-apps-script-backend.gs</code>) → الصقه في مشروع Apps Script → <strong>نشر إصدار جديد</strong> (Deploy → New version) مع الوصول <strong>Anyone</strong> ورابط <code>/exec</code> → اختبر صفاً واحداً في الشيت (حفظ نتيجة أو نسخة احتياطية) قبل الاعتماد على المزامنة الحية.
+                  <strong style="color:var(--accent);">بعد كل تعديل على كود Apps Script:</strong> انسخ الكود أدناه (يُحمَّل تلقائياً من <code>integrations/google-apps-script-backend.gs</code>) → الصقه في Apps Script → <strong>نشر إصدار جديد</strong> (Deploy → New version) — الوصول <strong>Anyone</strong> ورابط <code>/exec</code> → اختبر حفظ نتيجة أو نسخة احتياطية في الشيت.<br>
+                  <span style="font-size:0.85rem;">المزامنة تعمل <strong>بدون GitHub</strong> عبر ورقة <code>ARABYA_BACKUP</code>. إعداد GitHub (اختياري) في Script Properties لمزامنة مركزية مع المستودع.</span>
                 </p>
               </div>
 
@@ -1627,10 +1628,10 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.01.2"></script>
-  <script src="js/arabya-security.js?v=2026.06.01.2"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.01.2"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.01.2"></script>
-  <script src="app.js?v=2026.06.01.2"></script>
+  <script src="questions.js?v=2026.06.01.3"></script>
+  <script src="js/arabya-security.js?v=2026.06.01.3"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.01.3"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.01.3"></script>
+  <script src="app.js?v=2026.06.01.3"></script>
 </body>
 </html>

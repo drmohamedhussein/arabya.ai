@@ -74,8 +74,12 @@ function doPost(e) {
 
     if (action === "save_backup") {
       var merged = mergeArabyaDatabase_(data.data || {}, "save_backup");
-      writeArabyaBackupSheet_(merged);
-      return jsonArabya_({ status: "success", action: action, counts: countArabya_(merged) });
+      return jsonArabya_({
+        status: "success",
+        action: action,
+        counts: countArabya_(merged),
+        githubSynced: !merged._githubSyncSkipped
+      });
     }
 
     if (action === "save_entity") {
@@ -97,7 +101,14 @@ function doGet(e) {
     var action = e && e.parameter ? e.parameter.action : "";
     if (action === "get_backup") {
       var db = readArabyaDatabase_();
-      return jsonArabya_({ status: "success", data: db, counts: countArabya_(db) });
+      var resultCount = (db.results || []).length;
+      return jsonArabya_({
+        status: "success",
+        data: db,
+        counts: countArabya_(db),
+        sheetResultRows: resultCount,
+        backupResultRows: resultCount
+      });
     }
     return jsonArabya_({ status: "active", service: "ARABYA.NET backend bridge", schemaVersion: ARABYA_DEFAULT_DB.schemaVersion });
   } catch (err) {
@@ -274,7 +285,12 @@ function mergeArabyaDatabase_(patch, reason) {
     counts: countArabya_(db)
   });
   if (db.auditLog.length > 200) db.auditLog = db.auditLog.slice(db.auditLog.length - 200);
-  writeArabyaDatabase_(db);
+  writeArabyaBackupSheet_(db);
+  try {
+    writeArabyaDatabaseToGitHub_(db);
+  } catch (githubErr) {
+    db._githubSyncSkipped = String(githubErr.message || githubErr);
+  }
   return db;
 }
 
@@ -373,42 +389,63 @@ function readArabyaDatabase_() {
   var path = props.getProperty("GITHUB_DB_PATH") || "database/arabya-db.json";
   var branch = props.getProperty("GITHUB_BRANCH") || "main";
   var token = props.getProperty("GITHUB_TOKEN");
-  if (!repo || !token) return cloneArabyaDefaultDb_();
-
-  var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURIComponent(path).replace(/%2F/g, "/") + "?ref=" + encodeURIComponent(branch);
-  var response = UrlFetchApp.fetch(url, {
-    method: "get",
-    muteHttpExceptions: true,
-    headers: {
-      Authorization: "Bearer " + token,
-      Accept: "application/vnd.github+json"
+  if (repo && token) {
+    try {
+      var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURIComponent(path).replace(/%2F/g, "/") + "?ref=" + encodeURIComponent(branch);
+      var response = UrlFetchApp.fetch(url, {
+        method: "get",
+        muteHttpExceptions: true,
+        headers: {
+          Authorization: "Bearer " + token,
+          Accept: "application/vnd.github+json"
+        }
+      });
+      if (response.getResponseCode() === 200) {
+        var body = JSON.parse(response.getContentText());
+        var decoded = Utilities.newBlob(Utilities.base64Decode(body.content)).getDataAsString("UTF-8");
+        var db = JSON.parse(decoded || "{}");
+        db._sha = body.sha;
+        return Object.assign(cloneArabyaDefaultDb_(), db);
+      }
+    } catch (githubReadErr) {
+      // fallback to sheet backup below
     }
-  });
-  if (response.getResponseCode() === 404) return cloneArabyaDefaultDb_();
-  if (response.getResponseCode() >= 300) throw new Error("GitHub read failed: " + response.getContentText());
-
-  var body = JSON.parse(response.getContentText());
-  var decoded = Utilities.newBlob(Utilities.base64Decode(body.content)).getDataAsString("UTF-8");
-  var db = JSON.parse(decoded || "{}");
-  db._sha = body.sha;
-  return Object.assign(cloneArabyaDefaultDb_(), db);
+  }
+  return readArabyaDatabaseFromSheet_();
 }
 
-function writeArabyaDatabase_(db) {
+/** قراءة آخر نسخة احتياطية من ورقة ARABYA_BACKUP (وضع الشيت فقط بدون GitHub) */
+function readArabyaDatabaseFromSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP");
+  if (!sheet || sheet.getLastRow() < 2) return cloneArabyaDefaultDb_();
+  var lastRow = sheet.getLastRow();
+  var backupDataStr = sheet.getRange(lastRow, 2).getValue();
+  if (!backupDataStr) return cloneArabyaDefaultDb_();
+  try {
+    var parsed = JSON.parse(String(backupDataStr));
+    return Object.assign(cloneArabyaDefaultDb_(), parsed);
+  } catch (err) {
+    return cloneArabyaDefaultDb_();
+  }
+}
+
+function writeArabyaDatabaseToGitHub_(db) {
   var props = PropertiesService.getScriptProperties();
   var repo = props.getProperty("GITHUB_REPO");
   var path = props.getProperty("GITHUB_DB_PATH") || "database/arabya-db.json";
   var branch = props.getProperty("GITHUB_BRANCH") || "main";
   var token = props.getProperty("GITHUB_TOKEN");
-  if (!repo || !token) throw new Error("Missing GitHub Script Properties");
+  if (!repo || !token) return;
 
-  var sha = db._sha;
-  delete db._sha;
+  var payloadDb = JSON.parse(JSON.stringify(db));
+  var sha = payloadDb._sha;
+  delete payloadDb._sha;
+  delete payloadDb._githubSyncSkipped;
   var url = "https://api.github.com/repos/" + repo + "/contents/" + encodeURIComponent(path).replace(/%2F/g, "/");
   var payload = {
     message: "Sync ARABYA.NET database",
     branch: branch,
-    content: Utilities.base64Encode(JSON.stringify(db, null, 2), Utilities.Charset.UTF_8)
+    content: Utilities.base64Encode(JSON.stringify(payloadDb, null, 2), Utilities.Charset.UTF_8)
   };
   if (sha) payload.sha = sha;
 

@@ -1,20 +1,37 @@
 /**
- * بنك أسئلة مشترك — حفظ، استيراد، تصدير، وربط بامتحانات متعددة.
+ * بنك أسئلة خاص بكل معلم — محفوظ محلياً في متصفحه فقط (لا يشاركه طلاب أو معلمون آخرون).
  */
 (function (global) {
-  const STORAGE_KEY = "arabya_shared_question_banks";
+  const LEGACY_STORAGE_KEY = "arabya_shared_question_banks";
 
-  function loadSharedBanks() {
+  function storageKeyForTeacher(username) {
+    const safe = String(username || "local").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_") || "local";
+    return `arabya_question_banks_teacher_${safe}`;
+  }
+
+  function loadSharedBanks(username) {
+    const key = storageKeyForTeacher(username);
     try {
-      const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-      return Array.isArray(raw) ? raw : [];
+      const raw = JSON.parse(localStorage.getItem(key) || "[]");
+      if (Array.isArray(raw) && raw.length) return raw;
+    } catch (e) {}
+
+    try {
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]");
+      if (!Array.isArray(legacy) || !legacy.length) return [];
+      const teacher = String(username || "").trim();
+      const owned = legacy.filter(b => !b.teacher || b.teacher === teacher);
+      if (owned.length) {
+        localStorage.setItem(key, JSON.stringify(owned));
+      }
+      return owned;
     } catch (e) {
       return [];
     }
   }
 
-  function saveSharedBanks(banks) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(banks));
+  function saveSharedBanks(banks, username) {
+    localStorage.setItem(storageKeyForTeacher(username), JSON.stringify(banks || []));
   }
 
   function normalizeQuestions(questions) {
@@ -35,12 +52,21 @@
   }
 
   function listBanksForTeacher(username) {
-    return loadSharedBanks().filter(b => !b.teacher || b.teacher === username);
+    if (!username) return [];
+    return loadSharedBanks(username).filter(b => String(b.teacher || username) === String(username));
+  }
+
+  function getBankById(bankId, username) {
+    return listBanksForTeacher(username).find(b => b.id === bankId) || null;
   }
 
   function refreshSharedBankSelect(username) {
     const select = document.getElementById("shared-question-bank-select");
     if (!select) return;
+    if (!username) {
+      select.innerHTML = `<option value="">— سجّل دخول المعلم لعرض بنوكك —</option>`;
+      return;
+    }
     const banks = listBanksForTeacher(username);
     select.innerHTML = `<option value="">— اختر بنك أسئلة محفوظ —</option>` +
       banks.map(b => `<option value="${escapeAttr(b.id)}">${escapeHtml(b.name)} (${(b.questions || []).length} سؤال)</option>`).join("");
@@ -59,24 +85,28 @@
   }
 
   function saveBankFromExam(exam, bankName, teacherUsername) {
+    if (!teacherUsername) {
+      alert("يجب تسجيل دخول المعلم لحفظ بنك الأسئلة.");
+      return false;
+    }
     if (!exam || !Array.isArray(exam.questions) || !exam.questions.length) {
       alert("لا توجد أسئلة في هذا الامتحان لحفظها كبنك.");
       return false;
     }
     const name = String(bankName || "").trim() || `${exam.title || "بنك"} — ${new Date().toLocaleDateString("ar-EG")}`;
-    const banks = loadSharedBanks();
+    const banks = loadSharedBanks(teacherUsername);
     const id = `bank_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     banks.push({
       id,
       name,
       subject: exam.subject || "",
-      teacher: teacherUsername || exam.teacher || "",
+      teacher: teacherUsername,
       questions: JSON.parse(JSON.stringify(exam.questions)),
       updatedAt: new Date().toISOString()
     });
-    saveSharedBanks(banks);
+    saveSharedBanks(banks, teacherUsername);
     refreshSharedBankSelect(teacherUsername);
-    alert(`تم حفظ بنك «${name}» (${exam.questions.length} سؤال).`);
+    alert(`تم حفظ بنك «${name}» (${exam.questions.length} سؤال) — خاص بحسابك فقط على هذا الجهاز.`);
     return true;
   }
 
@@ -106,6 +136,7 @@
     const payload = {
       exportedAt: new Date().toISOString(),
       type: "arabya_question_bank",
+      ownerTeacher: bank.teacher || "",
       bank
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -138,9 +169,11 @@
   }
 
   global.ArabyaQuestionBank = {
+    storageKeyForTeacher,
     loadSharedBanks,
     saveSharedBanks,
     listBanksForTeacher,
+    getBankById,
     refreshSharedBankSelect,
     saveBankFromExam,
     mergeBankIntoExam,
@@ -152,27 +185,41 @@
   global.saveSharedBankFromCurrentExam = function () {
     const examId = global.currentEditingExamId;
     const state = global.systemState;
+    const username = state?.activeTeacher?.username;
+    if (!username) {
+      alert("يجب تسجيل دخول المعلم.");
+      return;
+    }
     if (!examId || !state) return;
     const exam = state.exams.find(e => e.id === examId);
-    const name = prompt("اسم بنك الأسئلة المشترك:", exam?.title || "");
+    const name = prompt("اسم بنك الأسئلة (خاص بك فقط):", exam?.title || "");
     if (name === null) return;
-    global.ArabyaQuestionBank.saveBankFromExam(exam, name, state.activeTeacher?.username);
+    global.ArabyaQuestionBank.saveBankFromExam(exam, name, username);
   };
 
   global.importSharedBankIntoCurrentExam = function () {
     const examId = global.currentEditingExamId;
     const state = global.systemState;
+    const username = state?.activeTeacher?.username;
     const select = document.getElementById("shared-question-bank-select");
     const modeEl = document.getElementById("shared-bank-import-mode");
+    if (!username) {
+      alert("يجب تسجيل دخول المعلم.");
+      return;
+    }
     if (!examId || !state || !select) return;
     const bankId = select.value;
     if (!bankId) {
-      alert("اختر بنك أسئلة من القائمة أولاً.");
+      alert("اختر بنك أسئلة من قائمتك أولاً.");
       return;
     }
-    const bank = loadSharedBanks().find(b => b.id === bankId);
+    const bank = getBankById(bankId, username);
+    if (!bank) {
+      alert("البنك غير متاح لحسابك.");
+      return;
+    }
     const exam = state.exams.find(e => e.id === examId);
-    if (!bank || !exam) return;
+    if (!exam) return;
     const mode = (modeEl && modeEl.value) || "append";
     const count = mergeBankIntoExam(exam, bank, mode);
     if (typeof global.sanitizeQuestionConfig === "function") global.sanitizeQuestionConfig(exam);
@@ -182,26 +229,34 @@
   };
 
   global.exportSelectedSharedBankJson = function () {
+    const username = global.systemState?.activeTeacher?.username;
     const select = document.getElementById("shared-question-bank-select");
-    if (!select || !select.value) {
-      alert("اختر بنكاً أولاً.");
+    if (!username || !select || !select.value) {
+      alert("اختر بنكاً من بنوكك أولاً.");
       return;
     }
-    const bank = loadSharedBanks().find(b => b.id === select.value);
+    const bank = getBankById(select.value, username);
     if (bank) exportBankJson(bank);
   };
 
   global.exportSelectedSharedBankCsv = function () {
+    const username = global.systemState?.activeTeacher?.username;
     const select = document.getElementById("shared-question-bank-select");
-    if (!select || !select.value) {
-      alert("اختر بنكاً أولاً.");
+    if (!username || !select || !select.value) {
+      alert("اختر بنكاً من بنوكك أولاً.");
       return;
     }
-    const bank = loadSharedBanks().find(b => b.id === select.value);
+    const bank = getBankById(select.value, username);
     if (bank) exportBankCsv(bank);
   };
 
   global.importQuestionBankFile = function (event) {
+    const username = global.systemState?.activeTeacher?.username;
+    if (!username) {
+      alert("يجب تسجيل دخول المعلم لاستيراد بنك أسئلة.");
+      event.target.value = "";
+      return;
+    }
     const file = event.target.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -213,19 +268,19 @@
           alert("تنسيق غير صالح. يجب أن يحتوي الملف على questions أو bank.questions");
           return;
         }
-        const banks = loadSharedBanks();
+        const banks = loadSharedBanks(username);
         const id = `bank_${Date.now()}`;
         banks.push({
           id,
           name: parsed.name || parsed.bank?.name || file.name.replace(/\.json$/i, ""),
           subject: parsed.subject || parsed.bank?.subject || "",
-          teacher: global.systemState?.activeTeacher?.username || "",
+          teacher: username,
           questions: normalizeQuestions(questions),
           updatedAt: new Date().toISOString()
         });
-        saveSharedBanks(banks);
-        refreshSharedBankSelect(global.systemState?.activeTeacher?.username);
-        alert("تم استيراد بنك الأسئلة بنجاح.");
+        saveSharedBanks(banks, username);
+        refreshSharedBankSelect(username);
+        alert("تم استيراد بنك الأسئلة إلى حسابك فقط.");
       } catch (err) {
         alert("تعذّر قراءة ملف بنك الأسئلة.");
       }

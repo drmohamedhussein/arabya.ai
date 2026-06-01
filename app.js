@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.2";
+const ARABYA_APP_VERSION = "2026.06.01.3";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -3029,14 +3029,22 @@ function setupArabyaLiveDataRefresh() {
 }
 
 function hydrateGoogleSheetsScriptBox() {
+  const box = document.getElementById("google-sheets-sync-script-code");
+  const hint = document.getElementById("google-sheets-script-load-hint");
   fetch("integrations/google-apps-script-backend.gs", { cache: "no-store" })
     .then(res => (res.ok ? res.text() : null))
     .then(text => {
-      if (!text) return;
-      const box = document.getElementById("google-sheets-sync-script-code");
-      if (box) box.value = text;
+      if (!text || !box) return;
+      box.value = text;
+      if (hint) {
+        hint.innerHTML = `<span style="color:var(--success);">تم تحميل أحدث كود Apps Script (${ARABYA_APP_VERSION}) من المستودع.</span> انسخه ثم انشر <strong>إصداراً جديداً</strong> في Google Apps Script.`;
+      }
     })
-    .catch(() => {});
+    .catch(() => {
+      if (hint) {
+        hint.innerHTML = `<span style="color:var(--error);">تعذّر تحميل الكود تلقائياً.</span> افتح الملف <code>integrations/google-apps-script-backend.gs</code> من GitHub والصقه يدوياً.`;
+      }
+    });
 }
 
 function getEffectiveExamSyncUrl(exam) {
