@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.01.2";
+const ARABYA_APP_VERSION = "2026.06.01.3";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2239,6 +2239,18 @@ function saveTeacherActiveTab(tabId) {
   } catch (e) {}
 }
 
+
+function focusTeacherTableControls(tabId) {
+  const toolbarId = tabId === "results" ? "teacher-results-toolbar" : "teacher-students-toolbar";
+  const toolbar = document.getElementById(toolbarId);
+  if (!toolbar) return;
+  requestAnimationFrame(() => {
+    toolbar.scrollIntoView({ behavior: "smooth", block: "start" });
+    toolbar.classList.add("teacher-controls-flash");
+    setTimeout(() => toolbar.classList.remove("teacher-controls-flash"), 1400);
+  });
+}
+
 function activateTeacherTab(tabId, options = {}) {
   const normalizedTab = normalizeTeacherTabId(tabId);
   if (systemState.activeView !== "teacher-dashboard-view" && !options.force) return normalizedTab;
@@ -2256,6 +2268,10 @@ function activateTeacherTab(tabId, options = {}) {
   if (targetPanel) targetPanel.classList.remove("hidden");
 
   if (!options.skipSave) saveTeacherActiveTab(normalizedTab);
+  if (normalizedTab === "results" || normalizedTab === "students") {
+    focusTeacherTableControls(normalizedTab);
+  }
+
   if (options.skipRefresh) return normalizedTab;
 
   reloadSystemStateFromLocalStorage();
