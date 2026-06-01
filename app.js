@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.3";
+const ARABYA_APP_VERSION = "2026.06.02.4";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -986,6 +986,9 @@ function saveStudentsToLocalStorage() {
 // دالة موحدة لحفظ حالة النظام بالكامل ومزامنتها سحابياً
 function saveSystemState(syncToCloud = true) {
   try {
+    loadDeletedStudentKeysFromStorage();
+    systemState.students = filterOutDeletedStudents(systemState.students);
+    persistDeletedStudentKeys();
     if (Array.isArray(systemState.teachers)) {
       localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
     }
@@ -1537,6 +1540,7 @@ function applyResultIpReleaseByStaff(res, newIpValue, syncStatusEl) {
   }
   return persistResultRecordWithCloudSync(res, syncStatusEl).then(() => {
     renderTeacherResultDeviceIpPanel(res);
+    renderDetailExamAllowedIpsList(res.examId || "");
     if (res.examId && currentEditingExamId === res.examId) {
       const exam = systemState.exams.find(e => e.id === res.examId);
       if (exam) renderExamAllowedIpsList(exam);
@@ -2710,7 +2714,31 @@ function isStudentKeyDeleted(key) {
 
 function isStudentRecordDeleted(student) {
   if (!student) return false;
-  return isStudentKeyDeleted(student.studentKey || getStudentLookupKey(student));
+  if (isStudentKeyDeleted(student.studentKey)) return true;
+  const lookup = getStudentLookupKey(student);
+  if (lookup && isStudentKeyDeleted(lookup)) return true;
+  const nid = normalizeStudentId(student.id);
+  if (nid && isStudentKeyDeleted(`id:${nid}`)) return true;
+  const code = sanitizeStudentCodeInput(student.code);
+  if (code && isStudentKeyDeleted(`code:${code}`)) return true;
+  return false;
+}
+
+function isResultFromDeletedStudent(res) {
+  if (!res) return false;
+  loadDeletedStudentKeysFromStorage();
+  if (res.studentLookupKey && isStudentKeyDeleted(res.studentLookupKey)) return true;
+  const lookup = getStudentLookupKey({
+    id: res.id,
+    name: res.name,
+    code: res.accessCode || res.code || ""
+  });
+  if (lookup && isStudentKeyDeleted(lookup)) return true;
+  const nid = normalizeStudentId(res.id);
+  if (nid && isStudentKeyDeleted(`id:${nid}`)) return true;
+  const code = sanitizeStudentCodeInput(res.accessCode || res.code);
+  if (code && isStudentKeyDeleted(`code:${code}`)) return true;
+  return false;
 }
 
 function addDeletedStudentKey(student) {
@@ -2738,9 +2766,10 @@ function mergeDeletedStudentKeysFromRemote(remoteKeys) {
 
 function hydrateStudentsFromResults(results) {
   if (!Array.isArray(results)) return;
+  loadDeletedStudentKeysFromStorage();
   results.forEach(res => {
     if (!res || (!res.name && !res.id && !res.accessCode && !res.code)) return;
-    if (res.studentLookupKey && isStudentKeyDeleted(res.studentLookupKey)) return;
+    if (isResultFromDeletedStudent(res)) return;
     upsertStudentRecord({
       name: res.name,
       id: res.id,
@@ -2783,6 +2812,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
     }, "نتيجة");
   }
   hydrateStudentsFromResults(systemState.results);
+  systemState.students = filterOutDeletedStudents(systemState.students);
   ensureResultRecordIds();
   hydratePresentedQuestionsForResults();
   if (remoteData.examDeviceRegistry) {
@@ -3357,6 +3387,9 @@ function applyCloudBackupData(data) {
     systemState.results = data.results;
     localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
     ensureResultRecordIds();
+    hydrateStudentsFromResults(systemState.results);
+    systemState.students = filterOutDeletedStudents(systemState.students);
+    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
   if (data.examDeviceRegistry) {
     saveExamDeviceRegistry(mergeRemoteExamDeviceRegistry_(loadExamDeviceRegistry(), data.examDeviceRegistry));
@@ -8219,6 +8252,7 @@ function renderTeacherResultDeviceIpPanel(res) {
       releaseStatus.innerHTML = '<span style="color:var(--text-muted);">لم يُحرَّر IP بعد. الحذف أو التعديل يفتح إعادة الدخول للامتحان نفسه.</span>';
     }
   }
+  renderDetailExamAllowedIpsList(res?.examId || "");
 }
 
 window.saveResultIpByTeacher = async function() {
@@ -9160,18 +9194,42 @@ function collectExamAllowedIps(exam) {
   return [...set].filter(Boolean);
 }
 
+function renderExamAllowedIpsHtml(ips, emptyMessage) {
+  if (!ips.length) {
+    return `<span style="color:var(--text-muted);">${emptyMessage}</span>`;
+  }
+  return (
+    `<ul style="margin:0; padding-right:1.2rem; font-size:0.88rem;">` +
+    ips.map(ip => `<li style="margin-bottom:0.25rem;"><code dir="ltr">${escapeHtml(ip)}</code></li>`).join("") +
+    `</ul>`
+  );
+}
+
 function renderExamAllowedIpsList(exam) {
   const el = document.getElementById("exam-allowed-ips-list");
   if (!el || !exam) return;
   const ips = collectExamAllowedIps(exam);
-  if (!ips.length) {
-    el.innerHTML = '<span style="color:var(--text-muted);">لا توجد عناوين IP مسجّلة بعد. أضفها في الحقول أعلاه أو حرّر/احذف IP من نتيجة طالب لفتح إعادة الدخول.</span>';
+  el.innerHTML = renderExamAllowedIpsHtml(
+    ips,
+    "لا توجد عناوين IP مسجّلة بعد. أضفها في الحقول أعلاه أو حرّر/احذف IP من نتيجة طالب لفتح إعادة الدخول."
+  );
+}
+
+function renderDetailExamAllowedIpsList(examId) {
+  const el = document.getElementById("detail-exam-allowed-ips-list");
+  const wrap = document.getElementById("detail-exam-allowed-ips-wrap");
+  if (!el) return;
+  const exam = examId ? systemState.exams.find(e => e.id === examId) : null;
+  if (wrap) wrap.classList.toggle("hidden", !exam);
+  if (!exam) {
+    el.innerHTML = '<span style="color:var(--text-muted);">—</span>';
     return;
   }
-  el.innerHTML =
-    `<ul style="margin:0; padding-right:1.2rem; font-size:0.88rem;">` +
-    ips.map(ip => `<li style="margin-bottom:0.25rem;"><code dir="ltr">${escapeHtml(ip)}</code></li>`).join("") +
-    `</ul>`;
+  const ips = collectExamAllowedIps(exam);
+  el.innerHTML = renderExamAllowedIpsHtml(
+    ips,
+    "لا توجد عناوين IP بعد. احفظ أو عدّل IP أعلاه، أو أضف عناوين في إعدادات الامتحان (قاعة IP)."
+  );
 }
 
 function addAllowedRetakeIpToExam(examId, ip) {
