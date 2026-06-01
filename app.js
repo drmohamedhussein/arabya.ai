@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.28";
+const ARABYA_APP_VERSION = "2026.05.31.29";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -184,42 +184,279 @@ function updateTeacherDashboardAccessUI() {
   if (regLink) regLink.classList.toggle("hidden", !canUsePublicTeacherRegistration());
 }
 
+let superAdminEditingTeacherUsername = null;
+
+function getTeacherStaffCapabilitySummary() {
+  return [
+    { feature: "كل الامتحانات والنتائج", superAdmin: true, teacher: false },
+    { feature: "إعدادات تشغيل الامتحان (وقت، عشوائي، عدد الأسئلة)", superAdmin: true, teacher: true },
+    { feature: "فلاتر النتائج والطلاب والإحصائيات", superAdmin: true, teacher: true },
+    { feature: "حذف/تعديل نتائج الطلاب", superAdmin: true, teacher: true },
+    { feature: "حذف الطلاب", superAdmin: true, teacher: false },
+    { feature: "إدارة حسابات المعلمين (تبويب المعلمين)", superAdmin: true, teacher: false },
+    { feature: "حذف حسابات المعلمين", superAdmin: true, teacher: false },
+    { feature: "تعديل ملفات المعلمين والربط السحابي", superAdmin: true, teacher: "حسابه فقط" }
+  ];
+}
+
+function renderTeacherCapabilityMatrix() {
+  const tbody = document.getElementById("teacher-capability-matrix-body");
+  if (!tbody) return;
+  tbody.innerHTML = getTeacherStaffCapabilitySummary().map(row => `
+    <tr>
+      <td>${escapeHtml(row.feature)}</td>
+      <td style="text-align:center; color:var(--secondary); font-weight:700;">${row.superAdmin === true ? "✓" : escapeHtml(String(row.superAdmin))}</td>
+      <td style="text-align:center;">${row.teacher === true ? "✓" : row.teacher === false ? "—" : escapeHtml(String(row.teacher))}</td>
+    </tr>
+  `).join("");
+}
+
+function countTeacherExams(username) {
+  return (systemState.exams || []).filter(exam => exam.teacher === username).length;
+}
+
+function fillSuperAdminTeacherEditorForm(teacher) {
+  const isNew = !teacher;
+  const panel = document.getElementById("teacher-account-editor-panel");
+  if (panel) panel.classList.toggle("hidden", false);
+  const titleEl = document.getElementById("teacher-account-editor-title");
+  if (titleEl) titleEl.textContent = isNew ? "إضافة معلم جديد" : `تعديل حساب: ${teacher.name || teacher.username}`;
+
+  const setVal = (id, val) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val ?? "";
+  };
+
+  setVal("super-admin-teacher-name", teacher?.name || "");
+  setVal("super-admin-teacher-username", teacher?.username || "");
+  setVal("super-admin-teacher-subject", teacher?.subject || "");
+  setVal("super-admin-teacher-password", teacher?.password || teacher?.autoEntryCode || "");
+  setVal("super-admin-teacher-autocode", teacher?.autoEntryCode || teacher?.password || "");
+  const cfg = teacher?.integrationConfig || {};
+  setVal("super-admin-teacher-sync-url", cfg.googleFormUrl || "");
+  setVal("super-admin-teacher-entry-name", cfg.entryName || "");
+  setVal("super-admin-teacher-entry-id", cfg.entryId || "");
+  setVal("super-admin-teacher-entry-code", cfg.entryCode || "");
+  setVal("super-admin-teacher-entry-score", cfg.entryScore || "");
+  setVal("super-admin-teacher-entry-details", cfg.entryDetails || "");
+
+  const usernameInput = document.getElementById("super-admin-teacher-username");
+  if (usernameInput) usernameInput.readOnly = !isNew;
+}
+
+window.openTeacherAccountEditor = function(username) {
+  if (!isSuperAdminTeacher()) {
+    alert("إدارة المعلمين متاحة لمدير المنصة (سوبر أدمن) فقط.");
+    return;
+  }
+  if (!username) {
+    superAdminEditingTeacherUsername = null;
+    fillSuperAdminTeacherEditorForm(null);
+    return;
+  }
+  const teacher = systemState.teachers.find(t => t.username === username);
+  if (!teacher) {
+    alert("لم يتم العثور على حساب المعلم.");
+    return;
+  }
+  superAdminEditingTeacherUsername = teacher.username;
+  fillSuperAdminTeacherEditorForm(teacher);
+  document.getElementById("teacher-account-editor-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+window.closeTeacherAccountEditor = function() {
+  superAdminEditingTeacherUsername = null;
+  document.getElementById("teacher-account-editor-panel")?.classList.add("hidden");
+};
+
+function readSuperAdminTeacherEditorForm() {
+  const get = (id) => document.getElementById(id)?.value.trim() || "";
+  return {
+    name: get("super-admin-teacher-name"),
+    username: get("super-admin-teacher-username"),
+    subject: get("super-admin-teacher-subject"),
+    password: get("super-admin-teacher-password"),
+    autoEntryCode: get("super-admin-teacher-autocode"),
+    integrationConfig: {
+      googleFormUrl: get("super-admin-teacher-sync-url"),
+      entryName: get("super-admin-teacher-entry-name"),
+      entryId: get("super-admin-teacher-entry-id"),
+      entryCode: get("super-admin-teacher-entry-code"),
+      entryScore: get("super-admin-teacher-entry-score"),
+      entryDetails: get("super-admin-teacher-entry-details")
+    }
+  };
+}
+
+window.saveTeacherAccountBySuperAdmin = async function() {
+  if (!isSuperAdminTeacher()) {
+    alert("حفظ بيانات المعلمين متاح لمدير المنصة فقط.");
+    return;
+  }
+  const form = readSuperAdminTeacherEditorForm();
+  if (!form.name || !form.username || !form.subject || !form.password || !form.autoEntryCode) {
+    alert("يرجى ملء جميع الحقول الإلزامية (الاسم، اسم المستخدم، المادة، الرقم السري، رمز الدخول).");
+    return;
+  }
+
+  const duplicateCode = systemState.teachers.some(t => {
+    if (superAdminEditingTeacherUsername && t.username === superAdminEditingTeacherUsername) return false;
+    return t.autoEntryCode === form.autoEntryCode || t.password === form.autoEntryCode;
+  });
+  if (duplicateCode) {
+    alert("رمز الدخول مستخدم من قبل معلم آخر. اختر رمزاً فريداً.");
+    return;
+  }
+
+  let teacherRecord = null;
+  if (superAdminEditingTeacherUsername) {
+    const idx = systemState.teachers.findIndex(t => t.username === superAdminEditingTeacherUsername);
+    if (idx === -1) {
+      alert("تعذّر العثور على حساب المعلم للتعديل.");
+      return;
+    }
+    if (inferTeacherRole(systemState.teachers[idx]) === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN && form.username !== superAdminEditingTeacherUsername) {
+      alert("لا يمكن تغيير اسم مستخدم سوبر أدمن.");
+      return;
+    }
+    teacherRecord = {
+      ...systemState.teachers[idx],
+      name: form.name,
+      username: systemState.teachers[idx].username,
+      subject: form.subject,
+      password: form.password,
+      autoEntryCode: form.autoEntryCode,
+      integrationConfig: { ...(systemState.teachers[idx].integrationConfig || {}), ...form.integrationConfig },
+      role: systemState.teachers[idx].role || ARABYA_ACCOUNT_ROLES.TEACHER
+    };
+    systemState.teachers[idx] = normalizeTeacherAccount(teacherRecord);
+    teacherRecord = systemState.teachers[idx];
+    if (systemState.activeTeacher && systemState.activeTeacher.username === teacherRecord.username) {
+      loginTeacherObject(teacherRecord, systemState.activeTeacherLoginCredential || form.autoEntryCode);
+    }
+  } else {
+    const exists = systemState.teachers.some(t => t.username.toLowerCase() === form.username.toLowerCase());
+    if (exists) {
+      alert("اسم المستخدم مسجل مسبقاً.");
+      return;
+    }
+    teacherRecord = normalizeTeacherAccount({
+      name: form.name,
+      username: form.username,
+      subject: form.subject,
+      password: form.password,
+      autoEntryCode: form.autoEntryCode,
+      integrationConfig: form.integrationConfig,
+      role: ARABYA_ACCOUNT_ROLES.TEACHER
+    });
+    systemState.teachers.push(teacherRecord);
+  }
+
+  saveTeachersToLocalStorage();
+  saveSystemState(false);
+  const syncResult = await syncTeacherCredentialsToCloud(teacherRecord);
+  await syncLocalDatabaseToCloud();
+  renderTeacherAccountsPanel();
+  closeTeacherAccountEditor();
+  const statusEl = document.getElementById("teacher-accounts-sync-status");
+  if (statusEl) {
+    statusEl.innerHTML = syncResult.ok
+      ? `<span class="material-icons" style="vertical-align:middle;color:var(--success);">cloud_done</span> تم الحفظ والمزامنة السحابية لحساب ${escapeHtml(teacherRecord.name)}.`
+      : `<span class="material-icons" style="vertical-align:middle;color:var(--warning);">cloud_queue</span> تم الحفظ محلياً — تحقق من رابط Google Sheets للمزامنة.`;
+  }
+  alert(formatTeacherCredentialSyncMessage(syncResult));
+};
+
+window.syncTeacherAccountBySuperAdmin = async function(username) {
+  if (!isSuperAdminTeacher()) return;
+  const teacher = systemState.teachers.find(t => t.username === username);
+  if (!teacher) return;
+  const statusEl = document.getElementById("teacher-accounts-sync-status");
+  if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري مزامنة ${escapeHtml(teacher.name || username)}...`;
+  const syncResult = await syncTeacherCredentialsToCloud(teacher);
+  await syncLocalDatabaseToCloud();
+  if (statusEl) {
+    statusEl.innerHTML = syncResult.ok
+      ? `<span class="material-icons" style="vertical-align:middle;color:var(--success);">cloud_done</span> تمت مزامنة ${escapeHtml(teacher.name || username)}.`
+      : `<span class="material-icons" style="vertical-align:middle;color:var(--error);">cloud_off</span> فشلت المزامنة — تحقق من إعدادات الربط.`;
+  }
+};
+
+window.syncAllTeachersToCloudBySuperAdmin = async function() {
+  if (!isSuperAdminTeacher()) return;
+  const statusEl = document.getElementById("teacher-accounts-sync-status");
+  if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري مزامنة جميع المعلمين...`;
+  let okCount = 0;
+  for (const teacher of systemState.teachers) {
+    const res = await syncTeacherCredentialsToCloud(teacher);
+    if (res.ok) okCount += 1;
+  }
+  const backupOk = await syncLocalDatabaseToCloud();
+  if (statusEl) {
+    statusEl.innerHTML = `<span class="material-icons" style="vertical-align:middle;color:var(--${backupOk ? "success" : "warning"});">cloud_done</span> تمت مزامنة ${okCount} من ${systemState.teachers.length} معلم${backupOk ? " + نسخة احتياطية كاملة." : "."}`;
+  }
+};
+
 function renderTeacherAccountsPanel() {
+  renderTeacherCapabilityMatrix();
   const tbody = document.getElementById("teacher-accounts-table-body");
   if (!tbody) return;
   tbody.innerHTML = "";
   if (!isSuperAdminTeacher()) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:var(--text-muted);">عرض حسابات المعلمين متاح لمدير المنصة فقط.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--text-muted);">عرض وإدارة حسابات المعلمين متاح لمدير المنصة (سوبر أدمن) فقط.</td></tr>';
     return;
   }
   if (!systemState.teachers.length) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:1.5rem;color:var(--text-muted);">لا توجد حسابات معلمين.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:1.5rem;color:var(--text-muted);">لا توجد حسابات معلمين.</td></tr>';
     return;
   }
   systemState.teachers.forEach(teacher => {
     const isSelf = systemState.activeTeacher && teacher.username === systemState.activeTeacher.username;
     const roleLabel = inferTeacherRole(teacher) === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN ? "سوبر أدمن" : "معلم";
+    const examCount = countTeacherExams(teacher.username);
+    const syncConfigured = !!(teacher.integrationConfig && teacher.integrationConfig.googleFormUrl);
     const row = document.createElement("tr");
     row.innerHTML = `
       <td>${escapeHtml(teacher.name || "")}</td>
       <td><code>${escapeHtml(teacher.username || "")}</code></td>
       <td>${escapeHtml(roleLabel)}</td>
       <td><code>${escapeHtml(teacher.autoEntryCode || "—")}</code></td>
+      <td>${examCount} امتحان · ${syncConfigured ? '<span style="color:var(--secondary);">مزامنة مهيأة</span>' : '<span style="color:var(--text-muted);">بدون رابط</span>'}</td>
       <td class="teacher-accounts-actions" style="display:flex;gap:0.35rem;flex-wrap:wrap;"></td>
     `;
     const actions = row.querySelector(".teacher-accounts-actions");
     if (isSelf) {
       actions.textContent = "حسابك الحالي";
     } else if (inferTeacherRole(teacher) === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) {
-      actions.textContent = "—";
-    } else if (canDeleteTeachers()) {
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "btn btn-outline btn-sm";
-      delBtn.style.cssText = "border-color:var(--error);color:var(--error);";
-      delBtn.textContent = "حذف";
-      delBtn.addEventListener("click", () => deleteTeacherAccount(teacher.username));
-      actions.appendChild(delBtn);
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn btn-outline btn-sm";
+      editBtn.textContent = "تعديل";
+      editBtn.addEventListener("click", () => openTeacherAccountEditor(teacher.username));
+      actions.appendChild(editBtn);
+    } else {
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "btn btn-primary btn-sm";
+      editBtn.textContent = "تعديل";
+      editBtn.addEventListener("click", () => openTeacherAccountEditor(teacher.username));
+      actions.appendChild(editBtn);
+      const syncBtn = document.createElement("button");
+      syncBtn.type = "button";
+      syncBtn.className = "btn btn-outline btn-sm";
+      syncBtn.style.cssText = "border-color:var(--secondary);color:var(--secondary);";
+      syncBtn.textContent = "مزامنة";
+      syncBtn.addEventListener("click", () => syncTeacherAccountBySuperAdmin(teacher.username));
+      actions.appendChild(syncBtn);
+      if (canDeleteTeachers()) {
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn btn-outline btn-sm";
+        delBtn.style.cssText = "border-color:var(--error);color:var(--error);";
+        delBtn.textContent = "حذف";
+        delBtn.addEventListener("click", () => deleteTeacherAccount(teacher.username));
+        actions.appendChild(delBtn);
+      }
     }
     tbody.appendChild(row);
   });
@@ -240,11 +477,18 @@ window.deleteTeacherAccount = async function(username) {
     return;
   }
   if (!confirm(`هل تريد حذف حساب المعلم "${teacher.name}"؟`)) return;
+  const examCount = countTeacherExams(username);
+  if (examCount > 0) {
+    const proceed = confirm(`هذا المعلم لديه ${examCount} امتحاناً مسجلاً. حذف الحساب يبقي الامتحانات في النظام (يمكن لسوبر الأدمن إدارتها). هل تريد المتابعة؟`);
+    if (!proceed) return;
+  }
   systemState.teachers = systemState.teachers.filter(t => t.username !== username);
+  if (superAdminEditingTeacherUsername === username) closeTeacherAccountEditor();
   saveTeachersToLocalStorage();
+  saveSystemState(false);
   renderTeacherAccountsPanel();
   const synced = await syncLocalDatabaseToCloud();
-  alert(synced ? "تم حذف حساب المعلم ومزامنة التغيير." : "تم حذف حساب المعلم محلياً.");
+  alert(synced ? "تم حذف حساب المعلم ومزامنة قاعدة البيانات السحابية." : "تم حذف حساب المعلم محلياً. أعد المزامنة من تبويب الربط عند توفر الاتصال.");
 };
 
 function ensureStudentAccountType(student) {
@@ -1973,10 +2217,11 @@ function sortResultsByRecency(results, sourceList) {
 
 
 const TEACHER_ACTIVE_TAB_KEY = "arabya_teacher_active_tab";
-const TEACHER_TAB_IDS = ["stats", "exams", "results", "students", "integration", "profile", "admins"];
+const TEACHER_TAB_IDS = ["stats", "exams", "results", "students", "teachers", "integration", "profile", "admins"];
 
 function normalizeTeacherTabId(tabId) {
-  const id = String(tabId || "").trim();
+  let id = String(tabId || "").trim();
+  if (id === "admins") id = "teachers";
   return TEACHER_TAB_IDS.includes(id) ? id : "stats";
 }
 
@@ -2026,7 +2271,7 @@ function activateTeacherTab(tabId, options = {}) {
     syncDatabaseFromCloud({ silent: true }).finally(() => refreshTeacherDashboardViews({ all: true }));
   } else if (normalizedTab === "exams") {
     renderExamsList();
-  } else if (normalizedTab === "admins") {
+  } else if (normalizedTab === "teachers" || normalizedTab === "admins") {
     renderTeacherAccountsPanel();
   }
   return normalizedTab;
@@ -2047,6 +2292,7 @@ function refreshTeacherDashboardViews(options = {}) {
   const resultsTab = document.getElementById("teacher-tab-results");
   const studentsTab = document.getElementById("teacher-tab-students");
   const examsTab = document.getElementById("teacher-tab-exams");
+  const teachersTab = document.getElementById("teacher-tab-teachers");
 
   if (refreshAll || (statsTab && !statsTab.classList.contains("hidden"))) {
     if (typeof renderTeacherStatsDashboard === "function") renderTeacherStatsDashboard();
@@ -2059,6 +2305,9 @@ function refreshTeacherDashboardViews(options = {}) {
   }
   if (refreshAll || (examsTab && !examsTab.classList.contains("hidden"))) {
     if (typeof renderExamsList === "function") renderExamsList();
+  }
+  if (refreshAll || (teachersTab && !teachersTab.classList.contains("hidden"))) {
+    if (typeof renderTeacherAccountsPanel === "function") renderTeacherAccountsPanel();
   }
 }
 
@@ -2335,6 +2584,7 @@ async function syncTeacherCredentialsToCloud(teacher = systemState.activeTeacher
     subject: teacher.subject || "",
     password: teacher.password || "",
     autoEntryCode: teacher.autoEntryCode || teacher.password || "",
+    role: inferTeacherRole(teacher),
     integrationConfig: teacher.integrationConfig || {}
   };
 
@@ -3438,9 +3688,9 @@ function handleTeacherQuickLogin() {
   }
 }
 
-function handleTeacherRegister() {
+async function handleTeacherRegister() {
   if (!canUsePublicTeacherRegistration() && (!systemState.activeTeacher || !isTeacherStaffAccount())) {
-    alert("إنشاء حساب معلم جديد من الصفحة العامة متاح لمدير المنصة (سوبر أدمن) فقط. سجّل دخولك كمدير ثم أضف المعلم من تبويب «حسابات المعلمين».");
+    alert("إنشاء حساب معلم جديد من الصفحة العامة متاح لمدير المنصة (سوبر أدمن) فقط. سجّل دخولك كمدير ثم أضف المعلم من تبويب «إدارة المعلمين» في لوحة التحكم.");
     navigateToView("teacher-login-view");
     return;
   }
@@ -3482,6 +3732,14 @@ function handleTeacherRegister() {
 
   systemState.teachers.push(newTeacher);
   saveTeachersToLocalStorage();
+  if (isSuperAdminTeacher()) {
+    const syncResult = await syncTeacherCredentialsToCloud(newTeacher);
+    await syncLocalDatabaseToCloud();
+    alert(`تم إنشاء حساب المعلم "${name}" ومزامنته.${syncResult.ok ? "" : " تحقق من رابط Google Sheets."}`);
+    activateTeacherTab("teachers", { force: true });
+    renderTeacherAccountsPanel();
+    return;
+  }
 
   alert(`تم تسجيل حسابك كمعلم بنجاح يا أستاذ ${name}! يمكنك الدخول الآن.`);
   navigateToView("teacher-login-view");

@@ -503,6 +503,9 @@
             <li class="teacher-menu-item" data-tab="students" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">people</span> الطلاب وأكواد الاشتراك
             </li>
+            <li class="teacher-menu-item" data-tab="teachers" data-super-admin-only role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">supervisor_account</span> إدارة المعلمين
+            </li>
             <li class="teacher-menu-item" data-tab="integration" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">sync</span> الربط بـ Google Sheets
             </li>
@@ -973,6 +976,109 @@
           </div>
 
           <!-- تبويب ربط جوجل شيتس واستيراد جوجل فورم -->
+
+          <div id="teacher-tab-teachers" class="teacher-tab-panel hidden" role="tabpanel" data-super-admin-only>
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">إدارة حسابات المعلمين</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">لمدير المنصة فقط — عرض، تعديل، حذف، ومزامنة بيانات كل معلم مع Google Sheets</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" class="btn btn-primary btn-sm" onclick="openTeacherAccountEditor()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">person_add</span> إضافة معلم
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary);color:var(--secondary);" onclick="syncAllTeachersToCloudBySuperAdmin()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">cloud_sync</span> مزامنة الكل
+                </button>
+                <button type="button" class="btn btn-outline btn-sm" onclick="syncDatabaseFromCloud({ silent: false }).then(() => renderTeacherAccountsPanel())">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">cloud_download</span> جلب من السحابة
+                </button>
+              </div>
+            </div>
+
+            <div id="teacher-accounts-sync-status" style="margin-bottom:1rem; font-size:0.9rem; min-height:1.25rem;" aria-live="polite"></div>
+
+            <details class="config-card-box" style="margin-bottom:1.25rem; text-align:right;">
+              <summary style="cursor:pointer; font-weight:700; color:var(--accent);">مقارنة صلاحيات سوبر أدمن والمعلم</summary>
+              <div class="table-container" style="margin-top:1rem;">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>الميزة</th>
+                      <th>سوبر أدمن</th>
+                      <th>معلم</th>
+                    </tr>
+                  </thead>
+                  <tbody id="teacher-capability-matrix-body"></tbody>
+                </table>
+              </div>
+            </details>
+
+            <div class="table-container" style="margin-bottom:1.5rem;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>الاسم</th>
+                    <th>اسم المستخدم</th>
+                    <th>الدور</th>
+                    <th>رمز الدخول</th>
+                    <th>الامتحانات / المزامنة</th>
+                    <th>الإجراء</th>
+                  </tr>
+                </thead>
+                <tbody id="teacher-accounts-table-body"></tbody>
+              </table>
+            </div>
+
+            <div id="teacher-account-editor-panel" class="exam-builder-card hidden" style="margin-bottom:2rem; border-color:rgba(245,158,11,0.35);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                <h4 id="teacher-account-editor-title" style="color:var(--accent); font-weight:700; margin:0;">تعديل حساب معلم</h4>
+                <button type="button" class="btn btn-outline btn-sm" onclick="closeTeacherAccountEditor()">إغلاق</button>
+              </div>
+              <h5 style="color:var(--secondary); margin-bottom:0.75rem;">الملف الشخصي</h5>
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" for="super-admin-teacher-name">اسم المعلم</label>
+                  <input type="text" id="super-admin-teacher-name" class="form-control">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" for="super-admin-teacher-username">اسم المستخدم (لا يُغيّر بعد الإنشاء)</label>
+                  <input type="text" id="super-admin-teacher-username" class="form-control" dir="ltr">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" for="super-admin-teacher-subject">المادة / التخصص</label>
+                  <input type="text" id="super-admin-teacher-subject" class="form-control">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" for="super-admin-teacher-password">الرقم السري</label>
+                  <input type="text" id="super-admin-teacher-password" class="form-control" dir="ltr">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" for="super-admin-teacher-autocode">رمز الدخول السريع</label>
+                  <input type="text" id="super-admin-teacher-autocode" class="form-control" dir="ltr">
+                </div>
+              </div>
+              <h5 style="color:var(--secondary); margin-bottom:0.75rem; border-top:1px solid rgba(255,255,255,0.06); padding-top:1rem;">الربط بـ Google Sheets (ملف المعلم)</h5>
+              <div class="form-group">
+                <label class="form-label" for="super-admin-teacher-sync-url">رابط Web App / المزامنة</label>
+                <input type="text" id="super-admin-teacher-sync-url" class="form-control" dir="ltr" placeholder="https://script.google.com/macros/s/.../exec">
+              </div>
+              <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:1rem;">
+                <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-name">حقل الاسم</label><input type="text" id="super-admin-teacher-entry-name" class="form-control" dir="ltr"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-id">حقل ID</label><input type="text" id="super-admin-teacher-entry-id" class="form-control" dir="ltr"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-code">حقل الكود</label><input type="text" id="super-admin-teacher-entry-code" class="form-control" dir="ltr"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-score">حقل الدرجة</label><input type="text" id="super-admin-teacher-entry-score" class="form-control" dir="ltr"></div>
+                <div class="form-group" style="margin:0;"><label class="form-label" for="super-admin-teacher-entry-details">حقل التفاصيل</label><input type="text" id="super-admin-teacher-entry-details" class="form-control" dir="ltr"></div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap; margin-top:1.25rem;">
+                <button type="button" class="btn btn-primary" onclick="saveTeacherAccountBySuperAdmin()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;">save</span> حفظ ومزامنة
+                </button>
+                <button type="button" class="btn btn-outline" onclick="closeTeacherAccountEditor()">إلغاء</button>
+              </div>
+            </div>
+          </div>
+
           <div id="teacher-tab-integration" class="teacher-tab-panel hidden" role="tabpanel">
             
             <!-- قسم الاستيراد والتصدير مع جوجل فورم -->
@@ -1406,7 +1512,7 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.05.31.28"></script>
-  <script src="app.js?v=2026.05.31.28"></script>
+  <script src="questions.js?v=2026.05.31.29"></script>
+  <script src="app.js?v=2026.05.31.29"></script>
 </body>
 </html>
