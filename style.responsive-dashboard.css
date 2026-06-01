@@ -6,12 +6,19 @@
 .teacher-tab-panel {
   width: 100%;
   max-width: 100%;
-  overflow-x: clip;
+  min-width: 0;
+  overflow-x: visible;
 }
 
 .teacher-main-panel {
   max-width: 100%;
-  overflow-x: clip;
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.teacher-grid,
+.teacher-sidebar {
+  min-width: 0;
 }
 
 .panel-header-actions {
@@ -55,6 +62,20 @@
   gap: 0.35rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.teacher-pagination-controls .form-control {
+  width: auto;
+  min-width: 5rem;
+  padding: 0.35rem 0.6rem;
+}
+
+.teacher-table-bottom-controls {
+  margin: 0.75rem 0 1.5rem;
+  padding: 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
 }
 
 .teacher-filter-toolbar {
@@ -109,20 +130,71 @@
 
 .table-container {
   overflow-x: auto;
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
+  width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--secondary) rgba(255, 255, 255, 0.06);
+}
+
+.table-container:focus {
+  outline: 2px solid rgba(20, 184, 166, 0.55);
+  outline-offset: 3px;
+}
+
+.table-container::-webkit-scrollbar {
+  height: 10px;
+}
+
+.table-container::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+.table-container::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, var(--secondary), var(--accent));
+  border-radius: 999px;
 }
 
 .table-container table {
-  min-width: 720px;
+  min-width: 760px;
+  table-layout: auto;
 }
 
 .table-container--compact table {
-  min-width: 560px;
+  min-width: 640px;
 }
 
 .table-container--wide table {
-  min-width: 880px;
+  min-width: 980px;
+}
+
+.table-container th {
+  white-space: nowrap;
+}
+
+.table-container td {
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.table-container td code {
+  direction: ltr;
+  display: inline-block;
+  max-width: 16rem;
+  white-space: nowrap;
+}
+
+.teacher-table-actions {
+  min-width: 9rem;
+  white-space: normal;
+}
+
+.teacher-table-actions .btn {
+  width: auto;
+  margin: 0.125rem;
+  padding: 0.3rem 0.55rem;
 }
 
 .table-scroll-hint {
@@ -140,6 +212,7 @@
 .exam-actions-row,
 .teacher-pagination-controls .btn,
 table .btn,
+.teacher-table-actions .btn,
 .teacher-filter-toolbar .btn {
   width: auto;
 }
@@ -167,7 +240,7 @@ table .btn,
 
 @media (max-width: 1100px) {
   .teacher-grid {
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
     gap: 1.25rem;
   }
 
@@ -193,6 +266,10 @@ table .btn,
     flex: 0 0 auto;
     white-space: nowrap;
     min-width: max-content;
+  }
+
+  .teacher-grid {
+    grid-template-columns: 1fr;
   }
 
   .form-grid-2,
@@ -286,6 +363,19 @@ table .btn,
     min-width: 4.5rem;
   }
 
+  .teacher-table-bottom-controls {
+    padding: 0.75rem;
+  }
+
+  .table-container table,
+  .table-container--wide table {
+    min-width: 900px;
+  }
+
+  .table-container--compact table {
+    min-width: 640px;
+  }
+
   .exam-info-card {
     padding: 1rem;
   }
@@ -297,7 +387,11 @@ table .btn,
 
 @media (max-width: 400px) {
   .table-container table {
-    min-width: 640px;
+    min-width: 860px;
+  }
+
+  .table-container--compact table {
+    min-width: 620px;
   }
 
   .panel-title {
