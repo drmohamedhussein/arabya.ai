@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.13";
+const ARABYA_APP_VERSION = "2026.06.02.14";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -10553,6 +10553,165 @@ function formatBackupRestoreSummary() {
     `أكبر بنك أسئلة بين الامتحانات: ${maxQ} سؤال.`
   );
 }
+
+function parseQuestionBankFilePayload(parsed, fileName) {
+  if (!parsed || typeof parsed !== "object") return { questions: null, name: "" };
+  const questions =
+    parsed.questions ||
+    parsed.bank?.questions ||
+    (Array.isArray(parsed) ? parsed : null);
+  const name =
+    parsed.name ||
+    parsed.bank?.name ||
+    String(fileName || "").replace(/\.json$/i, "") ||
+    "بنك أسئلة مستورد";
+  return { questions, name };
+}
+
+function findGrammarExamForQuestionBankRestore() {
+  const exams = systemState.exams || [];
+  return (
+    exams.find(e => /النحو والصرف\s*\(2\)/i.test(String(e.title || ""))) ||
+    exams.find(e => String(e.id) === "arabic_grammar") ||
+    exams.find(e => /النحو والصرف/i.test(String(e.title || ""))) ||
+    null
+  );
+}
+
+async function applyQuestionBankPayloadToGrammarExam(questions, bankName, mergeMode) {
+  if (!Array.isArray(questions) || !questions.length) {
+    alert("الملف لا يحتوي أسئلة صالحة.");
+    return false;
+  }
+  reloadSystemStateFromLocalStorage();
+  const exam = findGrammarExamForQuestionBankRestore();
+  if (!exam) {
+    alert(
+      "لم يُعثر على امتحان «النحو والصرف (2)».\n" +
+      "أنشئ الامتحان أو استعد النسخة الاحتياطية الكاملة أولاً، ثم أعد استيراد بنك الأسئلة."
+    );
+    return false;
+  }
+
+  const QB = window.ArabyaQuestionBank;
+  if (!QB || typeof QB.mergeBankIntoExam !== "function") {
+    alert("وحدة بنك الأسئلة غير محمّلة. حدّث الصفحة (Ctrl+Shift+R).");
+    return false;
+  }
+
+  const bank = {
+    name: bankName,
+    questions: QB.normalizeQuestions ? QB.normalizeQuestions(questions) : questions
+  };
+  const before = countExamQuestions(exam);
+  QB.mergeBankIntoExam(exam, bank, mergeMode);
+  if (typeof sanitizeQuestionConfig === "function") sanitizeQuestionConfig(exam);
+  const after = countExamQuestions(exam);
+
+  const username =
+    systemState.activeTeacher?.username ||
+    localStorage.getItem("arabya_active_teacher_username") ||
+    exam.teacher ||
+    "معلم اللغة العربية";
+  if (typeof QB.loadSharedBanks === "function" && typeof QB.saveSharedBanks === "function") {
+    const banks = QB.loadSharedBanks(username);
+    banks.push({
+      id: `bank_${Date.now()}`,
+      name: bankName,
+      subject: exam.subject || "النحو والصرف",
+      teacher: username,
+      questions: bank.questions,
+      updatedAt: new Date().toISOString()
+    });
+    QB.saveSharedBanks(banks, username);
+    if (typeof QB.refreshSharedBankSelect === "function") {
+      QB.refreshSharedBankSelect(username);
+    }
+  }
+
+  saveSystemState(true);
+  if (typeof pushCloudBackupNow === "function") {
+    try { await pushCloudBackupNow(); } catch (e) {}
+  }
+
+  alert(
+    `تم تحديث امتحان «${exam.title}».\n\n` +
+    `الملف: ${bankName}\n` +
+    `قبل: ${before} سؤال → بعد: ${after} سؤال\n` +
+    `الوضع: ${mergeMode === "replace" ? "استبدال كامل" : "دمج (إضافة)"}\n\n` +
+    `افتح «تعديل الامتحان والأسئلة» للمراجعة، ثم احفظ نسخة احتياطية سحابية.`
+  );
+  return true;
+}
+
+window.importQuestionBankIntoGrammarExam = function(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async function(e) {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      const { questions, name } = parseQuestionBankFilePayload(parsed, file.name);
+      if (!questions || !questions.length) {
+        alert("تنسيق غير صالح أو لا توجد أسئلة في الملف.");
+        event.target.value = "";
+        return;
+      }
+      reloadSystemStateFromLocalStorage();
+      const exam = findGrammarExamForQuestionBankRestore();
+      const targetTitle = exam ? exam.title : "النحو والصرف (2)";
+      const currentCount = exam ? countExamQuestions(exam) : 0;
+      const mergeMode = confirm(
+        `ملف: ${file.name}\n` +
+        `أسئلة في الملف: ${questions.length}\n` +
+        `الامتحان: «${targetTitle}» (${currentCount} سؤال حالياً)\n\n` +
+        `موافق = استبدال كل أسئلة الامتحان بأسئلة الملف\n` +
+        `إلغاء = دمج (إضافة غير المكررة فقط)`
+      )
+        ? "replace"
+        : "append";
+      await applyQuestionBankPayloadToGrammarExam(questions, name, mergeMode);
+    } catch (err) {
+      alert("تعذّر قراءة ملف بنك الأسئلة. تأكد أنه JSON صادر من المنصة.");
+    }
+    event.target.value = "";
+  };
+  reader.readAsText(file, "UTF-8");
+};
+
+const GRAMMAR_BANK_BUNDLED_CANDIDATES = [
+  "backups/grammar-question-bank.json",
+  "backups/bank-nahw-sarf-2.json"
+];
+
+window.restoreGrammarQuestionBankFromRepo = async function() {
+  let payload = null;
+  let loadedFrom = "";
+  for (const path of GRAMMAR_BANK_BUNDLED_CANDIDATES) {
+    try {
+      const res = await fetch(path, { cache: "no-store" });
+      if (!res.ok) continue;
+      payload = await res.json();
+      loadedFrom = path;
+      break;
+    } catch (e) {}
+  }
+  if (!payload) {
+    alert(
+      "لم يُرفع ملف البنك إلى مجلد backups/ في المستودع بعد.\n\n" +
+      "استخدم «استيراد بنك النحو → الامتحان» واختر ملفك:\n" +
+      "بنك_أسئلة_اختبار_النحو_والصرف_(2) (1).json"
+    );
+    return;
+  }
+  const { questions, name } = parseQuestionBankFilePayload(payload, loadedFrom);
+  const mergeMode = confirm(
+    `استعادة من: ${loadedFrom}\nأسئلة: ${(questions || []).length}\n\nموافق = استبدال أسئلة الامتحان | إلغاء = دمج`
+  )
+    ? "replace"
+    : "append";
+  await applyQuestionBankPayloadToGrammarExam(questions, name, mergeMode);
+};
 
 window.inspectBackupJsonFile = function(event) {
   const file = event.target.files[0];
