@@ -265,9 +265,40 @@ function mergeArabyaCollection_(current, incoming, collection) {
   incoming.forEach(function(item) {
     if (!item) return;
     var key = getArabyaRecordKey_(item, collection);
+    if (collection === "results" && map[key] && !shouldUseIncomingArabyaResult_(map[key], item)) return;
     map[key] = deepMergeArabyaObjects_(map[key] || {}, item);
   });
   return Object.keys(map).map(function(key) { return map[key]; });
+}
+
+function parseArabyaRecordRevisionTime_(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number" && isFinite(value)) return value;
+  var asNumber = Number(value);
+  if (isFinite(asNumber) && asNumber > 0) return asNumber;
+  var asDate = Date.parse(String(value));
+  return isNaN(asDate) ? null : asDate;
+}
+
+function getArabyaResultRevisionTime_(record, fields) {
+  if (!record) return null;
+  for (var i = 0; i < fields.length; i++) {
+    var parsed = parseArabyaRecordRevisionTime_(record[fields[i]]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function shouldUseIncomingArabyaResult_(current, incoming) {
+  var revisionFields = ["updatedAt", "lastEditedAt", "modifiedAt"];
+  var currentRevision = getArabyaResultRevisionTime_(current, revisionFields);
+  var incomingRevision = getArabyaResultRevisionTime_(incoming, revisionFields);
+  if (currentRevision !== null || incomingRevision !== null) {
+    var currentTime = currentRevision || getArabyaResultRevisionTime_(current, ["savedAt"]) || 0;
+    var incomingTime = incomingRevision || getArabyaResultRevisionTime_(incoming, ["savedAt"]) || 0;
+    return incomingTime >= currentTime;
+  }
+  return true;
 }
 
 function deepMergeArabyaObjects_(base, patch) {
@@ -302,6 +333,8 @@ function normaliseArabyaResult_(data) {
     id: data.id || "",
     accessCode: data.subscriptionCode || data.accessCode || "",
     studentLookupKey: data.studentLookupKey || "",
+    savedAt: data.savedAt || "",
+    updatedAt: data.updatedAt || "",
     email: data.email || "",
     mobile: data.mobile || "",
     examTitle: data.examTitle || "",

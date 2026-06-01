@@ -889,6 +889,10 @@ function saveSystemState(syncToCloud = true) {
   } catch(e) {
     console.error("saveSystemState: خطأ في حفظ البيانات محلياً:", e);
   }
+
+  if (syncToCloud) {
+    markTeacherHasCustomData();
+  }
   
   if (syncToCloud) {
     autoSyncToCloud();
@@ -1360,6 +1364,7 @@ function buildResultDeviceFieldsFromResult(res) {
 
 async function persistResultRecordWithCloudSync(res, syncStatusEl) {
   if (!res) return false;
+  touchResultRecordForLocalEdit_(res);
   saveSystemState(true);
   if (syncStatusEl) {
     syncStatusEl.innerHTML = '<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري حفظ البيانات ومزامنتها مع Google Sheets...';
@@ -1421,6 +1426,13 @@ function buildResultCloudRetakeFields(res) {
   };
 }
 
+function buildResultCloudRevisionFields(res) {
+  return {
+    savedAt: res?.savedAt || "",
+    updatedAt: res?.updatedAt || ""
+  };
+}
+
 window.allowStudentExamRetake = function(recordId) {
   const res = systemState.results.find(r => r.recordId === recordId);
   if (!res) {
@@ -1437,6 +1449,7 @@ window.allowStudentExamRetake = function(recordId) {
   res.retakeGrantedAt = new Date().toISOString();
   res.retakeGrantedBy = systemState.activeTeacher?.username || "teacher";
   delete res.retakeRevokedAt;
+  touchResultRecordForLocalEdit_(res);
   saveSystemState(true);
   renderStudentResultsTable();
   renderTeacherStudentsTable();
@@ -1462,6 +1475,7 @@ window.revokeStudentExamRetake = function(recordId) {
 
   res.allowRetake = false;
   res.retakeRevokedAt = new Date().toISOString();
+  touchResultRecordForLocalEdit_(res);
   saveSystemState(true);
   renderStudentResultsTable();
   renderTeacherStudentsTable();
@@ -2379,6 +2393,57 @@ function mergeRemoteCollection_(current, incoming, keyFn) {
   return Object.keys(map).map(key => map[key]);
 }
 
+function parseRecordRevisionTime_(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const asNumber = Number(value);
+  if (Number.isFinite(asNumber) && asNumber > 0) return asNumber;
+  const asDate = Date.parse(String(value));
+  return Number.isFinite(asDate) ? asDate : null;
+}
+
+function getRecordRevisionTime_(record, fields) {
+  if (!record || typeof record !== "object") return null;
+  for (const field of fields) {
+    const parsed = parseRecordRevisionTime_(record[field]);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function shouldUseIncomingResultRecord_(localRecord, incomingRecord) {
+  if (!localRecord) return true;
+  const revisionFields = ["updatedAt", "lastEditedAt", "modifiedAt"];
+  const localRevision = getRecordRevisionTime_(localRecord, revisionFields);
+  const incomingRevision = getRecordRevisionTime_(incomingRecord, revisionFields);
+
+  if (localRevision !== null || incomingRevision !== null) {
+    const localTime = localRevision ?? getRecordRevisionTime_(localRecord, ["savedAt"]) ?? 0;
+    const incomingTime = incomingRevision ?? getRecordRevisionTime_(incomingRecord, ["savedAt"]) ?? 0;
+    return incomingTime >= localTime;
+  }
+
+  return true;
+}
+
+function touchResultRecordForLocalEdit_(res) {
+  if (!res || typeof res !== "object") return res;
+  res.updatedAt = Date.now();
+  return res;
+}
+
+function mergeRemoteResultsCollection_(current, incoming, keyFn) {
+  const map = {};
+  (current || []).forEach(item => { map[keyFn(item)] = item; });
+  (incoming || []).forEach(item => {
+    if (!item) return;
+    const key = keyFn(item);
+    if (!shouldUseIncomingResultRecord_(map[key], item)) return;
+    map[key] = { ...(map[key] || {}), ...item };
+  });
+  return Object.keys(map).map(key => map[key]);
+}
+
 
 
 function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
@@ -2440,7 +2505,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""));
   }
   if (Array.isArray(remoteData.results)) {
-    systemState.results = mergeRemoteCollection_(systemState.results, remoteData.results, item => {
+    systemState.results = mergeRemoteResultsCollection_(systemState.results, remoteData.results, item => {
       if (item.recordId) return String(item.recordId);
       return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
     });
@@ -5999,6 +6064,7 @@ function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", res
     details: details,
     maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
     attemptNumber: resultObj?.attemptNumber ?? "",
+    ...buildResultCloudRevisionFields(resultObj),
     ...buildResultCloudRetakeFields(resultObj),
     ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
     ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
@@ -6088,6 +6154,7 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     maxScore: res.maxScore || "",
     isManualGradeUpdate: true,
     attemptNumber: res.attemptNumber ?? "",
+    ...buildResultCloudRevisionFields(res),
     ...buildResultCloudRetakeFields(res),
     ...buildResultDeviceFieldsFromResult(res),
     ...buildResultCloudIpReleaseFields(res),
@@ -7221,6 +7288,7 @@ window.saveTotalScoreManual = function() {
   }
 
   res.score = inputVal;
+  touchResultRecordForLocalEdit_(res);
   saveSystemState(true);
   renderStudentResultsTable();
   // Sync to cloud
@@ -7289,6 +7357,7 @@ window.saveResultDetailsManual = function() {
 
   const manualTotalInput = document.getElementById("detail-total-score-input").value.trim();
   res.score = manualTotalInput || `${totalEarnedPoints}/${exam.totalScore || 100} (درجة كلية)`;
+  touchResultRecordForLocalEdit_(res);
 
   saveSystemState(true);
   renderStudentResultsTable();
