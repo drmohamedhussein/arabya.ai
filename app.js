@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.05.31.30";
+const ARABYA_APP_VERSION = "2026.05.31.31";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -8672,27 +8672,22 @@ function renderTeacherStudentsTable() {
       <td>${escapeHtml(s.email || "--")}</td>
       <td>${escapeHtml(s.mobile || "--")}</td>
       <td>${escapeHtml(s.timestamp || "غير معروف")}</td>
-      <td class="teacher-students-actions" style="display:flex; gap:0.25rem; flex-wrap:wrap;"></td>
+      <td class="teacher-students-actions" style="display:flex; gap:0.25rem; flex-wrap:wrap; justify-content:flex-start; align-items:center; min-width:120px;"></td>
     `;
 
     const actionsCell = row.querySelector(".teacher-students-actions");
     const editBtn = document.createElement("button");
     editBtn.type = "button";
     editBtn.className = "btn btn-outline btn-sm";
-    editBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary); padding:0.25rem 0.5rem;";
+    editBtn.style.cssText = "border-color:var(--secondary); color:var(--secondary); padding:0.25rem 0.5rem; background:transparent; display:inline-flex; width:auto;";
     editBtn.textContent = "تعديل";
     editBtn.addEventListener("click", () => editStudentByTeacher(studentKey));
     actionsCell.appendChild(editBtn);
-
-    const deleteBtn = document.createElement("button");
-    deleteBtn.type = "button";
-    deleteBtn.className = "btn btn-outline btn-sm";
-    deleteBtn.style.cssText = "border-color:var(--error); color:var(--error); padding:0.25rem 0.5rem;";
     if (canDeleteStudents()) {
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "btn btn-outline btn-sm";
-      deleteBtn.style.cssText = "border-color:var(--error); color:var(--error); padding:0.25rem 0.5rem;";
+      deleteBtn.style.cssText = "border-color:var(--error); color:var(--error); padding:0.25rem 0.5rem; background:transparent; display:inline-flex; width:auto;";
       deleteBtn.textContent = "حذف";
       deleteBtn.addEventListener("click", () => deleteStudentByTeacher(studentKey));
       actionsCell.appendChild(deleteBtn);
