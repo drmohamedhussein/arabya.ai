@@ -20,10 +20,10 @@ function pickLatestAppVersion(...candidates) {
   return list.reduce((best, current) => (compareAppVersionStrings(current, best) > 0 ? current : best), list[0]);
 }
 
-assert.ok(compareAppVersionStrings("2026.06.02.22", "2026.06.02.19") > 0);
+assert.ok(compareAppVersionStrings("2026.06.02.24", "2026.06.02.19") > 0);
 assert.strictEqual(
-  pickLatestAppVersion("2026.06.02.19", "2026.06.02.22", "2026.06.02.21"),
-  "2026.06.02.22"
+  pickLatestAppVersion("2026.06.02.19", "2026.06.02.24", "2026.06.02.21"),
+  "2026.06.02.24"
 );
 assert.strictEqual(
   pickLatestAppVersion("", "2026.06.02.20"),
