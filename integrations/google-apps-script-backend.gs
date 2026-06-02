@@ -12,6 +12,7 @@
 
 var ARABYA_DEFAULT_DB = {
   schemaVersion: 2,
+  appVersion: "",
   updatedAt: "",
   source: "arabya.net",
   teachers: [],
@@ -415,6 +416,12 @@ function mergeArabyaDatabase_(patch, reason, actor) {
   }
   if (patch.questionBanks && typeof patch.questionBanks === "object") {
     db.questionBanks = deepMergeArabyaObjects_(db.questionBanks || {}, patch.questionBanks);
+  }
+  if (patch.config && typeof patch.config === "object" && patch.config.appVersion) {
+    db.appVersion = String(patch.config.appVersion);
+  }
+  if (patch.appVersion) {
+    db.appVersion = String(patch.appVersion);
   }
   db.schemaVersion = ARABYA_DEFAULT_DB.schemaVersion;
   db.updatedAt = new Date().toISOString();
@@ -1001,6 +1008,7 @@ function getArabyaSyncStats_() {
   });
   return {
     cloudRevision: getArabyaCloudRevision_(),
+    appVersion: db.appVersion || "",
     questionBankTeachers: qbTeachers,
     questionBankItems: qbItems,
     backupJsonChars: backupJsonChars,

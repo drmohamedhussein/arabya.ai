@@ -5,11 +5,88 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.21";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.22";
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
-window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
+window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
+window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
+
+function compareAppVersionStrings(a, b) {
+  const partsA = String(a || "").trim().split(".").map(part => parseInt(part, 10) || 0);
+  const partsB = String(b || "").trim().split(".").map(part => parseInt(part, 10) || 0);
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (partsA[i] || 0) - (partsB[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function pickLatestAppVersion(...candidates) {
+  const list = candidates.map(v => String(v || "").trim()).filter(Boolean);
+  if (!list.length) return "";
+  return list.reduce((best, current) => (compareAppVersionStrings(current, best) > 0 ? current : best), list[0]);
+}
+
+function readAppVersionFromLocalStorageConfig() {
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    return cfg.appVersion ? String(cfg.appVersion).trim() : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function getPlatformAppVersion() {
+  return pickLatestAppVersion(
+    systemState.config?.appVersion,
+    readAppVersionFromLocalStorageConfig(),
+    window.ARABYA_APP_BUILD_VERSION,
+    ARABYA_APP_BUILD_VERSION
+  ) || ARABYA_APP_BUILD_VERSION;
+}
+
+function applyPlatformAppVersion(version, options = {}) {
+  const next = String(version || "").trim();
+  if (!next) return;
+  systemState.config = systemState.config || {};
+  systemState.config.appVersion = next;
+  window.ARABYA_APP_VERSION = next;
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    cfg.appVersion = next;
+    localStorage.setItem("arabya_teacher_config", JSON.stringify(cfg));
+  } catch (e) {}
+  if (options.persistState !== false && typeof saveSystemState === "function") {
+    saveSystemState(false);
+  }
+  updateTeacherAppVersionLabel();
+}
+
+function bootstrapPlatformAppVersionFromLocal() {
+  const initial = pickLatestAppVersion(
+    readAppVersionFromLocalStorageConfig(),
+    systemState.config?.appVersion,
+    ARABYA_APP_BUILD_VERSION
+  );
+  applyPlatformAppVersion(initial, { persistState: false });
+}
+
+function syncPlatformAppVersionFromDatabase(data) {
+  if (!data || typeof data !== "object") return;
+  const remote = String(data.appVersion || data.config?.appVersion || "").trim();
+  if (!remote) return;
+  const next = pickLatestAppVersion(remote, getPlatformAppVersion(), ARABYA_APP_BUILD_VERSION);
+  applyPlatformAppVersion(next, { persistState: false });
+}
+
+function ensurePlatformAppVersionBeforeCloudPush() {
+  const next = pickLatestAppVersion(ARABYA_APP_BUILD_VERSION, getPlatformAppVersion());
+  applyPlatformAppVersion(next, { persistState: false });
+  return next;
+}
+
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
   TEACHER: "teacher",
@@ -242,7 +319,7 @@ function updateTeacherAppVersionLabel() {
       sidebar.appendChild(versionEl);
     }
   }
-  const label = `إصدار التطبيق: ${ARABYA_APP_VERSION}`;
+  const label = `إصدار التطبيق: ${getPlatformAppVersion()}`;
   if (versionEl) versionEl.textContent = label;
 }
 
@@ -644,6 +721,7 @@ let systemState = {
   // إعدادات التكامل مع جوجل شيت
   config: {
     teacherCode: "TEACHER2026",
+    appVersion: ARABYA_APP_BUILD_VERSION,
     googleFormUrl: "",
     entryName: "",
     entryId: "",
@@ -672,6 +750,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initDatabase();
+  bootstrapPlatformAppVersionFromLocal();
   applyUnifiedCloudSyncModel();
   stripEmptyHashFromUrl();
   setupNavigation();
@@ -697,6 +776,10 @@ document.addEventListener("DOMContentLoaded", () => {
   window.getEffectiveExamSyncUrl = getEffectiveExamSyncUrl;
   window.getUnifiedTeacherSyncUrl = getUnifiedTeacherSyncUrl;
   window.applyUnifiedCloudSyncModel = applyUnifiedCloudSyncModel;
+  window.getPlatformAppVersion = getPlatformAppVersion;
+  window.applyPlatformAppVersion = applyPlatformAppVersion;
+  window.compareAppVersionStrings = compareAppVersionStrings;
+  window.pickLatestAppVersion = pickLatestAppVersion;
   window.resolveCloudBackupTargetUrls = resolveCloudBackupTargetUrls;
   window.ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
   window.ARABYA_CLOUD_BACKUP_SCOPE_ALL = ARABYA_CLOUD_BACKUP_SCOPE_ALL;
@@ -708,7 +791,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.ArabyaRealtimeBridge) window.ArabyaRealtimeBridge.startRealtimeSync();
 
   // ===== تشخيص ما تم تحميله =====
-  console.log(`[ARABYA] إصدار المنصة: ${ARABYA_APP_VERSION}`);
+  console.log(`[ARABYA] إصدار المنصة: ${getPlatformAppVersion()} (بناء ${ARABYA_APP_BUILD_VERSION})`);
   updateTeacherAppVersionLabel();
   console.log(`[ARABYA] تم تحميل قاعدة البيانات:`,
     `معلمون=${systemState.teachers.length}`,
@@ -964,6 +1047,24 @@ function initDatabase() {
   loadDeletedResultKeysFromStorage();
   systemState.students = filterOutDeletedStudents(systemState.students);
   systemState.results = filterOutDeletedResults(systemState.results);
+  bootstrapPlatformAppVersionFromLocal();
+}
+
+async function fetchPlatformAppVersionFromCloudMeta() {
+  const urls = getGeneralTeacherSyncUrls();
+  for (const rawUrl of urls) {
+    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_sync_meta";
+    try {
+      const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+      if (!res.ok) continue;
+      const body = await res.json();
+      if (body && body.appVersion) {
+        syncPlatformAppVersionFromDatabase({ appVersion: body.appVersion });
+        return true;
+      }
+    } catch (e) {}
+  }
+  return false;
 }
 
 // حفظ قاعدة بيانات المعلمين محلياً (دون مزامنة سحابية)
@@ -3428,6 +3529,13 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   ensureStudentsDataShape();
   ensureExamsDataShape();
+  if (!examStartOnly && remoteData.config && typeof remoteData.config === "object") {
+    systemState.config = { ...(systemState.config || {}), ...remoteData.config };
+    try {
+      localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    } catch (e) {}
+  }
+  syncPlatformAppVersionFromDatabase(remoteData);
   applyDeletionTombstonesToLocalState();
   return true;
 }
@@ -3534,6 +3642,7 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
 }
 
 async function pushCloudBackupNow(reason) {
+  ensurePlatformAppVersionBeforeCloudPush();
   const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) {
     markCloudSyncLocalOnly("لا يوجد رابط Web App");
@@ -3981,6 +4090,7 @@ async function syncDatabaseFromCloud(options = {}) {
       if (response.cloudRevision && window.ArabyaCloudSync) {
         window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
       }
+      updateTeacherAppVersionLabel();
       return {
         ok: true,
         cloudRevision: response.cloudRevision ?? null,
@@ -4019,7 +4129,7 @@ function hydrateGoogleSheetsScriptBox() {
       if (!text || !box) return;
       box.value = text;
       if (hint) {
-        hint.innerHTML = `<span style="color:var(--success);">تم تحميل أحدث كود Apps Script (${ARABYA_APP_VERSION}) من المستودع.</span> انسخه ثم انشر <strong>إصداراً جديداً</strong> في Google Apps Script.`;
+        hint.innerHTML = `<span style="color:var(--success);">تم تحميل أحدث كود Apps Script (بناء ${ARABYA_APP_BUILD_VERSION} · قاعدة البيانات ${getPlatformAppVersion()}) من المستودع.</span> انسخه ثم انشر <strong>إصداراً جديداً</strong> في Google Apps Script.`;
       }
     })
     .catch(() => {
@@ -4172,6 +4282,13 @@ function applyCloudBackupData(data) {
   if (data.questionBanks && window.ArabyaCloudSync) {
     window.ArabyaCloudSync.applyQuestionBanksFromCloud(data.questionBanks);
   }
+  if (data.config && typeof data.config === "object") {
+    systemState.config = { ...(systemState.config || {}), ...data.config };
+    try {
+      localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    } catch (e) {}
+  }
+  syncPlatformAppVersionFromDatabase(data);
   applyDeletionTombstonesToLocalState();
   markTeacherHasCustomData();
 }
@@ -5470,6 +5587,7 @@ function loadTeacherDashboardData() {
       refreshTeacherDashboardViews({ all: true });
     }
   });
+  void fetchPlatformAppVersionFromCloudMeta();
 
   if (window.ArabyaCloudSync) {
     window.ArabyaCloudSync.startPullLoop();
@@ -6600,7 +6718,7 @@ function exportResultsToJSON() {
   }
   const payload = {
     exportedAt: new Date().toISOString(),
-    appVersion: ARABYA_APP_VERSION,
+    appVersion: getPlatformAppVersion(),
     filtered: isResultsTableFiltersActive(),
     count: exportRows.length,
     results: exportRows
@@ -10697,7 +10815,7 @@ window.exportStudentsToJSON = function() {
   }
   const payload = {
     exportedAt: new Date().toISOString(),
-    appVersion: ARABYA_APP_VERSION,
+    appVersion: getPlatformAppVersion(),
     filtered: isStudentsTableFiltersActive(),
     count: exportRows.length,
     students: exportRows
@@ -10985,10 +11103,10 @@ window.exportCompleteDatabase = function() {
   ensureStudentsDataShape();
   ensureExamsDataShape();
   const dbBackup = typeof buildFullCloudBackupData === "function"
-    ? { exportedAt: new Date().toISOString(), appVersion: ARABYA_APP_VERSION, ...buildFullCloudBackupData() }
+    ? { exportedAt: new Date().toISOString(), appVersion: getPlatformAppVersion(), ...buildFullCloudBackupData() }
     : {
       exportedAt: new Date().toISOString(),
-      appVersion: ARABYA_APP_VERSION,
+      appVersion: getPlatformAppVersion(),
       teachers: systemState.teachers,
       students: systemState.students,
       exams: systemState.exams,

@@ -101,7 +101,9 @@
     return {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
-      appVersion: global.ARABYA_APP_VERSION || "",
+      appVersion: typeof global.getPlatformAppVersion === "function"
+        ? global.getPlatformAppVersion()
+        : (global.ARABYA_APP_VERSION || ""),
       teachers: sanitizeTeachersForCloud(state.teachers),
       students: state.students || [],
       exams: state.exams || [],
@@ -112,7 +114,19 @@
       questionBanks: collectAllQuestionBanksForCloud(),
       deletedStudentKeys: Array.isArray(state.deletedStudentKeys) ? state.deletedStudentKeys : [],
       deletedResultKeys: Array.isArray(state.deletedResultKeys) ? state.deletedResultKeys : [],
-      config: state.config ? { ...state.config, teacherCode: undefined } : {}
+      config: state.config
+        ? {
+          ...state.config,
+          appVersion: typeof global.getPlatformAppVersion === "function"
+            ? global.getPlatformAppVersion()
+            : (global.ARABYA_APP_VERSION || ""),
+          teacherCode: undefined
+        }
+        : {
+          appVersion: typeof global.getPlatformAppVersion === "function"
+            ? global.getPlatformAppVersion()
+            : (global.ARABYA_APP_VERSION || "")
+        }
     };
   }
 
