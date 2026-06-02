@@ -26,7 +26,24 @@
     return n;
   }
 
+  function examContentTs(item) {
+    const edited = Date.parse(item?.questionsUpdatedAt || "") || Number(item?.localRevision) || 0;
+    if (edited) return edited;
+    return recordTs(item);
+  }
+
+  function shouldKeepLocalExamQuestions(local, remote) {
+    const localTs = examContentTs(local);
+    const remoteTs = examContentTs(remote);
+    if (localTs > remoteTs) return true;
+    const localCount = Array.isArray(local?.questions) ? local.questions.length : 0;
+    const remoteCount = Array.isArray(remote?.questions) ? remote.questions.length : 0;
+    if (localCount !== remoteCount && localTs >= remoteTs) return localCount > remoteCount;
+    return false;
+  }
+
   function mergeRemoteCollectionWithConflicts(current, incoming, keyFn, label) {
+    const isExamMerge = label === "امتحان";
     const map = {};
     (current || []).forEach(item => {
       map[keyFn(item)] = item;
@@ -40,19 +57,40 @@
         map[key] = { ...remote, syncedAt: remote.syncedAt || new Date().toISOString() };
         return;
       }
-      const localTs = recordTs(local);
-      const remoteTs = recordTs(remote);
+      const localTs = isExamMerge ? examContentTs(local) : recordTs(local);
+      const remoteTs = isExamMerge ? examContentTs(remote) : recordTs(remote);
       if (localTs === remoteTs || JSON.stringify(local) === JSON.stringify(remote)) {
-        map[key] = { ...local, ...remote };
+        const merged = { ...local, ...remote };
+        if (isExamMerge && shouldKeepLocalExamQuestions(local, remote)) {
+          merged.questions = local.questions;
+          merged.questionsUpdatedAt = local.questionsUpdatedAt || merged.questionsUpdatedAt;
+          merged.localRevision = local.localRevision || merged.localRevision;
+        }
+        map[key] = merged;
         return;
       }
       const mode = getConflictMode();
       if (mode === "ask") {
         conflicts.push({ key, label: label || key, local, remote, localTs, remoteTs });
-        if (remoteTs >= localTs) map[key] = { ...local, ...remote };
-        else map[key] = { ...local };
+        if (remoteTs >= localTs) {
+          const merged = { ...local, ...remote };
+          if (isExamMerge && shouldKeepLocalExamQuestions(local, remote)) {
+            merged.questions = local.questions;
+            merged.questionsUpdatedAt = local.questionsUpdatedAt || merged.questionsUpdatedAt;
+            merged.localRevision = local.localRevision || merged.localRevision;
+          }
+          map[key] = merged;
+        } else map[key] = { ...local };
+      } else if (remoteTs >= localTs) {
+        const merged = { ...local, ...remote };
+        if (isExamMerge && shouldKeepLocalExamQuestions(local, remote)) {
+          merged.questions = local.questions;
+          merged.questionsUpdatedAt = local.questionsUpdatedAt || merged.questionsUpdatedAt;
+          merged.localRevision = local.localRevision || merged.localRevision;
+        }
+        map[key] = merged;
       } else {
-        map[key] = remoteTs >= localTs ? { ...local, ...remote } : { ...local };
+        map[key] = { ...local };
       }
     });
     if (conflicts.length && getConflictMode() === "ask") {
@@ -394,6 +432,8 @@
     getConflictMode,
     setConflictMode,
     mergeRemoteCollectionWithConflicts,
+    examContentTs,
+    shouldKeepLocalExamQuestions,
     recordQuestionBankSync,
     renderQuestionBankSyncIndicator,
     testCloudConnection,

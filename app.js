@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.22";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.23";
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
@@ -1117,6 +1117,22 @@ function suspendCloudPullForMs(ms) {
   systemState.cloudPullSuspendedUntil = Date.now() + duration;
 }
 
+function touchExamContentRevision(exam) {
+  if (!exam) return;
+  exam.questionsUpdatedAt = new Date().toISOString();
+  exam.localRevision = Date.now();
+}
+
+async function pushLocalStateToCloudNow(reason) {
+  if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.pushNow === "function") {
+    return window.ArabyaCloudSync.pushNow(reason || "push");
+  }
+  if (typeof pushCloudBackupNow === "function") {
+    return pushCloudBackupNow(reason || "push");
+  }
+  return false;
+}
+
 function saveSystemState(syncToCloud = true) {
   try {
     applyDeletionTombstonesToLocalState();
@@ -1139,6 +1155,7 @@ function saveSystemState(syncToCloud = true) {
   }
   
   if (syncToCloud) {
+    suspendCloudPullForMs(20000);
     if (typeof scheduleCloudBackupPush === "function") {
       scheduleCloudBackupPush("saveSystemState", { immediate: true });
     } else {
@@ -3642,6 +3659,10 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
 }
 
 async function pushCloudBackupNow(reason) {
+  if (!systemState.cloudPushInProgress) {
+    suspendCloudPullForMs(45000);
+    systemState.ignoreCloudRevisionUntil = Date.now() + 45000;
+  }
   ensurePlatformAppVersionBeforeCloudPush();
   const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) {
@@ -3667,8 +3688,11 @@ async function pushCloudBackupNow(reason) {
   let ok = false;
   for (const url of urlList) {
     try {
-      await postToArabyaWebApp(url, payload);
+      const response = await postToArabyaWebApp(url, payload);
       ok = true;
+      if (response && response.cloudRevision && window.ArabyaCloudSync) {
+        window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
+      }
     } catch (e) {
       const sent = await postToArabyaWebAppNoCors(url, payload);
       if (sent) ok = true;
@@ -3676,6 +3700,8 @@ async function pushCloudBackupNow(reason) {
     }
   }
   if (ok) {
+    systemState.lastSuccessfulLocalPushAt = Date.now();
+    systemState.ignoreCloudRevisionUntil = Date.now() + 20000;
     recordCloudSyncOutcome(true, reason && /question|بنك/i.test(String(reason)) ? "مزامنة بنك الأسئلة والنسخة الاحتياطية" : "نسخة احتياطية سحابية");
     if (/question|بنك/i.test(String(reason)) && window.ArabyaPlatformSync) {
       window.ArabyaPlatformSync.recordQuestionBankSync(true, "رفع بنك الأسئلة");
@@ -4053,6 +4079,12 @@ function waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs) {
 }
 
 async function syncDatabaseFromCloud(options = {}) {
+  if (!options.forcePull && systemState.cloudPushInProgress) {
+    return { ok: false, skipped: true, reason: "push_in_progress" };
+  }
+  if (!options.forcePull && systemState.ignoreCloudRevisionUntil && Date.now() < systemState.ignoreCloudRevisionUntil) {
+    return { ok: false, skipped: true, reason: "local_push_guard" };
+  }
   if (!options.forcePull && isCloudPullSuspended()) {
     return { ok: false, skipped: true, reason: "pull_suspended_after_delete" };
   }
@@ -6190,7 +6222,7 @@ function applyExamMetaFromEditor(exam, options = {}) {
   return true;
 }
 
-window.saveExamMetaSettingsOnly = function() {
+window.saveExamMetaSettingsOnly = async function() {
   if (!currentEditingExamId) return;
   const exam = systemState.exams.find(e => e.id === currentEditingExamId);
   if (!exam) return;
@@ -6199,14 +6231,16 @@ window.saveExamMetaSettingsOnly = function() {
     return;
   }
   if (!applyExamMetaFromEditor(exam, { requireAcademic: true })) return;
-  saveSystemState(true);
+  touchExamContentRevision(exam);
+  saveSystemState(false);
+  const cloudOk = await pushLocalStateToCloudNow("save_exam_meta");
   document.getElementById("editor-exam-title").innerText = exam.title;
   renderExamAllowedIpsList(exam);
-  alert("تم حفظ إعدادات الامتحان بنجاح.");
+  alert(cloudOk ? "تم حفظ إعدادات الامتحان ورفعها إلى السحابة بنجاح." : "تم الحفظ محلياً. تعذّر الرفع السحابي الفوري — أعد المحاولة أو استخدم النسخة الاحتياطية السحابية.");
   renderExamsList();
 };
 
-function saveAllEditedQuestions() {
+async function saveAllEditedQuestions() {
   if (!currentEditingExamId) return;
   const exam = systemState.exams.find(e => e.id === currentEditingExamId);
   if (!exam) return;
@@ -6274,30 +6308,31 @@ function saveAllEditedQuestions() {
     }
   }
   sanitizeQuestionConfig(exam);
-  saveSystemState(true);
-  
-  // تحديث مؤشر حالة المزامنة بعد حفظ رابط الامتحان المخصص
+  touchExamContentRevision(exam);
+  saveSystemState(false);
+
+  let cloudOk = false;
   const indicator = document.getElementById("cloud-sync-status-indicator");
   if (indicator) {
-    const urls = new Set();
-    if (systemState.config && systemState.config.googleFormUrl) {
-      const u = systemState.config.googleFormUrl.trim();
-      if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
-    }
-    if (Array.isArray(systemState.exams)) {
-      systemState.exams.forEach(ex => {
-        if (ex.googleFormUrl) {
-          const u = ex.googleFormUrl.trim();
-          if (u.includes("/macros/s/") || u.endsWith("/exec")) urls.add(u);
-        }
-      });
-    }
-    if (urls.size > 0) {
-      indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle;">cloud_queue</span> المزامنة التلقائية مهيأة وجاهزة للاتصال (${urls.size} من الجداول)`;
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري رفع التعديلات إلى السحابة...`;
+  }
+  try {
+    cloudOk = await pushLocalStateToCloudNow("save_exam_questions");
+  } catch (pushErr) {
+    console.warn("[ARABYA] save exam cloud push:", pushErr);
+  }
+  saveSystemState(false);
+  if (indicator) {
+    if (cloudOk) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--success); font-size:1.1rem; vertical-align:middle;">cloud_done</span> تم حفظ الامتحان ورفعه إلى السحابة`;
+    } else if (getCloudBackupTargetUrls().length) {
+      indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem; vertical-align:middle;">cloud_off</span> حُفظ محلياً — تعذّر الرفع السحابي، سيتم إعادة المحاولة`;
     }
   }
-  
-  alert("تم تعديل وحفظ بيانات الامتحان وكافة الأسئلة بنجاح!");
+
+  alert(cloudOk
+    ? "تم تعديل وحفظ بيانات الامتحان وكافة الأسئلة ورفعها إلى السحابة بنجاح!"
+    : "تم الحفظ على هذا الجهاز. تعذّر الرفع الفوري إلى السحابة — تحقق من الاتصال ثم اضغط «نسخة احتياطية سحابية» أو أعد المحاولة بعد قليل.");
   
   // إعادة عرض
   document.getElementById("editor-exam-title").innerText = exam.title;

@@ -8,6 +8,7 @@
   const PUSH_DEBOUNCE_MS = 350;
   const REVISION_STORAGE_KEY = "arabya_cloud_revision";
   const MIN_PULL_GAP_MS = 4000;
+  const OWN_PUSH_PULL_GUARD_MS = 45000;
 
   let pushTimer = null;
   let pushInFlight = false;
@@ -174,11 +175,42 @@
     return null;
   }
 
+  function shouldSkipCloudPull(reason) {
+    const state = global.systemState || {};
+    if (state.cloudPushInProgress) return true;
+    if (state.ignoreCloudRevisionUntil && Date.now() < state.ignoreCloudRevisionUntil) {
+      return reason !== "manual";
+    }
+    if (state.cloudPullSuspendedUntil && Date.now() < state.cloudPullSuspendedUntil) {
+      return reason !== "manual";
+    }
+    return false;
+  }
+
+  function beginLocalCloudPush(reason) {
+    const state = global.systemState || {};
+    state.cloudPushInProgress = true;
+    state.ignoreCloudRevisionUntil = Date.now() + OWN_PUSH_PULL_GUARD_MS;
+    if (typeof global.suspendCloudPullForMs === "function") {
+      global.suspendCloudPullForMs(OWN_PUSH_PULL_GUARD_MS);
+    }
+    state.lastCloudPushReason = reason || "";
+  }
+
+  function endLocalCloudPush(ok) {
+    const state = global.systemState || {};
+    state.cloudPushInProgress = false;
+    if (ok) {
+      state.lastSuccessfulLocalPushAt = Date.now();
+      state.ignoreCloudRevisionUntil = Date.now() + 20000;
+    } else {
+      state.ignoreCloudRevisionUntil = Date.now() + 8000;
+    }
+  }
+
   function runPullFromCloud(reason) {
-    if (global.systemState?.cloudPullSuspendedUntil && Date.now() < global.systemState.cloudPullSuspendedUntil) {
-      if (reason !== "manual") {
-        return Promise.resolve({ ok: false, skipped: true });
-      }
+    if (shouldSkipCloudPull(reason)) {
+      return Promise.resolve({ ok: false, skipped: true });
     }
     if (global.systemState?.activeView !== "teacher-dashboard-view") {
       return Promise.resolve(null);
@@ -213,6 +245,7 @@
 
   async function watchCloudRevision() {
     if (global.systemState?.activeView !== "teacher-dashboard-view") return;
+    if (shouldSkipCloudPull("revision-watch")) return;
     if (!getCloudWebAppUrls().length) return;
     const remoteRevision = await fetchRemoteCloudRevision();
     if (!remoteRevision) return;
@@ -234,9 +267,14 @@
       return false;
     }
     pushInFlight = true;
+    beginLocalCloudPush(reason);
     try {
       const ok = await global.pushCloudBackupNow(reason);
+      endLocalCloudPush(!!ok);
       return ok;
+    } catch (err) {
+      endLocalCloudPush(false);
+      return false;
     } finally {
       pushInFlight = false;
       if (pendingPush) {
