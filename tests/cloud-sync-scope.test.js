@@ -1,5 +1,5 @@
 /**
- * Per-exam result sync URL vs cloud backup scope targets.
+ * Unified teacher cloud sync (option 2): one Web App URL per account.
  */
 const assert = require("assert");
 
@@ -13,11 +13,6 @@ function normalizeArabyaWebAppUrl(rawUrl) {
   return url;
 }
 
-function isValidCloudSyncUrl(url) {
-  const clean = (url || "").trim();
-  return !!(clean && (clean.includes("/macros/s/") || clean.endsWith("/exec")));
-}
-
 function resolveCloudBackupTargetUrls(scope, generalUrls, allUrls) {
   const general = [...new Set((generalUrls || []).map(u => normalizeArabyaWebAppUrl(u)).filter(Boolean))];
   const all = [...new Set((allUrls || []).map(u => normalizeArabyaWebAppUrl(u)).filter(Boolean))];
@@ -25,27 +20,28 @@ function resolveCloudBackupTargetUrls(scope, generalUrls, allUrls) {
   return general.length ? general : all;
 }
 
-const generalOnly = ["https://script.google.com/macros/s/AAA/exec"];
-const examUrl = "https://script.google.com/macros/s/BBB/exec";
-const allUrls = [...generalOnly, examUrl];
+const teacherUrl = "https://script.google.com/macros/s/TEACHER/exec";
+const legacyExamUrl = "https://script.google.com/macros/s/EXAM/exec";
 
 assert.deepStrictEqual(
-  resolveCloudBackupTargetUrls(ARABYA_CLOUD_BACKUP_SCOPE_GENERAL, generalOnly, allUrls),
-  generalOnly
+  resolveCloudBackupTargetUrls(ARABYA_CLOUD_BACKUP_SCOPE_GENERAL, [teacherUrl], [teacherUrl, legacyExamUrl]),
+  [teacherUrl],
+  "unified backup uses teacher URL only"
 );
 
 assert.deepStrictEqual(
-  resolveCloudBackupTargetUrls(ARABYA_CLOUD_BACKUP_SCOPE_ALL, generalOnly, allUrls),
-  allUrls
+  resolveCloudBackupTargetUrls(ARABYA_CLOUD_BACKUP_SCOPE_GENERAL, [teacherUrl], [teacherUrl, legacyExamUrl]),
+  [teacherUrl]
 );
+
+function pickSyncUrlsForUnifiedModel(generalUrls, examUrls) {
+  return [...new Set((generalUrls || []).map(normalizeArabyaWebAppUrl).filter(Boolean))];
+}
 
 assert.deepStrictEqual(
-  resolveCloudBackupTargetUrls(ARABYA_CLOUD_BACKUP_SCOPE_GENERAL, [], allUrls),
-  allUrls,
-  "falls back to all when general empty"
+  pickSyncUrlsForUnifiedModel([teacherUrl], [legacyExamUrl]),
+  [teacherUrl],
+  "exam-specific URLs are ignored in unified model"
 );
 
-assert.ok(isValidCloudSyncUrl("https://script.google.com/macros/s/x/exec"));
-assert.ok(!isValidCloudSyncUrl("https://docs.google.com/forms/"));
-
-console.log("Cloud sync scope tests passed.");
+console.log("Unified cloud sync tests passed.");

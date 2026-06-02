@@ -878,14 +878,8 @@
                   </div>
                 </div>
 
-                <!-- إعدادات الربط السحابية الخاصة بهذا الامتحان فقط -->
-                <h4 style="color:var(--accent); margin-top: 1.5rem; margin-bottom: 1rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">الربط والمزامنة السحابية الخاصة بهذا الامتحان (اختياري):</h4>
-                <div class="form-group">
-                  <label class="form-label" for="edit-meta-google-url">رابط المزامنة السحابية المخصص لهذا الامتحان (Google Form Submit URL / Web App):</label>
-                  <input type="text" id="edit-meta-google-url" class="form-control" placeholder="اتركه فارغاً لاستخدام رابط المعلم العام المعتمد..." style="border-color: rgba(245, 158, 11, 0.3);">
-                  <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">إذا وضعت رابطاً هنا، تُرسل <strong>نتائج هذا الامتحان فقط</strong> إلى هذا الشيت. إذا تركته فارغاً، تُستخدم نتائجه رابط المعلم العام في تبويب (الربط). النسخة الاحتياطية الكاملة تُحدَّد من إعداد «النسخة الاحتياطية الكاملة» في تبويب الربط.</small>
-                </div>
-                
+                <h4 style="color:var(--accent); margin-top: 1.5rem; margin-bottom: 0.75rem; font-weight:700; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 1rem;">تصدير Google Form (اختياري — معرفات الحقول فقط):</h4>
+                <p style="color:var(--text-muted); font-size:0.82rem; line-height:1.6; margin:0 0 1rem;">المزامنة السحابية لجميع الامتحانات تتم عبر <strong>رابط واحد</strong> في تبويب <strong>الربط بـ Google Sheets</strong>. هنا تُعرّف معرفات حقول النموذج عند التصدير إلى Google Form فقط.</p>
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-top:0.5rem; margin-bottom: 1rem;">
                   <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label" for="edit-meta-entry-name">معرف حقل الاسم:</label>
@@ -1257,8 +1251,8 @@
 
             <!-- إعدادات مزامنة جوجل شيتس -->
             <div class="panel-header" style="margin-top: 3rem;">
-              <div class="panel-title">إعدادات مزامنة Google Sheets السحابية</div>
-              <div style="font-size:0.85rem; color:var(--text-muted);">ربط تلقائي لترحيل الدرجات، الأسئلة المقالية والبيانات الأكاديمية</div>
+              <div class="panel-title">إعدادات مزامنة Google Sheets (رابط موحّد)</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">شيت واحد لكل حساب معلم — كل المواد والامتحانات؛ الفلترة من لوحة التحكم</div>
             </div>
 
             <div class="form-group">
@@ -1267,17 +1261,9 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="teacher-config-url">رابط المزامنة العام (Web App /exec) — للامتحانات بدون رابط خاص:</label>
+              <label class="form-label" for="teacher-config-url">رابط المزامنة الموحّد (Web App /exec) — لكل امتحاناتك ونتائجك:</label>
               <input type="text" id="teacher-config-url" class="form-control" placeholder="https://script.google.com/macros/s/XXXX/exec">
-            </div>
-
-            <div class="form-group">
-              <label class="form-label" for="teacher-config-backup-scope">النسخة الاحتياطية الكاملة (save_backup) تُرفع إلى:</label>
-              <select id="teacher-config-backup-scope" class="form-control">
-                <option value="general">رابط المعلم العام فقط (مُستحسن عند شيت لكل مادة)</option>
-                <option value="all">كل روابط المزامنة (العام + روابط الامتحانات المخصصة)</option>
-              </select>
-              <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">نتيجة كل امتحان تُرسل دائماً إلى رابطه الفعّال فقط (رابط الامتحان أو العام). هذا الخيار يخص النسخة الاحتياطية الكاملة وتحديث ورقة ARABYA_BACKUP.</small>
+              <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">قاعدة بيانات واحدة على Google Sheets: كل الامتحانات والطلاب والنتائج تُخزَّن معاً ويُميَّز كل سجل بمعرّف الامتحان. لعرض نتائج مادة معيّنة استخدم فلتر الامتحان في تبويب النتائج أو زر «عرض النتائج» من بطاقة الامتحان.</small>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">

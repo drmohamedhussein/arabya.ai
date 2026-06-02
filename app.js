@@ -5,9 +5,10 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.20";
+const ARABYA_APP_VERSION = "2026.06.02.21";
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
+const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -671,6 +672,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initDatabase();
+  applyUnifiedCloudSyncModel();
   stripEmptyHashFromUrl();
   setupNavigation();
   ensureResultsQuickFiltersMarkup();
@@ -693,6 +695,8 @@ document.addEventListener("DOMContentLoaded", () => {
   window.getCloudBackupTargetUrls = getCloudBackupTargetUrls;
   window.getCloudBackupScope = getCloudBackupScope;
   window.getEffectiveExamSyncUrl = getEffectiveExamSyncUrl;
+  window.getUnifiedTeacherSyncUrl = getUnifiedTeacherSyncUrl;
+  window.applyUnifiedCloudSyncModel = applyUnifiedCloudSyncModel;
   window.resolveCloudBackupTargetUrls = resolveCloudBackupTargetUrls;
   window.ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
   window.ARABYA_CLOUD_BACKUP_SCOPE_ALL = ARABYA_CLOUD_BACKUP_SCOPE_ALL;
@@ -2907,21 +2911,9 @@ function reloadSystemStateFromLocalStorage() {
   ensureExamsDataShape();
 }
 
+/** كل عمليات السحابة للمعلم الحالي تستخدم رابطاً موحّداً واحداً (الخيار 2). */
 function getArabyaWebAppUrls() {
-  const urls = new Set();
-  getGeneralTeacherSyncUrls().forEach(u => urls.add(u));
-  if (Array.isArray(systemState.exams)) {
-    systemState.exams.forEach(exam => {
-      if (isValidCloudSyncUrl(exam.googleFormUrl)) urls.add(normalizeArabyaWebAppUrl(exam.googleFormUrl.trim()));
-    });
-  }
-  if (Array.isArray(systemState.teachers)) {
-    systemState.teachers.forEach(t => {
-      const u = t && t.integrationConfig && t.integrationConfig.googleFormUrl ? String(t.integrationConfig.googleFormUrl).trim() : "";
-      if (isValidCloudSyncUrl(u)) urls.add(normalizeArabyaWebAppUrl(u));
-    });
-  }
-  return Array.from(urls).filter(Boolean);
+  return getGeneralTeacherSyncUrls();
 }
 
 function getGeneralTeacherSyncUrls() {
@@ -2946,16 +2938,6 @@ function getGeneralTeacherSyncUrls() {
 }
 
 function getCloudBackupScope() {
-  const fromTeacher = systemState.activeTeacher && systemState.activeTeacher.integrationConfig
-    ? systemState.activeTeacher.integrationConfig.cloudBackupScope
-    : "";
-  if (fromTeacher === ARABYA_CLOUD_BACKUP_SCOPE_ALL || fromTeacher === ARABYA_CLOUD_BACKUP_SCOPE_GENERAL) {
-    return fromTeacher;
-  }
-  try {
-    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
-    if (cfg.cloudBackupScope === ARABYA_CLOUD_BACKUP_SCOPE_ALL) return ARABYA_CLOUD_BACKUP_SCOPE_ALL;
-  } catch (e) {}
   return ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
 }
 
@@ -2967,15 +2949,73 @@ function resolveCloudBackupTargetUrls(scope, generalUrls, allUrls) {
 }
 
 function getCloudBackupTargetUrls() {
-  return resolveCloudBackupTargetUrls(
-    getCloudBackupScope(),
-    getGeneralTeacherSyncUrls(),
-    getArabyaWebAppUrls()
-  );
+  return getGeneralTeacherSyncUrls();
+}
+
+function getUnifiedTeacherSyncUrl(exam) {
+  const candidates = [];
+  if (exam && exam.teacher && Array.isArray(systemState.teachers)) {
+    const owner = systemState.teachers.find(x => x.username === exam.teacher);
+    if (owner && owner.integrationConfig && owner.integrationConfig.googleFormUrl) {
+      candidates.push(String(owner.integrationConfig.googleFormUrl).trim());
+    }
+  }
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
+    candidates.push(String(systemState.activeTeacher.integrationConfig.googleFormUrl).trim());
+  }
+  if (systemState.config && systemState.config.googleFormUrl) candidates.push(String(systemState.config.googleFormUrl).trim());
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    if (cfg.googleFormUrl) candidates.push(String(cfg.googleFormUrl).trim());
+  } catch (e) {}
+  try {
+    const teacherUrlInput = document.getElementById("teacher-config-url");
+    if (teacherUrlInput && teacherUrlInput.value) candidates.push(String(teacherUrlInput.value).trim());
+  } catch (e) {}
+  try {
+    const s = getUrlParameter("s");
+    if (s) candidates.push(String(s).trim());
+  } catch (e) {}
+  for (const u of candidates) {
+    if (isValidCloudSyncUrl(u)) return normalizeArabyaWebAppUrl(u);
+  }
+  return "";
 }
 
 function getExamResultSyncUrl(exam) {
-  return getEffectiveExamSyncUrl(exam || systemState.currentExam || null);
+  return getUnifiedTeacherSyncUrl(exam || systemState.currentExam || null);
+}
+
+function applyUnifiedCloudSyncModel(options = {}) {
+  if (!options.force) {
+    try {
+      if (localStorage.getItem(ARABYA_UNIFIED_CLOUD_SYNC_FLAG) === "done") return false;
+    } catch (e) {}
+  }
+  let changed = false;
+  if (Array.isArray(systemState.exams)) {
+    systemState.exams.forEach(exam => {
+      if (exam && exam.googleFormUrl) {
+        delete exam.googleFormUrl;
+        changed = true;
+      }
+    });
+  }
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig) {
+    if (systemState.activeTeacher.integrationConfig.cloudBackupScope === ARABYA_CLOUD_BACKUP_SCOPE_ALL) {
+      systemState.activeTeacher.integrationConfig.cloudBackupScope = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+      changed = true;
+    }
+  }
+  if (systemState.config && systemState.config.cloudBackupScope === ARABYA_CLOUD_BACKUP_SCOPE_ALL) {
+    systemState.config.cloudBackupScope = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+    changed = true;
+  }
+  if (changed && typeof saveSystemState === "function") saveSystemState(false);
+  try {
+    localStorage.setItem(ARABYA_UNIFIED_CLOUD_SYNC_FLAG, "done");
+  } catch (e) {}
+  return changed;
 }
 
 function mergeRemoteCollection_(current, incoming, keyFn, label) {
@@ -3990,34 +4030,7 @@ function hydrateGoogleSheetsScriptBox() {
 }
 
 function getEffectiveExamSyncUrl(exam) {
-  const candidates = [];
-  if (exam && exam.googleFormUrl) candidates.push(String(exam.googleFormUrl).trim());
-  if (exam && exam.teacher && Array.isArray(systemState.teachers)) {
-    const owner = systemState.teachers.find(x => x.username === exam.teacher);
-    if (owner && owner.integrationConfig && owner.integrationConfig.googleFormUrl) {
-      candidates.push(String(owner.integrationConfig.googleFormUrl).trim());
-    }
-  }
-  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
-    candidates.push(String(systemState.activeTeacher.integrationConfig.googleFormUrl).trim());
-  }
-  if (systemState.config && systemState.config.googleFormUrl) candidates.push(String(systemState.config.googleFormUrl).trim());
-  try {
-    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
-    if (cfg.googleFormUrl) candidates.push(String(cfg.googleFormUrl).trim());
-  } catch (e) {}
-  try {
-    const examUrlInput = document.getElementById("edit-meta-google-url");
-    if (examUrlInput && examUrlInput.value) candidates.push(String(examUrlInput.value).trim());
-  } catch (e) {}
-  try {
-    const s = getUrlParameter("s");
-    if (s) candidates.push(String(s).trim());
-  } catch (e) {}
-  for (const u of candidates) {
-    if (isValidCloudSyncUrl(u)) return normalizeArabyaWebAppUrl(u);
-  }
-  return "";
+  return getUnifiedTeacherSyncUrl(exam);
 }
 
 window.testExamSync = function(examId) {
@@ -4026,7 +4039,7 @@ window.testExamSync = function(examId) {
   const badge = document.getElementById("sync-badge-" + examId);
   const url = getEffectiveExamSyncUrl(exam);
   if (!url) {
-    if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--error);">cloud_off</span> <span style="color:var(--error); font-weight:700;">لا يوجد رابط مزامنة. أضف رابط الويب اب في تعديل الامتحان أو في تبويب الربط.</span>`;
+    if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--error);">cloud_off</span> <span style="color:var(--error); font-weight:700;">لا يوجد رابط مزامنة موحّد. أضف رابط Web App في تبويب (الربط بـ Google Sheets).</span>`;
     return;
   }
   if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--secondary); animation:spin 1s infinite linear;">sync</span> <span style="color:var(--secondary); font-weight:700;">جاري اختبار الاتصال بجوجل شيت...</span>`;
@@ -4061,14 +4074,10 @@ function isValidCloudSyncUrl(url) {
 function collectCloudSyncUrls(extraUrl) {
   const urls = new Set();
   [extraUrl, systemState.config?.googleFormUrl, systemState.activeTeacher?.integrationConfig?.googleFormUrl].forEach(url => {
-    if (isValidCloudSyncUrl(url)) urls.add(url.trim());
+    if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(url.trim()));
   });
-  if (Array.isArray(systemState.exams)) {
-    systemState.exams.forEach(exam => {
-      if (isValidCloudSyncUrl(exam.googleFormUrl)) urls.add(exam.googleFormUrl.trim());
-    });
-  }
-  return Array.from(urls);
+  getGeneralTeacherSyncUrls().forEach(u => urls.add(u));
+  return Array.from(urls).filter(Boolean);
 }
 
 function countLocalTeacherData() {
@@ -5425,16 +5434,13 @@ function loadTeacherDashboardData() {
   if (!systemState.activeTeacher) return;
   normalizeTeacherAccount(systemState.activeTeacher);
   updateTeacherDashboardAccessUI();
+  applyUnifiedCloudSyncModel();
 
   document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
   document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
   document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
   document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
-  const backupScopeEl = document.getElementById("teacher-config-backup-scope");
-  if (backupScopeEl) {
-    backupScopeEl.value = getCloudBackupScope();
-  }
   document.getElementById("teacher-config-name").value = systemState.activeTeacher.integrationConfig?.entryName || "";
   document.getElementById("teacher-config-id").value = systemState.activeTeacher.integrationConfig?.entryId || "";
   document.getElementById("teacher-config-code-id").value = systemState.activeTeacher.integrationConfig?.entryCode || "";
@@ -5556,10 +5562,7 @@ async function saveTeacherIntegrationConfig() {
   const entryCode = document.getElementById("teacher-config-code-id").value.trim();
   const entryScore = document.getElementById("teacher-config-score").value.trim();
   const entryDetails = document.getElementById("teacher-config-details").value.trim();
-  const backupScopeRaw = document.getElementById("teacher-config-backup-scope")?.value || ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
-  const cloudBackupScope = backupScopeRaw === ARABYA_CLOUD_BACKUP_SCOPE_ALL
-    ? ARABYA_CLOUD_BACKUP_SCOPE_ALL
-    : ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+  const cloudBackupScope = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
 
   if (!code) {
     alert("الرقم السري لا يمكن أن يكون فارغاً!");
@@ -5639,10 +5642,10 @@ function renderExamsList() {
     const configuredCount = getConfiguredQuestionCount(exam);
     const displayedCount = configuredCount || bankCount;
     const questionMode = exam.shuffleQuestions === false ? "ترتيبي" : "عشوائي";
-    const syncUrl = getEffectiveExamSyncUrl(exam);
+    const syncUrl = getUnifiedTeacherSyncUrl(exam);
     const badge = syncUrl
-      ? `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_queue</span> رابط المزامنة مهيأ — اضغط (اختبار المزامنة) للتأكد</span>`
-      : `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_off</span> لا يوجد رابط مزامنة لهذا الامتحان (يُحفظ محلياً فقط)</span>`;
+      ? `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_queue</span> مزامنة موحّدة (رابط المعلم) — اختبر الاتصال</span>`
+      : `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_off</span> لا يوجد رابط موحّد في تبويب الربط (محلي فقط)</span>`;
 
     card.innerHTML = `
       <div>
@@ -5824,7 +5827,6 @@ window.editExamQuestions = function(examId) {
   if (maxCheatEl) maxCheatEl.value = exam.maxCheatAttempts ?? 5;
   const endsAtEl = document.getElementById("edit-meta-ends-at");
   if (endsAtEl) endsAtEl.value = formatExamEndsAtForInput(exam.endsAt || "");
-  document.getElementById("edit-meta-google-url").value = exam.googleFormUrl || "";
   document.getElementById("edit-meta-entry-name").value = exam.entryName || "";
   document.getElementById("edit-meta-entry-id").value = exam.entryId || "";
   document.getElementById("edit-meta-entry-code").value = exam.entryCode || "";
@@ -6010,7 +6012,6 @@ function applyExamMetaFromEditor(exam, options = {}) {
   const editRandomizeQuestions = document.getElementById("edit-meta-randomize")?.checked !== false;
   const rawQuestionCount = document.getElementById("edit-meta-question-count")?.value.trim() || "";
   const rawMaxCheatAttempts = document.getElementById("edit-meta-max-cheat-attempts")?.value ?? "5";
-  const editGoogleUrl = document.getElementById("edit-meta-google-url")?.value.trim() || "";
   const editEntryName = document.getElementById("edit-meta-entry-name")?.value.trim() || "";
   const editEntryId = document.getElementById("edit-meta-entry-id")?.value.trim() || "";
   const editEntryCode = document.getElementById("edit-meta-entry-code")?.value.trim() || "";
@@ -6053,7 +6054,7 @@ function applyExamMetaFromEditor(exam, options = {}) {
   exam.shuffleQuestions = editRandomizeQuestions;
   exam.questionCount = rawQuestionCount;
   exam.maxCheatAttempts = maxCheatAttemptsNumber;
-  exam.googleFormUrl = editGoogleUrl;
+  if (exam.googleFormUrl) delete exam.googleFormUrl;
   exam.entryName = editEntryName;
   exam.entryId = editEntryId;
   exam.entryCode = editEntryCode;
@@ -7379,7 +7380,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
   const urlList = syncUrl ? [syncUrl] : [];
 
   if (urlList.length === 0) {
-    const traditionalUrl = (exam && exam.googleFormUrl) ? exam.googleFormUrl : (systemState.config ? systemState.config.googleFormUrl || "" : "");
+    const traditionalUrl = getUnifiedTeacherSyncUrl(exam) || (systemState.config ? systemState.config.googleFormUrl || "" : "");
     const isTraditional = traditionalUrl && traditionalUrl.includes("docs.google.com");
     if (isTraditional) {
       if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري الإرسال إلى Google Form...`;
@@ -7444,7 +7445,7 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
   const linkedExam = res && res.examId
     ? systemState.exams.find(e => e.id === res.examId)
     : systemState.exams.find(e => e.title === res.examTitle);
-  const syncUrl = getEffectiveExamSyncUrl(linkedExam || null);
+  const syncUrl = getUnifiedTeacherSyncUrl(linkedExam || null);
   const urlList = syncUrl ? [syncUrl] : [];
 
   if (urlList.length === 0) {
@@ -8894,8 +8895,8 @@ async function postDeleteResultToCloud(res) {
   const linkedExam = res.examId
     ? systemState.exams.find(e => e.id === res.examId)
     : systemState.exams.find(e => e.title === res.examTitle);
-  const syncUrl = getEffectiveExamSyncUrl(linkedExam || null);
-  const urlList = syncUrl ? [syncUrl] : getCloudBackupTargetUrls();
+  const syncUrl = getUnifiedTeacherSyncUrl(linkedExam || null);
+  const urlList = syncUrl ? [syncUrl] : [];
   if (!urlList.length) return { ok: false, successCount: 0, total: 0 };
   const actor = window.ArabyaPlatformSync && window.ArabyaPlatformSync.getCloudSyncActor
     ? window.ArabyaPlatformSync.getCloudSyncActor()
