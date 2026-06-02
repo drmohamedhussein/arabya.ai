@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.25";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.26";
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
@@ -6002,7 +6002,7 @@ function renderQuestionsForEdit(exam) {
   const requestedCount = parseInt(exam.questionCount, 10);
   const displayMode = exam.shuffleQuestions === false ? "ترتيبي" : "عشوائي";
   const summary = document.createElement("div");
-  summary.className = "exam-builder-card";
+  summary.className = "question-bank-editor-summary";
   summary.style.marginBottom = "1rem";
   summary.style.padding = "0.85rem 1rem";
   summary.style.borderColor = "rgba(20,184,166,0.25)";
@@ -6027,7 +6027,9 @@ function renderQuestionsForEdit(exam) {
 
   exam.questions.forEach((q, index) => {
     const card = document.createElement("div");
-    card.className = "exam-builder-card";
+    card.className = "exam-builder-card exam-question-edit-card";
+    card.dataset.questionType = q.type || "multiple";
+    card.dataset.questionIndex = String(index);
     
     let typeName = "اختيار من متعدد";
     if (q.type === "boolean") typeName = "صواب وخطأ";
@@ -6158,6 +6160,53 @@ function renderQuestionsForEdit(exam) {
   container.appendChild(saveBtn);
 }
 
+function syncExamQuestionsFromEditorDom(exam) {
+  if (!exam) return [];
+  const cards = document.querySelectorAll("#editor-questions-list .exam-question-edit-card");
+  const updatedQuestions = [];
+
+  cards.forEach((card, index) => {
+    const textInput = card.querySelector(".edit-q-text");
+    if (!textInput) return;
+
+    const questionText = textInput.value.trim();
+    const pointsInput = card.querySelector(".edit-q-points");
+    const questionPoints = pointsInput ? parseFloat(pointsInput.value) || 10 : 10;
+    const timeInput = card.querySelector(".edit-q-time");
+    const questionTimeSeconds = timeInput ? parseInt(timeInput.value, 10) || 60 : 60;
+    const typeInput = card.dataset.questionType || exam.questions[index]?.type || "multiple";
+
+    let options = [];
+    let correctAnswer = 0;
+
+    if (typeInput === "essay") {
+      options = [];
+      correctAnswer = "";
+    } else {
+      card.querySelectorAll(".edit-q-option").forEach(input => {
+        options.push(input.value.trim());
+      });
+      const qIndex = card.dataset.questionIndex ?? String(index);
+      const checkedRadio = card.querySelector(`input[name="edit-correct-${qIndex}"]:checked`);
+      correctAnswer = checkedRadio ? parseInt(checkedRadio.value, 10) : 0;
+    }
+
+    updatedQuestions.push({
+      id: index + 1,
+      type: typeInput,
+      question: questionText,
+      options,
+      correctAnswer,
+      points: questionPoints,
+      timeSeconds: Math.max(5, questionTimeSeconds)
+    });
+  });
+
+  updatedQuestions.forEach((q, idx) => { q.id = idx + 1; });
+  exam.questions = updatedQuestions;
+  return updatedQuestions;
+}
+
 // حفظ الأسئلة والبيانات الأكاديمية لاحقاً (تعديل كامل)
 
 function applyExamMetaFromEditor(exam, options = {}) {
@@ -6252,53 +6301,9 @@ function saveAllEditedQuestions() {
     return;
   }
 
-  const rawQuestionCount = document.getElementById("edit-meta-question-count")?.value.trim() || "";
   if (!applyExamMetaFromEditor(exam, { requireAcademic: true })) return;
 
-  // 2. تحديث وحفظ الأسئلة وأوزان درجاتها
-  const cards = document.querySelectorAll("#editor-questions-list .exam-builder-card");
-  const updatedQuestions = [];
-
-  cards.forEach((card, index) => {
-    const textInput = card.querySelector(".edit-q-text");
-    const questionText = textInput ? textInput.value.trim() : "";
-
-    const pointsInput = card.querySelector(".edit-q-points");
-    const questionPoints = pointsInput ? parseFloat(pointsInput.value) || 10 : 10;
-
-    const timeInput = card.querySelector(".edit-q-time");
-    const questionTimeSeconds = timeInput ? parseInt(timeInput.value, 10) || 60 : 60;
-
-    const typeInput = exam.questions[index].type;
-
-    let options = [];
-    let correctAnswer = 0;
-
-    if (typeInput === "essay") {
-      options = [];
-      correctAnswer = "";
-    } else {
-      const optionInputs = card.querySelectorAll(".edit-q-option");
-      optionInputs.forEach(input => {
-        options.push(input.value.trim());
-      });
-
-      const checkedRadio = card.querySelector(`input[name="edit-correct-${index}"]:checked`);
-      correctAnswer = checkedRadio ? parseInt(checkedRadio.value) : 0;
-    }
-
-    updatedQuestions.push({
-      id: index + 1,
-      type: typeInput,
-      question: questionText,
-      options,
-      correctAnswer,
-      points: questionPoints,
-      timeSeconds: Math.max(5, questionTimeSeconds)
-    });
-  });
-
-  exam.questions = updatedQuestions;
+  syncExamQuestionsFromEditorDom(exam);
   sanitizeQuestionConfig(exam);
   saveSystemState(true);
   
@@ -6335,6 +6340,7 @@ window.addOptionToQuestion = function(qIndex) {
   const exam = systemState.exams.find(e => e.id === currentEditingExamId);
   if (!exam) return;
 
+  syncExamQuestionsFromEditorDom(exam);
   exam.questions[qIndex].options.push(`خيار جديد ${exam.questions[qIndex].options.length + 1}`);
   renderQuestionsForEdit(exam);
 };
@@ -6343,6 +6349,8 @@ window.removeOptionFromQuestion = function(qIndex, optIndex) {
   if (!currentEditingExamId) return;
   const exam = systemState.exams.find(e => e.id === currentEditingExamId);
   if (!exam) return;
+
+  syncExamQuestionsFromEditorDom(exam);
 
   if (exam.questions[qIndex].options.length <= 2) {
     alert("لا يمكن أن يحتوي سؤال الاختيار على أقل من بديلين!");
@@ -6361,6 +6369,8 @@ window.addNewQuestionToExam = function(type) {
   if (!currentEditingExamId) return;
   const exam = systemState.exams.find(e => e.id === currentEditingExamId);
   if (!exam) return;
+
+  syncExamQuestionsFromEditorDom(exam);
 
   let newQ = null;
   if (type === 'multiple') {
@@ -6406,6 +6416,7 @@ window.deleteQuestion = function(index) {
   if (!exam) return;
 
   if (confirm("هل أنت متأكد من حذف هذا السؤال؟")) {
+    syncExamQuestionsFromEditorDom(exam);
     exam.questions.splice(index, 1);
     exam.questions.forEach((q, idx) => { q.id = idx + 1; });
     saveSystemState(true);
