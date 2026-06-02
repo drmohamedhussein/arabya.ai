@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.24";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.26";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1028,6 +1028,7 @@ function initDatabase() {
   }
   ensureResultRecordIds();
   hydratePresentedQuestionsForResults();
+  hydrateResultAnswerDataForResults();
 
   // 4. تهيئة قاعدة بيانات الطلاب وأكوادهم
   const savedStudents = localStorage.getItem("arabya_students_db");
@@ -2068,7 +2069,11 @@ function matchPresentedQuestionsFromDetails(res, exam) {
   if (!exam || !Array.isArray(exam.questions) || !res?.details) return [];
   const texts = extractQuestionTextsFromResultDetails(res.details);
   if (!texts.length) return [];
+  return matchExamQuestionsByTexts(exam, texts);
+}
 
+function matchExamQuestionsByTexts(exam, texts) {
+  if (!exam || !Array.isArray(exam.questions) || !Array.isArray(texts)) return [];
   const usedIds = new Set();
   const matched = [];
   texts.forEach(text => {
@@ -2089,8 +2094,172 @@ function matchPresentedQuestionsFromDetails(res, exam) {
   return matched;
 }
 
+function getResultAnswerForQuestion(res, questionId) {
+  const answers = res?.studentAnswers;
+  if (!answers || typeof answers !== "object") return undefined;
+  if (answers[questionId] !== undefined) return answers[questionId];
+  const key = String(questionId);
+  if (answers[key] !== undefined) return answers[key];
+  const num = parseInt(key, 10);
+  if (Number.isFinite(num) && answers[num] !== undefined) return answers[num];
+  return undefined;
+}
+
+function getResultQuestionScore(res, questionId) {
+  const scores = res?.questionScores;
+  if (!scores || typeof scores !== "object") return undefined;
+  if (scores[questionId] !== undefined) return scores[questionId];
+  const key = String(questionId);
+  if (scores[key] !== undefined) return scores[key];
+  const num = parseInt(key, 10);
+  if (Number.isFinite(num) && scores[num] !== undefined) return scores[num];
+  return undefined;
+}
+
+function resultHasStructuredAnswers(res) {
+  const answers = res?.studentAnswers;
+  return !!(answers && typeof answers === "object" && Object.keys(answers).length > 0);
+}
+
+function resolveStudentOptionIndexFromText(question, answerText) {
+  const text = String(answerText || "").trim();
+  if (!text || /لم\s*تتم\s*الإجابة/i.test(text)) return -1;
+  if (/انته(?:ى|ي)\s*الوقت/i.test(text)) return -1;
+  if (/ملغي|غش/i.test(text)) return -2;
+  const options = Array.isArray(question?.options) ? question.options : [];
+  const exactIdx = options.findIndex(opt => String(opt).trim() === text);
+  if (exactIdx >= 0) return exactIdx;
+  const letterMatch = text.match(/^([A-Da-d])$/);
+  if (letterMatch) {
+    const letterIdx = letterMatch[1].toUpperCase().charCodeAt(0) - 65;
+    if (letterIdx >= 0 && letterIdx < options.length) return letterIdx;
+  }
+  return undefined;
+}
+
+function parseManualQuestionScoreFromBracket(bracketText, fallbackPoints, isCorrect) {
+  const manual = String(bracketText || "").match(/درجة\s*السؤال\s*المعدلة\s*:\s*([\d.]+)/i);
+  if (manual) return parseFloat(manual[1]) || 0;
+  if (/✓|صح/i.test(bracketText || "")) return fallbackPoints;
+  if (/✗|خط/i.test(bracketText || "")) return 0;
+  if (isCorrect) return fallbackPoints;
+  return 0;
+}
+
+/** يستخرج إجابات الطالب ودرجات الأسئلة من حقل details للنتائج القديمة */
+function parseResultDetailsIntoAnswerMaps(res, exam) {
+  if (!res?.details || typeof res.details !== "string") {
+    return { studentAnswers: {}, questionScores: {}, presentedQuestions: [] };
+  }
+  const studentAnswers = {};
+  const questionScores = {};
+  const presentedQuestions = [];
+  const details = res.details;
+
+  const essayRegex = /س\s*مقالي\s*\(وزنها\s*([\d.]+)\s*نق(?:طة|اط)?\)\s*:\s*([\s\S]+?)\n\s*إجابة\s*الطالب:\s*([\s\S]*?)(?:\n\s*\[(.+?)\])?(?=\n-{3,}|\nس\s*\(|\n*$)/gi;
+  let essayMatch;
+  while ((essayMatch = essayRegex.exec(details)) !== null) {
+    const qPoints = parseFloat(essayMatch[1]) || 10;
+    const questionText = essayMatch[2].trim();
+    let answerText = essayMatch[3].trim();
+    const bracket = essayMatch[4] || "";
+    if (/^\(لم\s*يكتب/i.test(answerText)) answerText = "";
+    const matched = exam ? matchExamQuestionsByTexts(exam, [questionText]) : [];
+    const question = matched[0] || {
+      id: presentedQuestions.length + 1,
+      type: "essay",
+      question: questionText,
+      options: [],
+      correctAnswer: "",
+      points: qPoints
+    };
+    studentAnswers[question.id] = answerText;
+    questionScores[question.id] = parseManualQuestionScoreFromBracket(bracket, qPoints, false);
+    presentedQuestions.push(question);
+  }
+
+  details.split("\n").forEach(line => {
+    const trimmed = line.trim();
+    if (!trimmed || /^س\s*مقالي/i.test(trimmed)) return;
+    const objectiveMatch = trimmed.match(/^س\s*\(وزنها\s*([\d.]+)\s*نق(?:طة|اط)?\)\s*:\s*(.+?)\s*\|\s*إجابة\s*الطالب:\s*(.+?)\s*\|\s*الصحيحة:\s*(.+?)(?:\s*\[(.+?)\])?\s*$/i);
+    if (!objectiveMatch) return;
+    const qPoints = parseFloat(objectiveMatch[1]) || 10;
+    const questionText = objectiveMatch[2].trim();
+    const studentAnsText = objectiveMatch[3].trim();
+    const correctText = objectiveMatch[4].trim();
+    const bracket = objectiveMatch[5] || "";
+    const matched = exam ? matchExamQuestionsByTexts(exam, [questionText]) : [];
+    const question = matched[0] || {
+      id: presentedQuestions.length + 1000,
+      type: "multiple",
+      question: questionText,
+      options: [correctText, studentAnsText].filter((v, i, arr) => v && arr.indexOf(v) === i),
+      correctAnswer: 0,
+      points: qPoints
+    };
+    const studentIdx = resolveStudentOptionIndexFromText(question, studentAnsText);
+    const correctIdx = resolveStudentOptionIndexFromText(question, correctText);
+    if (correctIdx !== undefined && correctIdx >= 0 && question.correctAnswer !== correctIdx) {
+      question.correctAnswer = correctIdx;
+    }
+    studentAnswers[question.id] = studentIdx !== undefined ? studentIdx : studentAnsText;
+    const isCorrect = studentIdx !== undefined && studentIdx === question.correctAnswer;
+    questionScores[question.id] = parseManualQuestionScoreFromBracket(bracket, qPoints, isCorrect);
+    if (!presentedQuestions.some(q => q.id === question.id)) {
+      presentedQuestions.push(question);
+    }
+  });
+
+  return { studentAnswers, questionScores, presentedQuestions };
+}
+
+function ensureResultAnswerData(res, exam) {
+  if (!res) return false;
+  if (!res.studentAnswers || typeof res.studentAnswers !== "object") res.studentAnswers = {};
+  if (!res.questionScores || typeof res.questionScores !== "object") res.questionScores = {};
+  if (resultHasStructuredAnswers(res)) return false;
+  const parsed = parseResultDetailsIntoAnswerMaps(res, exam);
+  if (!parsed || !Object.keys(parsed.studentAnswers).length) return false;
+  res.studentAnswers = parsed.studentAnswers;
+  res.questionScores = { ...res.questionScores, ...parsed.questionScores };
+  if ((!Array.isArray(res.presentedQuestions) || !res.presentedQuestions.length) && parsed.presentedQuestions.length) {
+    res.presentedQuestions = JSON.parse(JSON.stringify(parsed.presentedQuestions));
+  }
+  return true;
+}
+
+function hydrateResultAnswerDataForResults() {
+  if (!Array.isArray(systemState.results) || !systemState.results.length) return false;
+  let changed = false;
+  systemState.results.forEach(res => {
+    const exam = systemState.exams.find(item => item.id === res.examId);
+    if (ensureResultAnswerData(res, exam)) changed = true;
+  });
+  if (changed) {
+    try {
+      localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+    } catch (e) {
+      console.error("hydrateResultAnswerDataForResults:", e);
+    }
+  }
+  return changed;
+}
+
+function compactPresentedQuestionsForCloud(questions) {
+  return (Array.isArray(questions) ? questions : []).map(q => ({
+    id: q.id,
+    type: q.type,
+    question: q.question,
+    options: q.options,
+    correctAnswer: q.correctAnswer,
+    points: q.points
+  }));
+}
+
 /** الأسئلة التي ظهرت للطالب فعلاً (وليس بنك الأسئلة كاملاً) */
 function getPresentedQuestionsForResult(res, exam) {
+  ensureResultAnswerData(res, exam);
+
   if (Array.isArray(res?.presentedQuestions) && res.presentedQuestions.length > 0) {
     return res.presentedQuestions;
   }
@@ -2145,6 +2314,7 @@ function hydratePresentedQuestionsForResults() {
   systemState.results.forEach(res => {
     if (Array.isArray(res.presentedQuestions) && res.presentedQuestions.length > 0) return;
     const exam = systemState.exams.find(item => item.id === res.examId);
+    ensureResultAnswerData(res, exam);
     const resolved = getPresentedQuestionsForResult(res, exam);
     const bankSize = Array.isArray(exam?.questions) ? exam.questions.length : 0;
     const configuredCount = getConfiguredQuestionCount(exam);
@@ -2164,6 +2334,7 @@ function hydratePresentedQuestionsForResults() {
       console.error("hydratePresentedQuestionsForResults:", e);
     }
   }
+  hydrateResultAnswerDataForResults();
   return changed;
 }
 
@@ -3563,6 +3734,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     systemState.students = filterOutDeletedStudents(systemState.students);
     ensureResultRecordIds();
     hydratePresentedQuestionsForResults();
+    hydrateResultAnswerDataForResults();
   } else {
     ensureResultRecordIds();
   }
@@ -3606,9 +3778,9 @@ function buildSlimResultCloudPayload(payload) {
   if (slim.details && String(slim.details).length > 12000) {
     slim.details = String(slim.details).slice(0, 12000) + "\n...[مختصر للمزامنة السحابية]";
   }
-  delete slim.studentAnswers;
-  delete slim.questionScores;
-  delete slim.presentedQuestions;
+  if (Array.isArray(slim.presentedQuestions) && slim.presentedQuestions.length) {
+    slim.presentedQuestions = compactPresentedQuestionsForCloud(slim.presentedQuestions);
+  }
   return slim;
 }
 
@@ -3656,9 +3828,9 @@ function slimCloudBackupDataForSize(data) {
       if (copy.details && String(copy.details).length > 1500) {
         copy.details = String(copy.details).slice(0, 1500);
       }
-      delete copy.studentAnswers;
-      delete copy.questionScores;
-      delete copy.presentedQuestions;
+      if (Array.isArray(copy.presentedQuestions) && copy.presentedQuestions.length) {
+        copy.presentedQuestions = compactPresentedQuestionsForCloud(copy.presentedQuestions);
+      }
       return copy;
     });
   }
@@ -7617,6 +7789,11 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
     details: details,
     maxScore: resultObj?.maxScore || getCurrentExamTotalScore(),
     attemptNumber: resultObj?.attemptNumber ?? "",
+    studentAnswers: resultObj?.studentAnswers || { ...systemState.studentAnswers },
+    questionScores: resultObj?.questionScores || {},
+    presentedQuestions: compactPresentedQuestionsForCloud(
+      resultObj?.presentedQuestions || systemState.shuffledQuestions || []
+    ),
     ...buildResultCloudRetakeFields(resultObj),
     ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
     ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
@@ -7750,6 +7927,9 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
     maxScore: res.maxScore || "",
     isManualGradeUpdate: true,
     attemptNumber: res.attemptNumber ?? "",
+    studentAnswers: res.studentAnswers || {},
+    questionScores: res.questionScores || {},
+    presentedQuestions: compactPresentedQuestionsForCloud(res.presentedQuestions || []),
     ...buildResultCloudRetakeFields(res),
     ...buildResultDeviceFieldsFromResult(res),
     ...buildResultCloudIpReleaseFields(res),
@@ -7849,7 +8029,8 @@ function renderStudentSearchDetailReadOnly(res) {
 
   if (!res.studentAnswers) res.studentAnswers = {};
   presentedQuestions.forEach((q, index) => {
-    const studentAns = res.studentAnswers[q.id];
+    const studentAns = getResultAnswerForQuestion(res, q.id);
+    const earnedScore = getResultQuestionScore(res, q.id);
     const qPoints = q.points !== undefined ? q.points : 10;
     let typeName = "اختيار من متعدد";
     if (q.type === "boolean") typeName = "صواب وخطأ";
@@ -7878,7 +8059,7 @@ function renderStudentSearchDetailReadOnly(res) {
     }
 
     card.innerHTML =
-      `<div style="font-weight:700; color:var(--secondary); margin-bottom:0.5rem;">سؤال ${index + 1} (${typeName}) · ${qPoints} درجة</div>` +
+      `<div style="font-weight:700; color:var(--secondary); margin-bottom:0.5rem;">سؤال ${index + 1} (${typeName}) · ${qPoints} درجة${earnedScore !== undefined ? ` — حصلت على ${earnedScore}` : ""}</div>` +
       `<div style="font-weight:600; margin-bottom:0.75rem; line-height:1.6;">${escapeHtml(q.question || "")}</div>` +
       bodyHtml;
     questionsEl.appendChild(card);
@@ -8893,15 +9074,15 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
   }
 
   questionsToRender.forEach((q, index) => {
-    const studentAns = res.studentAnswers[q.id];
+    const studentAns = getResultAnswerForQuestion(res, q.id);
     
     // تهيئة الدرجة إذا كانت فارغة للموضوعي
-    if (q.type !== "essay" && res.questionScores[q.id] === undefined) {
+    if (q.type !== "essay" && getResultQuestionScore(res, q.id) === undefined) {
       res.questionScores[q.id] = (studentAns === q.correctAnswer) ? (q.points || 10) : 0;
     }
 
     const qPoints = q.points !== undefined ? q.points : 10;
-    const currentScore = res.questionScores[q.id] !== undefined ? res.questionScores[q.id] : 0;
+    const currentScore = getResultQuestionScore(res, q.id) !== undefined ? getResultQuestionScore(res, q.id) : 0;
 
     const qCard = document.createElement("div");
     qCard.className = "exam-builder-card";

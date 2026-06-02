@@ -62,7 +62,9 @@ var ARABYA_RESULTS_HEADERS = [
   "محل بسجل",
   "تحرير IP بواسطة المعلم",
   "تاريخ تحرير IP",
-  "محرر IP"
+  "إجابات الطالب",
+  "درجات الأسئلة",
+  "الأسئلة المعروضة"
 ];
 
 function doPost(e) {
@@ -336,7 +338,10 @@ function buildArabyaResultRow_(data) {
     data.supersededByRecordId || "",
     data.ipReleasedByTeacher ? "نعم" : "لا",
     data.ipReleasedAt || "",
-    data.ipReleasedBy || ""
+    data.ipReleasedBy || "",
+    stringifyArabyaJsonField_(data.studentAnswers),
+    stringifyArabyaJsonField_(data.questionScores),
+    stringifyArabyaJsonField_(data.presentedQuestions)
   ];
 }
 
@@ -778,7 +783,10 @@ function normaliseArabyaResult_(data) {
     isManualGradeUpdate: !!data.isManualGradeUpdate,
     ipReleasedByTeacher: !!data.ipReleasedByTeacher,
     ipReleasedAt: data.ipReleasedAt || "",
-    ipReleasedBy: data.ipReleasedBy || ""
+    ipReleasedBy: data.ipReleasedBy || "",
+    studentAnswers: parseArabyaJsonField_(data.studentAnswers, {}),
+    questionScores: parseArabyaJsonField_(data.questionScores, {}),
+    presentedQuestions: parseArabyaJsonField_(data.presentedQuestions, [])
   };
 }
 
@@ -920,7 +928,10 @@ function readArabyaResultsFromSheet_() {
       supersededByRecordId: String(row[31] || ""),
       ipReleasedByTeacher: String(row[32] || "") === "نعم",
       ipReleasedAt: String(row[33] || ""),
-      ipReleasedBy: String(row[34] || "")
+      ipReleasedBy: String(row[34] || ""),
+      studentAnswers: parseArabyaJsonField_(row[35], {}),
+      questionScores: parseArabyaJsonField_(row[36], {}),
+      presentedQuestions: parseArabyaJsonField_(row[37], [])
     });
   });
   return out.map(normaliseArabyaResult_);
