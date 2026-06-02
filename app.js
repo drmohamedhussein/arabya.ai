@@ -2782,7 +2782,7 @@ function sortResultsByRecency(results, sourceList) {
 
 
 const TEACHER_ACTIVE_TAB_KEY = "arabya_teacher_active_tab";
-const TEACHER_TAB_IDS = ["home", "stats", "exams", "results", "students", "teachers", "integration", "profile", "admins"];
+const TEACHER_TAB_IDS = ["home", "stats", "exams", "question-bank", "results", "students", "teachers", "integration", "profile", "admins"];
 const CLOUD_SYNC_LAST_OK_KEY = "arabya_last_cloud_sync_ok";
 const CLOUD_SYNC_LAST_FAIL_KEY = "arabya_last_cloud_sync_fail";
 const CLOUD_SYNC_LOCAL_ONLY_KEY = "arabya_cloud_sync_local_only";
@@ -2937,6 +2937,8 @@ function activateTeacherTab(tabId, options = {}) {
     syncDatabaseFromCloud({ silent: true }).finally(() => refreshTeacherDashboardViews({ all: true }));
   } else if (normalizedTab === "exams") {
     renderExamsList();
+  } else if (normalizedTab === "question-bank") {
+    if (typeof window.renderQuestionBankTab === "function") window.renderQuestionBankTab();
   } else if (normalizedTab === "teachers" || normalizedTab === "admins") {
     renderTeacherAccountsPanel();
   } else if (normalizedTab === "profile") {
@@ -2962,6 +2964,7 @@ function refreshTeacherDashboardViews(options = {}) {
   const resultsTab = document.getElementById("teacher-tab-results");
   const studentsTab = document.getElementById("teacher-tab-students");
   const examsTab = document.getElementById("teacher-tab-exams");
+  const questionBankTab = document.getElementById("teacher-tab-question-bank");
   const teachersTab = document.getElementById("teacher-tab-teachers");
 
   const homeTab = document.getElementById("teacher-tab-home");
@@ -2979,6 +2982,9 @@ function refreshTeacherDashboardViews(options = {}) {
   }
   if (refreshAll || (examsTab && !examsTab.classList.contains("hidden"))) {
     if (typeof renderExamsList === "function") renderExamsList();
+  }
+  if (refreshAll || (questionBankTab && !questionBankTab.classList.contains("hidden"))) {
+    if (typeof window.renderQuestionBankTab === "function") window.renderQuestionBankTab();
   }
   if (refreshAll || (teachersTab && !teachersTab.classList.contains("hidden"))) {
     if (typeof renderTeacherAccountsPanel === "function") renderTeacherAccountsPanel();
@@ -5573,6 +5579,7 @@ function loadTeacherDashboardData() {
   renderTeacherHomeDashboard();
   renderTeacherStatsDashboard();
   renderExamsList();
+  if (typeof window.renderQuestionBankTab === "function") window.renderQuestionBankTab();
   renderStudentResultsTable();
   renderTeacherStudentsTable();
   refreshCloudSyncStatusUI();

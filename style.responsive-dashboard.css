@@ -399,6 +399,85 @@ table .btn,
   }
 }
 
+.question-bank-import-card {
+  margin-bottom: 1.25rem;
+}
+
+.question-bank-import-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.question-bank-import-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: center;
+}
+
+.question-bank-google-import-row {
+  flex: 1 1 340px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.question-bank-google-import-row .form-control {
+  flex: 1 1 220px;
+}
+
+.question-bank-sections-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.question-bank-summary-line {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.question-bank-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.question-bank-list-item {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.question-bank-list-item ul {
+  margin: 0.5rem 0;
+  padding-inline-start: 1.1rem;
+}
+
+.question-bank-list-item li {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.question-bank-list-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  .question-bank-import-grid,
+  .question-bank-sections-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* شريط مزامنة عام في لوحة المعلم */
 .teacher-global-sync-bar {
   margin-bottom: 1rem;

@@ -528,6 +528,9 @@
             <li class="teacher-menu-item" data-tab="exams" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">assignment</span> الامتحانات والأسئلة
             </li>
+            <li class="teacher-menu-item" data-tab="question-bank" role="tab" aria-selected="false">
+              <span class="material-icons" aria-hidden="true">quiz</span> بنك الأسئلة
+            </li>
             <li class="teacher-menu-item" data-tab="results" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">poll</span> سجل نتائج الطلاب
             </li>
@@ -938,6 +941,66 @@
               </div>
             </div>
 
+          </div>
+
+          <div id="teacher-tab-question-bank" class="teacher-tab-panel hidden" role="tabpanel" aria-hidden="true">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">بنك الأسئلة</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">إدارة واستيراد بنوك الأسئلة واستخدامها لاحقاً داخل تبويب الامتحانات.</div>
+              </div>
+              <div class="panel-header-actions">
+                <button type="button" id="question-bank-refresh-btn" class="btn btn-outline btn-sm">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">refresh</span> تحديث
+                </button>
+              </div>
+            </div>
+
+            <div class="exam-builder-card question-bank-import-card">
+              <h4 style="color:var(--secondary); margin-bottom:0.75rem; font-weight:700;">استيراد بنك جديد</h4>
+              <div id="question-bank-import-status" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.8rem;" aria-live="polite">يمكنك الاستيراد من ملف Excel/CSV أو من Google Sheet.</div>
+              <div class="question-bank-import-grid">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="question-bank-name">اسم البنك</label>
+                  <input type="text" id="question-bank-name" class="form-control" placeholder="مثال: بنك النحو - الفرقة الأولى">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label" for="question-bank-subject">المادة (اختياري)</label>
+                  <input type="text" id="question-bank-subject" class="form-control" placeholder="مثال: النحو والصرف">
+                </div>
+              </div>
+              <div class="question-bank-import-actions">
+                <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('question-bank-excel-input').click()">
+                  <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">upload_file</span> استيراد من ملف Excel/CSV
+                </button>
+                <input type="file" id="question-bank-excel-input" style="display:none;" accept=".xlsx,.xls,.csv,.txt">
+                <div class="question-bank-google-import-row">
+                  <label class="sr-only" for="question-bank-google-sheet-url">رابط Google Sheet</label>
+                  <input type="url" id="question-bank-google-sheet-url" class="form-control" placeholder="https://docs.google.com/spreadsheets/d/...">
+                  <button type="button" id="question-bank-google-import-btn" class="btn btn-primary btn-sm">
+                    <span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">cloud_download</span> استيراد من Google Sheet
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="question-bank-sections-grid">
+              <div class="exam-builder-card question-bank-section-card">
+                <h4 style="color:var(--accent); margin-bottom:0.5rem;">قسم أسئلة الصواب والخطأ</h4>
+                <div id="question-bank-boolean-summary" class="question-bank-summary-line"></div>
+                <div id="question-bank-boolean-list" class="question-bank-list"></div>
+              </div>
+              <div class="exam-builder-card question-bank-section-card">
+                <h4 style="color:var(--secondary); margin-bottom:0.5rem;">قسم أسئلة الاختيار من متعدد</h4>
+                <div id="question-bank-multiple-summary" class="question-bank-summary-line"></div>
+                <div id="question-bank-multiple-list" class="question-bank-list"></div>
+              </div>
+              <div class="exam-builder-card question-bank-section-card">
+                <h4 style="color:var(--text-primary); margin-bottom:0.5rem;">قسم أسئلة الكتابة المقالية</h4>
+                <div id="question-bank-essay-summary" class="question-bank-summary-line"></div>
+                <div id="question-bank-essay-list" class="question-bank-list"></div>
+              </div>
+            </div>
           </div>
 
           <!-- تبويب سجل نتائج الطلاب (تصدير واستيراد النتائج) -->
