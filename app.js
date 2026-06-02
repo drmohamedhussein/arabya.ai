@@ -5,7 +5,9 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.19";
+const ARABYA_APP_VERSION = "2026.06.02.20";
+const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
+const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -687,6 +689,13 @@ document.addEventListener("DOMContentLoaded", () => {
   window.systemState = systemState;
   window.loadExamDeviceRegistry = loadExamDeviceRegistry;
   window.getArabyaWebAppUrls = getArabyaWebAppUrls;
+  window.getGeneralTeacherSyncUrls = getGeneralTeacherSyncUrls;
+  window.getCloudBackupTargetUrls = getCloudBackupTargetUrls;
+  window.getCloudBackupScope = getCloudBackupScope;
+  window.getEffectiveExamSyncUrl = getEffectiveExamSyncUrl;
+  window.resolveCloudBackupTargetUrls = resolveCloudBackupTargetUrls;
+  window.ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+  window.ARABYA_CLOUD_BACKUP_SCOPE_ALL = ARABYA_CLOUD_BACKUP_SCOPE_ALL;
   window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
   window.isSuperAdminTeacher = isSuperAdminTeacher;
   window.inferTeacherRole = inferTeacherRole;
@@ -2900,34 +2909,73 @@ function reloadSystemStateFromLocalStorage() {
 
 function getArabyaWebAppUrls() {
   const urls = new Set();
-  if (systemState.config && systemState.config.googleFormUrl) {
-    const url = systemState.config.googleFormUrl.trim();
-    if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
-  }
-  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
-    const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
-    if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
-  }
+  getGeneralTeacherSyncUrls().forEach(u => urls.add(u));
   if (Array.isArray(systemState.exams)) {
     systemState.exams.forEach(exam => {
-      if (exam.googleFormUrl) {
-        const url = exam.googleFormUrl.trim();
-        if (url.includes("/macros/s/") || url.endsWith("/exec")) urls.add(url);
-      }
+      if (isValidCloudSyncUrl(exam.googleFormUrl)) urls.add(normalizeArabyaWebAppUrl(exam.googleFormUrl.trim()));
     });
   }
   if (Array.isArray(systemState.teachers)) {
     systemState.teachers.forEach(t => {
       const u = t && t.integrationConfig && t.integrationConfig.googleFormUrl ? String(t.integrationConfig.googleFormUrl).trim() : "";
-      if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) urls.add(u);
+      if (isValidCloudSyncUrl(u)) urls.add(normalizeArabyaWebAppUrl(u));
     });
+  }
+  return Array.from(urls).filter(Boolean);
+}
+
+function getGeneralTeacherSyncUrls() {
+  const urls = new Set();
+  if (systemState.config && isValidCloudSyncUrl(systemState.config.googleFormUrl)) {
+    urls.add(normalizeArabyaWebAppUrl(systemState.config.googleFormUrl.trim()));
+  }
+  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && isValidCloudSyncUrl(systemState.activeTeacher.integrationConfig.googleFormUrl)) {
+    urls.add(normalizeArabyaWebAppUrl(systemState.activeTeacher.integrationConfig.googleFormUrl.trim()));
   }
   try {
     const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
-    const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
-    if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) urls.add(u);
+    if (isValidCloudSyncUrl(cfg.googleFormUrl)) urls.add(normalizeArabyaWebAppUrl(cfg.googleFormUrl.trim()));
   } catch (e) {}
-  return Array.from(urls).map(normalizeArabyaWebAppUrl).filter(Boolean);
+  try {
+    const teacherUrlInput = document.getElementById("teacher-config-url");
+    if (teacherUrlInput && isValidCloudSyncUrl(teacherUrlInput.value)) {
+      urls.add(normalizeArabyaWebAppUrl(teacherUrlInput.value.trim()));
+    }
+  } catch (e) {}
+  return Array.from(urls).filter(Boolean);
+}
+
+function getCloudBackupScope() {
+  const fromTeacher = systemState.activeTeacher && systemState.activeTeacher.integrationConfig
+    ? systemState.activeTeacher.integrationConfig.cloudBackupScope
+    : "";
+  if (fromTeacher === ARABYA_CLOUD_BACKUP_SCOPE_ALL || fromTeacher === ARABYA_CLOUD_BACKUP_SCOPE_GENERAL) {
+    return fromTeacher;
+  }
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    if (cfg.cloudBackupScope === ARABYA_CLOUD_BACKUP_SCOPE_ALL) return ARABYA_CLOUD_BACKUP_SCOPE_ALL;
+  } catch (e) {}
+  return ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+}
+
+function resolveCloudBackupTargetUrls(scope, generalUrls, allUrls) {
+  const general = [...new Set((generalUrls || []).map(u => normalizeArabyaWebAppUrl(u)).filter(Boolean))];
+  const all = [...new Set((allUrls || []).map(u => normalizeArabyaWebAppUrl(u)).filter(Boolean))];
+  if (scope === ARABYA_CLOUD_BACKUP_SCOPE_ALL) return all.length ? all : general;
+  return general.length ? general : all;
+}
+
+function getCloudBackupTargetUrls() {
+  return resolveCloudBackupTargetUrls(
+    getCloudBackupScope(),
+    getGeneralTeacherSyncUrls(),
+    getArabyaWebAppUrls()
+  );
+}
+
+function getExamResultSyncUrl(exam) {
+  return getEffectiveExamSyncUrl(exam || systemState.currentExam || null);
 }
 
 function mergeRemoteCollection_(current, incoming, keyFn, label) {
@@ -3446,7 +3494,7 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
 }
 
 async function pushCloudBackupNow(reason) {
-  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) {
     markCloudSyncLocalOnly("لا يوجد رابط Web App");
     return false;
@@ -3511,7 +3559,7 @@ function propagateStudentEditsToResults(student, previousKey = "") {
 
 async function syncTeacherCredentialsToCloud(teacher = systemState.activeTeacher) {
   if (!teacher) return { ok: false, reason: "no_teacher" };
-  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  const urlList = getGeneralTeacherSyncUrls();
   if (urlList.length === 0) return { ok: false, reason: "no_url" };
 
   const record = window.ArabyaCloudSync
@@ -3593,7 +3641,7 @@ function updateTeacherCredentialSyncIndicator(syncResult, syncing = false) {
 
 async function syncStudentRecordToCloud(student) {
   if (!student) return false;
-  const urlList = getArabyaWebAppUrls();
+  const urlList = getGeneralTeacherSyncUrls();
   if (urlList.length === 0) return false;
 
   const payload = {
@@ -3627,7 +3675,7 @@ async function syncStudentRecordToCloud(student) {
 }
 
 async function syncLocalDatabaseToCloud() {
-  const urlList = getArabyaWebAppUrls();
+  const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) return false;
   return pushCloudBackupNow();
 }
@@ -3696,36 +3744,56 @@ function recordPreExamSyncDuration(durationMs) {
   } catch (e) {}
 }
 
-async function fetchCloudBackupResponse_(timeoutMs) {
-  const urlList = getArabyaWebAppUrls();
-  for (const rawUrl of urlList) {
-    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = controller && timeoutMs > 0
-      ? setTimeout(() => controller.abort(), timeoutMs)
-      : null;
-    try {
-      const res = await fetch(fetchUrl, {
-        method: "GET",
-        headers: { Accept: "application/json" },
-        signal: controller ? controller.signal : undefined
-      });
-      if (!res.ok) continue;
-      const response = await res.json();
-      if (response && response.status === "success" && response.data) {
-        return response;
-      }
-    } catch (err) {
-      if (err && err.name === "AbortError") {
-        console.warn("[ARABYA] cloud backup fetch timed out", timeoutMs, "ms");
-      } else {
-        console.warn("fetchCloudBackupResponse_ failed for", fetchUrl, err);
-      }
-    } finally {
-      if (timer) clearTimeout(timer);
+async function fetchCloudBackupJson_(rawUrl, timeoutMs) {
+  const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller && timeoutMs > 0
+    ? setTimeout(() => controller.abort(), timeoutMs)
+    : null;
+  try {
+    const res = await fetch(fetchUrl, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: controller ? controller.signal : undefined
+    });
+    if (!res.ok) return null;
+    const response = await res.json();
+    if (response && response.status === "success" && response.data) return response;
+  } catch (err) {
+    if (err && err.name === "AbortError") {
+      console.warn("[ARABYA] cloud backup fetch timed out", timeoutMs, "ms", rawUrl);
+    } else {
+      console.warn("fetchCloudBackupJson_ failed for", fetchUrl, err);
     }
+  } finally {
+    if (timer) clearTimeout(timer);
   }
   return null;
+}
+
+async function fetchAndMergeAllCloudBackups(mergeOptions = {}, timeoutMs = 0) {
+  const urlList = getArabyaWebAppUrls();
+  if (!urlList.length) return { ok: false, lastResponse: null };
+  let lastResponse = null;
+  let anyMerged = false;
+  if (timeoutMs > 0) {
+    const settled = await Promise.all(urlList.map(url => fetchCloudBackupJson_(url, timeoutMs)));
+    settled.forEach(response => {
+      if (!response || !response.data) return;
+      mergeRemoteDatabaseIntoLocal(response.data, mergeOptions);
+      anyMerged = true;
+      lastResponse = response;
+    });
+  } else {
+    for (const rawUrl of urlList) {
+      const response = await fetchCloudBackupJson_(rawUrl, 0);
+      if (!response || !response.data) continue;
+      mergeRemoteDatabaseIntoLocal(response.data, mergeOptions);
+      anyMerged = true;
+      lastResponse = response;
+    }
+  }
+  return { ok: anyMerged, lastResponse };
 }
 
 function prefetchStudentExamGateData() {
@@ -3849,26 +3917,12 @@ async function syncDatabaseFromCloud(options = {}) {
   }
   if (!silent) refreshCloudSyncStatusUI("جاري جلب البيانات من Google Sheets...", "syncing");
 
-  const response = timeoutMs > 0
-    ? await fetchCloudBackupResponse_(timeoutMs)
-    : await (async () => {
-      for (const rawUrl of urlList) {
-        const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
-        try {
-          const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
-          if (!res.ok) continue;
-          const json = await res.json();
-          if (json && json.status === "success" && json.data) return json;
-        } catch (err) {
-          console.warn("syncDatabaseFromCloud failed for", fetchUrl, err);
-        }
-      }
-      return null;
-    })();
+  const mergeOpts = scope === "exam_start" ? { scope: "exam_start" } : {};
+  const pullResult = await fetchAndMergeAllCloudBackups(mergeOpts, timeoutMs);
+  const response = pullResult.lastResponse;
 
-  if (response && response.data) {
+  if (pullResult.ok && response && response.data) {
     try {
-      mergeRemoteDatabaseIntoLocal(response.data, scope === "exam_start" ? { scope: "exam_start" } : {});
       applyDeletionTombstonesToLocalState();
       try {
         localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
@@ -3938,26 +3992,21 @@ function hydrateGoogleSheetsScriptBox() {
 function getEffectiveExamSyncUrl(exam) {
   const candidates = [];
   if (exam && exam.googleFormUrl) candidates.push(String(exam.googleFormUrl).trim());
-  if (systemState.config && systemState.config.googleFormUrl) candidates.push(String(systemState.config.googleFormUrl).trim());
+  if (exam && exam.teacher && Array.isArray(systemState.teachers)) {
+    const owner = systemState.teachers.find(x => x.username === exam.teacher);
+    if (owner && owner.integrationConfig && owner.integrationConfig.googleFormUrl) {
+      candidates.push(String(owner.integrationConfig.googleFormUrl).trim());
+    }
+  }
   if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
     candidates.push(String(systemState.activeTeacher.integrationConfig.googleFormUrl).trim());
   }
-  if (exam && exam.teacher && Array.isArray(systemState.teachers)) {
-    const t = systemState.teachers.find(x => x.username === exam.teacher);
-    if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) candidates.push(String(t.integrationConfig.googleFormUrl).trim());
-  }
-  if (Array.isArray(systemState.teachers)) {
-    systemState.teachers.forEach(t => {
-      if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) candidates.push(String(t.integrationConfig.googleFormUrl).trim());
-    });
-  }
+  if (systemState.config && systemState.config.googleFormUrl) candidates.push(String(systemState.config.googleFormUrl).trim());
   try {
     const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
     if (cfg.googleFormUrl) candidates.push(String(cfg.googleFormUrl).trim());
   } catch (e) {}
   try {
-    const teacherUrlInput = document.getElementById("teacher-config-url");
-    if (teacherUrlInput && teacherUrlInput.value) candidates.push(String(teacherUrlInput.value).trim());
     const examUrlInput = document.getElementById("edit-meta-google-url");
     if (examUrlInput && examUrlInput.value) candidates.push(String(examUrlInput.value).trim());
   } catch (e) {}
@@ -3966,7 +4015,7 @@ function getEffectiveExamSyncUrl(exam) {
     if (s) candidates.push(String(s).trim());
   } catch (e) {}
   for (const u of candidates) {
-    if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) return u;
+    if (isValidCloudSyncUrl(u)) return normalizeArabyaWebAppUrl(u);
   }
   return "";
 }
@@ -4195,49 +4244,26 @@ function syncTeacherDataOnLogin(options = {}) {
 
 // حفظ نسخة احتياطية سحابية يدوياً
 window.backupDatabaseToCloud = function() {
-  const urls = new Set();
-  
-  if (systemState.config && systemState.config.googleFormUrl) {
-    const url = systemState.config.googleFormUrl.trim();
-    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
-      urls.add(url);
-    }
-  }
-  
-  if (systemState.activeTeacher && systemState.activeTeacher.integrationConfig && systemState.activeTeacher.integrationConfig.googleFormUrl) {
-    const url = systemState.activeTeacher.integrationConfig.googleFormUrl.trim();
-    if (url.includes("/macros/s/") || url.endsWith("/exec")) {
-      urls.add(url);
-    }
-  }
-  
-  if (Array.isArray(systemState.exams)) {
-    systemState.exams.forEach(exam => {
-      if (exam.googleFormUrl) {
-        const url = exam.googleFormUrl.trim();
-        if (url.includes("/macros/s/") || url.endsWith("/exec")) {
-          urls.add(url);
-        }
-      }
-    });
-  }
-
-  const urlList = Array.from(urls);
+  const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) {
     alert("يرجى إدخال رابط ويب اب (Web App URL) في إعدادات التكامل أو في إعدادات الامتحان أولاً لتمكين النسخ الاحتياطي السحابي!");
     return;
   }
 
-  const dbBackup = {
-    teachers: systemState.teachers,
-    students: systemState.students,
-    exams: systemState.exams,
-    results: systemState.results
-  };
+  const dbBackup = typeof buildFullCloudBackupData === "function"
+    ? buildFullCloudBackupData()
+    : {
+      teachers: systemState.teachers,
+      students: systemState.students,
+      exams: systemState.exams,
+      results: systemState.results,
+      examDeviceRegistry: typeof loadExamDeviceRegistry === "function" ? loadExamDeviceRegistry() : undefined
+    };
 
   const payload = {
     action: "save_backup",
-    data: dbBackup
+    data: dbBackup,
+    actor: window.ArabyaPlatformSync ? window.ArabyaPlatformSync.getCloudSyncActor() : { username: systemState.activeTeacher?.username || "" }
   };
 
   let successCount = 0;
@@ -5405,6 +5431,10 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
   document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
+  const backupScopeEl = document.getElementById("teacher-config-backup-scope");
+  if (backupScopeEl) {
+    backupScopeEl.value = getCloudBackupScope();
+  }
   document.getElementById("teacher-config-name").value = systemState.activeTeacher.integrationConfig?.entryName || "";
   document.getElementById("teacher-config-id").value = systemState.activeTeacher.integrationConfig?.entryId || "";
   document.getElementById("teacher-config-code-id").value = systemState.activeTeacher.integrationConfig?.entryCode || "";
@@ -5526,6 +5556,10 @@ async function saveTeacherIntegrationConfig() {
   const entryCode = document.getElementById("teacher-config-code-id").value.trim();
   const entryScore = document.getElementById("teacher-config-score").value.trim();
   const entryDetails = document.getElementById("teacher-config-details").value.trim();
+  const backupScopeRaw = document.getElementById("teacher-config-backup-scope")?.value || ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
+  const cloudBackupScope = backupScopeRaw === ARABYA_CLOUD_BACKUP_SCOPE_ALL
+    ? ARABYA_CLOUD_BACKUP_SCOPE_ALL
+    : ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
 
   if (!code) {
     alert("الرقم السري لا يمكن أن يكون فارغاً!");
@@ -5535,12 +5569,14 @@ async function saveTeacherIntegrationConfig() {
   systemState.activeTeacher.password = code;
   systemState.activeTeacher.autoEntryCode = code;
   systemState.activeTeacher.integrationConfig = {
+    ...(systemState.activeTeacher.integrationConfig || {}),
     googleFormUrl: url,
     entryName,
     entryId,
     entryCode,
     entryScore,
-    entryDetails
+    entryDetails,
+    cloudBackupScope
   };
 
   systemState.config = {
@@ -5551,6 +5587,7 @@ async function saveTeacherIntegrationConfig() {
     entryCode,
     entryScore,
     entryDetails,
+    cloudBackupScope,
     autoEntryCode: systemState.activeTeacher.autoEntryCode || code
   };
 
@@ -7314,10 +7351,10 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
   return buildSlimResultCloudPayload(payload);
 }
 
-async function postAddResultToAllCloudUrls(slimPayload) {
-  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
-  if (!urlList.length) return { ok: false, successCount: 0, total: 0 };
-  const outcomes = await Promise.all(urlList.map(async url => {
+async function postAddResultToCloudUrls(urlList, slimPayload) {
+  const targets = [...new Set((urlList || []).map(normalizeArabyaWebAppUrl).filter(Boolean))];
+  if (!targets.length) return { ok: false, successCount: 0, total: 0 };
+  const outcomes = await Promise.all(targets.map(async url => {
     try {
       await postToArabyaWebApp(url, slimPayload);
       return true;
@@ -7331,14 +7368,15 @@ async function postAddResultToAllCloudUrls(slimPayload) {
     }
   }));
   const successCount = outcomes.filter(Boolean).length;
-  return { ok: successCount > 0, successCount, total: urlList.length };
+  return { ok: successCount > 0, successCount, total: targets.length };
 }
 
 // المزامنة مع جوجل شيتس - ترسل نتيجة الطالب فور الانتهاء من الامتحان
 async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "", resultObj = null) {
   const exam = systemState.currentExam;
   const statusEl = document.getElementById("runner-res-sync-status");
-  const urlList = Array.from(getArabyaWebAppUrls());
+  const syncUrl = getExamResultSyncUrl(exam);
+  const urlList = syncUrl ? [syncUrl] : [];
 
   if (urlList.length === 0) {
     const traditionalUrl = (exam && exam.googleFormUrl) ? exam.googleFormUrl : (systemState.config ? systemState.config.googleFormUrl || "" : "");
@@ -7373,7 +7411,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
 
   try {
     const [postResult, backupOk] = await Promise.all([
-      postAddResultToAllCloudUrls(slimPayload),
+      postAddResultToCloudUrls(urlList, slimPayload),
       pushCloudBackupNow("exam_submit")
     ]);
     if (!statusEl) return;
@@ -7403,7 +7441,11 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
 
 // مزامنة نتيجة معدّلة يدوياً (من قبل المعلم) مع Google Sheets
 function sendUpdatedResultToCloud(res, syncStatusEl = null) {
-  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
+  const linkedExam = res && res.examId
+    ? systemState.exams.find(e => e.id === res.examId)
+    : systemState.exams.find(e => e.title === res.examTitle);
+  const syncUrl = getEffectiveExamSyncUrl(linkedExam || null);
+  const urlList = syncUrl ? [syncUrl] : [];
 
   if (urlList.length === 0) {
     if (syncStatusEl) syncStatusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle; font-size:1rem;">cloud_queue</span> لم يتم ربط Google Sheets بعد — تم الحفظ محلياً فقط.`;
@@ -8848,8 +8890,13 @@ function findTeacherResultByRecordId(recordId) {
 }
 
 async function postDeleteResultToCloud(res) {
-  const urlList = getArabyaWebAppUrls().map(normalizeArabyaWebAppUrl).filter(Boolean);
-  if (!urlList.length || !res) return { ok: false, successCount: 0, total: 0 };
+  if (!res) return { ok: false, successCount: 0, total: 0 };
+  const linkedExam = res.examId
+    ? systemState.exams.find(e => e.id === res.examId)
+    : systemState.exams.find(e => e.title === res.examTitle);
+  const syncUrl = getEffectiveExamSyncUrl(linkedExam || null);
+  const urlList = syncUrl ? [syncUrl] : getCloudBackupTargetUrls();
+  if (!urlList.length) return { ok: false, successCount: 0, total: 0 };
   const actor = window.ArabyaPlatformSync && window.ArabyaPlatformSync.getCloudSyncActor
     ? window.ArabyaPlatformSync.getCloudSyncActor()
     : { username: systemState.activeTeacher?.username || "", name: systemState.activeTeacher?.name || "" };

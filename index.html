@@ -883,7 +883,7 @@
                 <div class="form-group">
                   <label class="form-label" for="edit-meta-google-url">رابط المزامنة السحابية المخصص لهذا الامتحان (Google Form Submit URL / Web App):</label>
                   <input type="text" id="edit-meta-google-url" class="form-control" placeholder="اتركه فارغاً لاستخدام رابط المعلم العام المعتمد..." style="border-color: rgba(245, 158, 11, 0.3);">
-                  <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">إذا وضعت رابطاً هنا، سيقوم النظام بإرسال درجات هذا الامتحان تحديداً إليه. إذا تركته فارغاً، فسيتم المزامنة عبر رابط المعلم العام الموضح بتبويب (الربط).</small>
+                  <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">إذا وضعت رابطاً هنا، تُرسل <strong>نتائج هذا الامتحان فقط</strong> إلى هذا الشيت. إذا تركته فارغاً، تُستخدم نتائجه رابط المعلم العام في تبويب (الربط). النسخة الاحتياطية الكاملة تُحدَّد من إعداد «النسخة الاحتياطية الكاملة» في تبويب الربط.</small>
                 </div>
                 
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; flex-wrap: wrap; margin-top:0.5rem; margin-bottom: 1rem;">
@@ -1267,8 +1267,17 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label" for="teacher-config-url">رابط المزامنة (Google Form Submit URL / Web App URL):</label>
+              <label class="form-label" for="teacher-config-url">رابط المزامنة العام (Web App /exec) — للامتحانات بدون رابط خاص:</label>
               <input type="text" id="teacher-config-url" class="form-control" placeholder="https://script.google.com/macros/s/XXXX/exec">
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="teacher-config-backup-scope">النسخة الاحتياطية الكاملة (save_backup) تُرفع إلى:</label>
+              <select id="teacher-config-backup-scope" class="form-control">
+                <option value="general">رابط المعلم العام فقط (مُستحسن عند شيت لكل مادة)</option>
+                <option value="all">كل روابط المزامنة (العام + روابط الامتحانات المخصصة)</option>
+              </select>
+              <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.35rem; display:block;">نتيجة كل امتحان تُرسل دائماً إلى رابطه الفعّال فقط (رابط الامتحان أو العام). هذا الخيار يخص النسخة الاحتياطية الكاملة وتحديث ورقة ARABYA_BACKUP.</small>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; flex-wrap: wrap;">
@@ -1330,7 +1339,23 @@
               <div id="apps-script-deploy-notice" class="config-card-box" style="margin-bottom:1rem; text-align:right; border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.04);">
                 <p style="font-size:0.9rem; color:var(--text-muted); line-height:1.7; margin:0;">
                   <strong style="color:var(--accent);">بعد كل تعديل على كود Apps Script:</strong> انسخ الكود أدناه (يُحمَّل تلقائياً من <code>integrations/google-apps-script-backend.gs</code>) → الصقه في Apps Script → <strong>نشر إصدار جديد</strong> (Deploy → New version) — الوصول <strong>Anyone</strong> ورابط <code>/exec</code> → اختبر حفظ نتيجة أو نسخة احتياطية في الشيت.<br>
-                  <span style="font-size:0.85rem;">المزامنة تعمل <strong>بدون GitHub</strong> عبر ورقة <code>ARABYA_BACKUP</code>. إعداد GitHub (اختياري) في Script Properties لمزامنة مركزية مع المستودع.</span>
+                  <span style="font-size:0.85rem;">المزامنة تعمل <strong>بدون GitHub</strong> عبر ورقة <code>ARABYA_BACKUP</code> وورقة <code>نتائج الطلاب</code>. إعداد GitHub اختياري لمزامنة مركزية مع المستودع (انظر الأسفل).</span>
+                </p>
+              </div>
+
+              <div class="config-card-box" style="margin-bottom:1rem; text-align:right; border-color:rgba(59,130,246,0.35); background:rgba(59,130,246,0.04);">
+                <h4 style="color:var(--secondary); margin:0 0 0.5rem; font-size:1rem;">مزامنة GitHub الاختيارية (لكل ملف Google Sheets / Web App)</h4>
+                <p style="font-size:0.88rem; color:var(--text-muted); line-height:1.7; margin:0 0 0.75rem;">
+                  في مشروع <strong>Apps Script</strong> المربوط بجدولك: <strong>Project Settings → Script properties</strong> ثم أضف:
+                </p>
+                <ul style="margin:0 1.25rem 0.75rem 0; line-height:1.75; font-size:0.88rem; color:var(--text-primary);">
+                  <li><code dir="ltr">GITHUB_TOKEN</code> — رمز GitHub (Fine-grained) بصلاحية <strong>Contents: Read and write</strong> على المستودع.</li>
+                  <li><code dir="ltr">GITHUB_REPO</code> — مثل <code dir="ltr">drmohamedhussein/arabya.ai</code></li>
+                  <li><code dir="ltr">GITHUB_BRANCH</code> — مثل <code dir="ltr">main</code></li>
+                  <li><code dir="ltr">GITHUB_DB_PATH</code> — مثل <code dir="ltr">database/arabya-db.json</code> (يمكن مساراً مختلفاً لشيت الأدب)</li>
+                </ul>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin:0; line-height:1.65;">
+                  عند كل <code>save_backup</code> أو <code>add_result</code> يحاول السكربت دمج البيانات في JSON المستودع. بدون هذه الخصائص يبقى التخزين على الشيت فقط. لكل مادة بشيت منفصل يمكنك استخدام <strong>مسار JSON مختلف</strong> أو مستودع مختلف.
                 </p>
               </div>
 
