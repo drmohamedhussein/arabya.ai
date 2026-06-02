@@ -510,10 +510,13 @@
           </div>
           
           <ul class="teacher-menu" role="tablist" aria-label="خيارات المعلم الجانبية">
+            <li class="teacher-menu-item active" data-tab="home" role="tab" aria-selected="true">
+              <span class="material-icons" aria-hidden="true">dashboard</span> الرئيسية
+            </li>
             <li class="teacher-menu-item" data-tab="stats" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">insights</span> الإحصائيات
             </li>
-            <li class="teacher-menu-item active" data-tab="exams" role="tab" aria-selected="true">
+            <li class="teacher-menu-item" data-tab="exams" role="tab" aria-selected="false">
               <span class="material-icons" aria-hidden="true">assignment</span> الامتحانات والأسئلة
             </li>
             <li class="teacher-menu-item" data-tab="results" role="tab" aria-selected="false">
@@ -542,6 +545,21 @@
         <!-- اللوحة الرئيسية المتغيرة -->
         <div class="teacher-main-panel">
           <div id="teacher-global-sync-bar" class="teacher-global-sync-bar hidden" role="status" aria-live="polite"></div>
+
+          <div id="teacher-tab-home" class="teacher-tab-panel" role="tabpanel">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">الرئيسية</div>
+                <div style="font-size:0.85rem; color:var(--text-muted);">ملخص سريع لحسابك والمنصة</div>
+              </div>
+              <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                <button type="button" id="teacher-home-refresh-btn" class="btn btn-outline btn-sm"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">refresh</span> تحديث</button>
+                <button type="button" id="teacher-home-open-stats-btn" class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);"><span class="material-icons" style="font-size:1.1rem;vertical-align:middle;" aria-hidden="true">insights</span> الإحصائيات التفصيلية</button>
+              </div>
+            </div>
+            <div id="teacher-home-updated-at" style="font-size:0.8rem; color:var(--text-muted); margin-bottom:1rem;"></div>
+            <div id="teacher-home-summary" class="profile-summary-grid" aria-live="polite"></div>
+          </div>
 
           <div id="teacher-tab-stats" class="teacher-tab-panel hidden" role="tabpanel">
             <div class="panel-header">
@@ -602,7 +620,7 @@
           </div>
 
           <!-- تبويب الامتحانات (Exams Tab) -->
-          <div id="teacher-tab-exams" class="teacher-tab-panel" role="tabpanel">
+          <div id="teacher-tab-exams" class="teacher-tab-panel hidden" role="tabpanel">
             
             <!-- الجزء الأول: قائمة الامتحانات -->
             <div id="teacher-exams-list-view">
@@ -1721,7 +1739,7 @@ function doGet(e) {
   <script src="js/arabya-platform-sync.js?v=2026.06.02.15"></script>
   <script src="js/arabya-realtime-bridge.js?v=2026.06.02.15"></script>
   <script src="js/arabya-cloud-sync.js?v=2026.06.02.15"></script>
-  <script src="app.js?v=2026.06.02.16"></script>
+  <script src="app.js?v=2026.06.02.17"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");

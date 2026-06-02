@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.16";
+const ARABYA_APP_VERSION = "2026.06.02.17";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -1501,13 +1501,52 @@ function clearExamDeviceRegistryForStudentExam(studentLookupKey, examId) {
   saveExamDeviceRegistry(registry);
 }
 
-function clearExamDeviceRegistryForStudentAllExams(studentLookupKey) {
-  if (!studentLookupKey) return;
-  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
-  registry.bindings = (registry.bindings || []).filter(
-    entry => entry.studentLookupKey !== studentLookupKey
-  );
+function isRegistryBindingForDeletedStudent(entry) {
+  if (!entry) return false;
+  loadDeletedStudentKeysFromStorage();
+  const key = String(entry.studentLookupKey || "").trim();
+  if (key && isStudentKeyDeleted(key)) return true;
+  return isStudentRecordDeleted({
+    studentKey: key,
+    name: entry.studentName || "",
+    id: "",
+    code: ""
+  });
+}
+
+function releaseDeviceBindingsForDeletedStudents(registry) {
+  if (!registry || !Array.isArray(registry.bindings)) return registry;
+  registry.bindings = registry.bindings.filter(entry => !isRegistryBindingForDeletedStudent(entry));
+  return registry;
+}
+
+function purgeExamDeviceRegistryForStudent(studentOrKey) {
+  const keys = new Set();
+  if (typeof studentOrKey === "string") {
+    if (studentOrKey) keys.add(studentOrKey);
+  } else if (studentOrKey) {
+    getStudentLookupKeysForMatch(studentOrKey).forEach(k => keys.add(k));
+    if (studentOrKey.studentKey) keys.add(String(studentOrKey.studentKey));
+  }
+  if (!keys.size) return;
+  const registry = releaseDeviceBindingsForDeletedStudents(pruneExamDeviceRegistry(loadExamDeviceRegistry()));
+  registry.bindings = (registry.bindings || []).filter(entry => !keys.has(entry.studentLookupKey));
   saveExamDeviceRegistry(registry);
+}
+
+function clearExamDeviceRegistryForStudentAllExams(studentLookupKey) {
+  purgeExamDeviceRegistryForStudent(studentLookupKey);
+}
+
+function purgeStaleDeviceBindingsForProfile(profile) {
+  if (!profile?.deviceFingerprint) return;
+  const registry = releaseDeviceBindingsForDeletedStudents(pruneExamDeviceRegistry(loadExamDeviceRegistry()));
+  const before = (registry.bindings || []).length;
+  registry.bindings = (registry.bindings || []).filter(entry => {
+    if (!deviceBindingMatchesEntry(profile, entry)) return true;
+    return !isRegistryBindingForDeletedStudent(entry);
+  });
+  if (registry.bindings.length !== before) saveExamDeviceRegistry(registry);
 }
 
 function buildResultDeviceFieldsFromResult(res) {
@@ -2586,15 +2625,16 @@ function sortResultsByRecency(results, sourceList) {
 
 
 const TEACHER_ACTIVE_TAB_KEY = "arabya_teacher_active_tab";
-const TEACHER_TAB_IDS = ["stats", "exams", "results", "students", "teachers", "integration", "profile", "admins"];
+const TEACHER_TAB_IDS = ["home", "stats", "exams", "results", "students", "teachers", "integration", "profile", "admins"];
 const CLOUD_SYNC_LAST_OK_KEY = "arabya_last_cloud_sync_ok";
 const CLOUD_SYNC_LAST_FAIL_KEY = "arabya_last_cloud_sync_fail";
 const CLOUD_SYNC_LOCAL_ONLY_KEY = "arabya_cloud_sync_local_only";
 
 function normalizeTeacherTabId(tabId) {
   let id = String(tabId || "").trim();
-  if (id === "admins" || id === "dashboard") id = id === "dashboard" ? "stats" : "teachers";
-  return TEACHER_TAB_IDS.includes(id) ? id : "stats";
+  if (id === "dashboard") id = "home";
+  if (id === "admins") id = "teachers";
+  return TEACHER_TAB_IDS.includes(id) ? id : "home";
 }
 
 function recordCloudSyncOutcome(ok, detail) {
@@ -2695,7 +2735,7 @@ function getSavedTeacherActiveTab() {
   try {
     return normalizeTeacherTabId(localStorage.getItem(TEACHER_ACTIVE_TAB_KEY));
   } catch (e) {
-    return "stats";
+    return "home";
   }
 }
 
@@ -2726,7 +2766,9 @@ function activateTeacherTab(tabId, options = {}) {
   if (options.skipRefresh) return normalizedTab;
 
   reloadSystemStateFromLocalStorage();
-  if (normalizedTab === "stats") {
+  if (normalizedTab === "home") {
+    renderTeacherHomeDashboard();
+  } else if (normalizedTab === "stats") {
     renderTeacherStatsDashboard();
   } else if (normalizedTab === "results") {
     if (typeof pullTeacherResultsFromCloud === "function") {
@@ -2765,6 +2807,10 @@ function refreshTeacherDashboardViews(options = {}) {
   const examsTab = document.getElementById("teacher-tab-exams");
   const teachersTab = document.getElementById("teacher-tab-teachers");
 
+  const homeTab = document.getElementById("teacher-tab-home");
+  if (refreshAll || (homeTab && !homeTab.classList.contains("hidden"))) {
+    if (typeof renderTeacherHomeDashboard === "function") renderTeacherHomeDashboard();
+  }
   if (refreshAll || (statsTab && !statsTab.classList.contains("hidden"))) {
     if (typeof renderTeacherStatsDashboard === "function") renderTeacherStatsDashboard();
   }
@@ -3237,6 +3283,7 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
   const merged = new Map();
   [...local.bindings, ...remote.bindings].forEach(entry => {
     if (!entry || !entry.examId || !entry.studentLookupKey) return;
+    if (isRegistryBindingForDeletedStudent(entry)) return;
     const key = [
       entry.examId,
       entry.studentLookupKey,
@@ -5031,6 +5078,51 @@ function setupTeacherStatsControls() {
     syncBtn.addEventListener("click", () => syncTeacherStatsFromCloud());
   }
 }
+
+function setupTeacherHomeControls() {
+  const refreshBtn = document.getElementById("teacher-home-refresh-btn");
+  if (refreshBtn && !refreshBtn.dataset.bound) {
+    refreshBtn.dataset.bound = "1";
+    refreshBtn.addEventListener("click", () => {
+      reloadSystemStateFromLocalStorage();
+      renderTeacherHomeDashboard();
+    });
+  }
+  const statsBtn = document.getElementById("teacher-home-open-stats-btn");
+  if (statsBtn && !statsBtn.dataset.bound) {
+    statsBtn.dataset.bound = "1";
+    statsBtn.addEventListener("click", () => activateTeacherTab("stats"));
+  }
+}
+
+function renderTeacherHomeDashboard() {
+  setupTeacherHomeControls();
+  const container = document.getElementById("teacher-home-summary");
+  if (!container) return;
+  const stats = typeof computeTeacherStatsSnapshot === "function"
+    ? computeTeacherStatsSnapshot()
+    : {
+        examsCount: (systemState.exams || []).length,
+        studentsCount: filterOutDeletedStudents(systemState.students || []).length,
+        resultsCount: (systemState.results || []).length,
+        cloudConnected: getArabyaWebAppUrls().length > 0
+      };
+  const teacher = systemState.activeTeacher || {};
+  const updatedEl = document.getElementById("teacher-home-updated-at");
+  if (updatedEl) {
+    updatedEl.textContent = `آخر تحديث: ${new Date().toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" })}`;
+  }
+  container.innerHTML =
+    `<div class="profile-stat-card"><div class="profile-stat-label">اسم المعلم</div><div class="profile-stat-value">${escapeHtml(teacher.name || "معلم اللغة العربية")}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">اسم المستخدم</div><div class="profile-stat-value">${escapeHtml(teacher.username || "—")}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">التخصص</div><div class="profile-stat-value">${escapeHtml(teacher.subject || "اللغة العربية")}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">الامتحانات</div><div class="profile-stat-value">${stats.examsCount}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">الطلاب</div><div class="profile-stat-value">${stats.studentsCount}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">النتائج</div><div class="profile-stat-value">${stats.resultsCount}</div></div>` +
+    `<div class="profile-stat-card"><div class="profile-stat-label">Google Sheets</div><div class="profile-stat-value" style="color:${stats.cloudConnected ? "var(--secondary)" : "var(--warning)"};">${stats.cloudConnected ? "متصل" : "غير متصل"}</div></div>`;
+}
+
+window.renderTeacherHomeDashboard = renderTeacherHomeDashboard;
 
 function renderTeacherStatsDashboard() {
   setupStatsDateRangeControls();
@@ -8608,7 +8700,7 @@ function pruneExamDeviceRegistry(registry) {
     const savedAt = Number(entry.savedAt) || 0;
     return savedAt && now - savedAt < maxAgeMs;
   });
-  return registry;
+  return releaseDeviceBindingsForDeletedStudents(registry);
 }
 
 async function sha256Hex(value) {
@@ -8795,6 +8887,7 @@ function findDeviceExamAttemptConflict(profile, examId, studentContext) {
       return;
     }
 
+    if (isResultFromDeletedStudent(r)) return;
     if (!profile || !deviceHardwareMatchesResult(profile, r)) return;
     if ((isFinished || isInProgress) && !otherStudentBlock) otherStudentBlock = r;
   });
@@ -8808,20 +8901,19 @@ function findDeviceBindingConflict(profile, examId, studentLookupKey, studentCon
   if (studentContext && canStudentBypassExamLockForExam(examId, studentContext)) return null;
   if (!profile || !studentLookupKey) return null;
   if (!profile.deviceFingerprint && !profile.deviceId) return null;
-  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  const registry = releaseDeviceBindingsForDeletedStudents(pruneExamDeviceRegistry(loadExamDeviceRegistry()));
+  saveExamDeviceRegistry(registry);
   const bindings = registry.bindings || [];
-  const globalConflict = bindings.find(entry =>
+  const isActiveConflict = entry =>
     entry.studentLookupKey &&
     entry.studentLookupKey !== studentLookupKey &&
-    deviceBindingMatchesEntry(profile, entry)
-  );
+    !isRegistryBindingForDeletedStudent(entry) &&
+    deviceBindingMatchesEntry(profile, entry);
+  const globalConflict = bindings.find(isActiveConflict);
   if (globalConflict) return globalConflict;
   if (!examId) return null;
   return bindings.find(entry =>
-    entry.examId === examId &&
-    entry.studentLookupKey &&
-    entry.studentLookupKey !== studentLookupKey &&
-    deviceBindingMatchesEntry(profile, entry)
+    entry.examId === examId && isActiveConflict(entry)
   ) || null;
 }
 
@@ -8863,6 +8955,7 @@ async function logExamDeviceReject_(entry) {
 
 async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, studentContext) {
   const profile = await collectExamDeviceProfile();
+  purgeStaleDeviceBindingsForProfile(profile);
   if (!profile.deviceFingerprint) {
     const fail = {
       ok: false,
@@ -10222,7 +10315,7 @@ window.deleteStudentByTeacher = async function(studentKey) {
   if (!confirm(`هل أنت متأكد من حذف الطالب "${student.name}"؟\n\nلن يُعاد من السحابة أو من نتائج الامتحانات بعد المزامنة.`)) return;
   addDeletedStudentKey(student);
   tombstoneResultsForDeletedStudent(student);
-  clearExamDeviceRegistryForStudentAllExams(studentKey);
+  purgeExamDeviceRegistryForStudent(student);
   const deleteCtx = buildStudentMatchContext(student);
   systemState.results = (systemState.results || []).filter(r => !resultMatchesStudentIdentity(r, deleteCtx));
   systemState.students = systemState.students.filter(s => {

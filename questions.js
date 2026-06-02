@@ -669,7 +669,10 @@ function renderArabyaStudentProfile(student) {
 }
 
 function enhanceArabyaTeacherDashboard() {
-  if (document.getElementById("teacher-tab-stats") && typeof window.activateTeacherTab === "function") {
+  if (
+    (document.getElementById("teacher-tab-home") || document.getElementById("teacher-tab-stats")) &&
+    typeof window.activateTeacherTab === "function"
+  ) {
     return;
   }
   var menu = document.querySelector(".teacher-menu");
