@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.24";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.25";
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
@@ -1969,7 +1969,19 @@ function getConfiguredQuestionCount(exam) {
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return null;
   }
-  return Math.min(parsed, Array.isArray(exam.questions) ? exam.questions.length : 0);
+  const bankSize = Array.isArray(exam.questions) ? exam.questions.length : 0;
+  if (!bankSize) return null;
+  return Math.min(parsed, bankSize);
+}
+
+function parseDisplayedQuestionCountInput(rawValue) {
+  const raw = String(rawValue ?? "").trim();
+  if (!raw) return { ok: true, value: "" };
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { ok: false, message: "عدد الأسئلة المعروضة يجب أن يكون رقماً صحيحاً أكبر من صفر، أو اترك الحقل فارغاً لعرض كل البنك." };
+  }
+  return { ok: true, value: String(parsed) };
 }
 
 function buildRuntimeQuestionsForExam(exam) {
@@ -5985,8 +5997,31 @@ function renderQuestionsForEdit(exam) {
   const container = document.getElementById("editor-questions-list");
   container.innerHTML = "";
 
+  const bankCount = Array.isArray(exam.questions) ? exam.questions.length : 0;
+  const configuredCount = getConfiguredQuestionCount(exam);
+  const requestedCount = parseInt(exam.questionCount, 10);
+  const displayMode = exam.shuffleQuestions === false ? "ترتيبي" : "عشوائي";
+  const summary = document.createElement("div");
+  summary.className = "exam-builder-card";
+  summary.style.marginBottom = "1rem";
+  summary.style.padding = "0.85rem 1rem";
+  summary.style.borderColor = "rgba(20,184,166,0.25)";
+  summary.style.background = "rgba(20,184,166,0.04)";
+  summary.innerHTML =
+    `<div style="font-size:0.88rem; line-height:1.7; color:var(--text-muted);">` +
+    `<strong style="color:var(--secondary);">بنك الأسئلة:</strong> ${bankCount} سؤالاً — يمكنك إضافة أي عدد من الأسئلة بلا حد أقصى.` +
+    `<br><strong style="color:var(--accent);">المعروض للطالب:</strong> ` +
+    (Number.isFinite(requestedCount) && requestedCount > 0
+      ? `${requestedCount} سؤالاً (${displayMode}${bankCount && requestedCount > bankCount ? ` — سيُعرض ${configuredCount || bankCount} حتى يكتمل البنك` : ""})`
+      : `كل البنك (${bankCount} سؤال — ${displayMode})`) +
+    `</div>`;
+  container.appendChild(summary);
+
   if (exam.questions.length === 0) {
-    container.innerHTML = `<div style="text-align:center; color: var(--text-muted); padding: 2rem;">لا توجد أسئلة مضافة في هذا الامتحان بعد. أضف سؤالاً بالأسفل!</div>`;
+    const empty = document.createElement("div");
+    empty.style.cssText = "text-align:center; color: var(--text-muted); padding: 2rem;";
+    empty.textContent = "لا توجد أسئلة مضافة في هذا الامتحان بعد. أضف سؤالاً بالأسفل!";
+    container.appendChild(empty);
     return;
   }
 
@@ -6149,14 +6184,9 @@ function applyExamMetaFromEditor(exam, options = {}) {
   }
 
   if (rawQuestionCount) {
-    const questionCountNumber = parseInt(rawQuestionCount, 10);
-    if (!Number.isFinite(questionCountNumber) || questionCountNumber <= 0) {
-      alert("عدد الأسئلة المعروضة يجب أن يكون رقماً صحيحاً أكبر من صفر.");
-      return false;
-    }
-    const bankSize = Array.isArray(exam.questions) ? exam.questions.length : 0;
-    if (bankSize && questionCountNumber > bankSize) {
-      alert(`عدد الأسئلة المعروضة (${questionCountNumber}) لا يمكن أن يتجاوز حجم بنك الأسئلة الحالي (${bankSize}).`);
+    const countCheck = parseDisplayedQuestionCountInput(rawQuestionCount);
+    if (!countCheck.ok) {
+      alert(countCheck.message);
       return false;
     }
   }
@@ -6269,17 +6299,6 @@ function saveAllEditedQuestions() {
   });
 
   exam.questions = updatedQuestions;
-  if (rawQuestionCount) {
-    const questionCountNumber = parseInt(rawQuestionCount, 10);
-    if (!Number.isFinite(questionCountNumber) || questionCountNumber <= 0) {
-      alert("عدد الأسئلة المعروضة يجب أن يكون رقماً صحيحاً أكبر من صفر.");
-      return;
-    }
-    if (questionCountNumber > updatedQuestions.length) {
-      alert(`عدد الأسئلة المعروضة (${questionCountNumber}) لا يمكن أن يتجاوز حجم بنك الأسئلة الحالي (${updatedQuestions.length}).`);
-      return;
-    }
-  }
   sanitizeQuestionConfig(exam);
   saveSystemState(true);
   
