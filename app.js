@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.24";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.25";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1142,26 +1142,45 @@ function endCriticalCloudPush(ok) {
   }
 }
 
-async function pushLocalStateToCloudNow(reason) {
+function isCriticalCloudPushReason(reason) {
+  return /save_exam_|save_exam_meta|manual_backup|push_now/i.test(String(reason || ""));
+}
+
+async function pushLocalStateToCloudNow(reason, options) {
+  const opts = options && typeof options === "object" ? options : {};
   const urls = getCloudBackupTargetUrls();
   if (!urls.length) {
     systemState.lastCloudPushError = "لم يُضبط رابط Web App في تبويب «الربط بـ Google Sheets».";
     return false;
   }
-  if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.waitForPushSlot === "function") {
-    await window.ArabyaCloudSync.waitForPushSlot(15000);
-  }
-  if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.pushNow === "function") {
-    return window.ArabyaCloudSync.pushNow(reason || "push");
-  }
-  beginCriticalCloudPush(reason);
-  try {
-    return await pushCloudBackupNow(reason || "push");
-  } finally {
-    if (systemState.cloudPushInProgress) {
-      endCriticalCloudPush(false);
+  const maxAttempts = Number(opts.retries) > 0
+    ? Number(opts.retries)
+    : (isCriticalCloudPushReason(reason) ? 3 : 1);
+  let lastOk = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    if (attempt > 1) {
+      await delayMs(700 * attempt);
     }
+    if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.waitForPushSlot === "function") {
+      await window.ArabyaCloudSync.waitForPushSlot(15000);
+    }
+    if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.pushNow === "function") {
+      lastOk = await window.ArabyaCloudSync.pushNow(
+        attempt > 1 ? `${reason || "push"}_retry${attempt}` : (reason || "push")
+      );
+    } else {
+      beginCriticalCloudPush(reason);
+      try {
+        lastOk = await pushCloudBackupNow(reason || "push");
+      } finally {
+        if (systemState.cloudPushInProgress) {
+          endCriticalCloudPush(lastOk);
+        }
+      }
+    }
+    if (lastOk) return true;
   }
+  return false;
 }
 
 function saveSystemState(syncToCloud = true) {
@@ -6439,6 +6458,9 @@ async function saveAllEditedQuestions() {
     cloudOk = await pushLocalStateToCloudNow("save_exam_questions");
   } catch (pushErr) {
     console.warn("[ARABYA] save exam cloud push:", pushErr);
+  }
+  if (!cloudOk && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("save_exam_questions_followup");
   }
   saveSystemState(false);
   if (indicator) {
