@@ -5263,6 +5263,7 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-auto-login-url").value = autoUrl;
 
   renderTeacherProfilePanel();
+  renderTeacherHomeDashboard();
   renderTeacherStatsDashboard();
   renderExamsList();
   renderStudentResultsTable();
