@@ -260,10 +260,32 @@
     }
   }
 
+  function waitForPushSlot(maxWaitMs) {
+    const limit = Number(maxWaitMs) > 0 ? Number(maxWaitMs) : 12000;
+    const started = Date.now();
+    return new Promise(resolve => {
+      const tick = () => {
+        if (!pushInFlight) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - started >= limit) {
+          resolve(false);
+          return;
+        }
+        setTimeout(tick, 120);
+      };
+      tick();
+    });
+  }
+
   async function pushNow(reason) {
     if (typeof global.pushCloudBackupNow !== "function") return false;
-    if (pushInFlight) {
-      pendingPush = true;
+    const gotSlot = await waitForPushSlot(15000);
+    if (!gotSlot) {
+      if (global.systemState) {
+        global.systemState.lastCloudPushError = "مزامنة سحابية أخرى قيد التنفيذ — أعد المحاولة بعد ثوانٍ.";
+      }
       return false;
     }
     pushInFlight = true;
@@ -356,7 +378,9 @@
     rememberCloudRevisionFromResponse,
     setStoredCloudRevision,
     getStoredCloudRevision,
-    runPullFromCloud
+    runPullFromCloud,
+    waitForPushSlot,
+    isPushBusy: () => pushInFlight
   };
 
   global.buildFullCloudBackupData = buildFullCloudBackupData;

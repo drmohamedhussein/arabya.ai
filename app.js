@@ -5,7 +5,8 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.23";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.24";
+const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
@@ -1123,14 +1124,44 @@ function touchExamContentRevision(exam) {
   exam.localRevision = Date.now();
 }
 
+function beginCriticalCloudPush(reason) {
+  systemState.lastCloudPushError = "";
+  systemState.cloudPushInProgress = true;
+  systemState.ignoreCloudRevisionUntil = Date.now() + 60000;
+  suspendCloudPullForMs(60000);
+  systemState.lastCloudPushReason = reason || "";
+}
+
+function endCriticalCloudPush(ok) {
+  systemState.cloudPushInProgress = false;
+  if (ok) {
+    systemState.lastSuccessfulLocalPushAt = Date.now();
+    systemState.ignoreCloudRevisionUntil = Date.now() + 25000;
+  } else {
+    systemState.ignoreCloudRevisionUntil = Date.now() + 5000;
+  }
+}
+
 async function pushLocalStateToCloudNow(reason) {
+  const urls = getCloudBackupTargetUrls();
+  if (!urls.length) {
+    systemState.lastCloudPushError = "لم يُضبط رابط Web App في تبويب «الربط بـ Google Sheets».";
+    return false;
+  }
+  if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.waitForPushSlot === "function") {
+    await window.ArabyaCloudSync.waitForPushSlot(15000);
+  }
   if (window.ArabyaCloudSync && typeof window.ArabyaCloudSync.pushNow === "function") {
     return window.ArabyaCloudSync.pushNow(reason || "push");
   }
-  if (typeof pushCloudBackupNow === "function") {
-    return pushCloudBackupNow(reason || "push");
+  beginCriticalCloudPush(reason);
+  try {
+    return await pushCloudBackupNow(reason || "push");
+  } finally {
+    if (systemState.cloudPushInProgress) {
+      endCriticalCloudPush(false);
+    }
   }
-  return false;
 }
 
 function saveSystemState(syncToCloud = true) {
@@ -3595,6 +3626,93 @@ async function postToArabyaWebAppNoCors(url, payload) {
   }
 }
 
+function delayMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchCloudRevisionForUrl(rawUrl) {
+  const url = normalizeArabyaWebAppUrl(rawUrl);
+  if (!url) return "";
+  const fetchUrl = url + (url.includes("?") ? "&" : "?") + "action=get_sync_meta";
+  try {
+    const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) return "";
+    const body = await res.json();
+    return body && body.cloudRevision ? String(body.cloudRevision) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function slimCloudBackupDataForSize(data) {
+  const slim = {
+    ...data,
+    questionBanks: {},
+    auditLog: []
+  };
+  if (Array.isArray(slim.results)) {
+    slim.results = slim.results.map(res => {
+      const copy = { ...res };
+      if (copy.details && String(copy.details).length > 1500) {
+        copy.details = String(copy.details).slice(0, 1500);
+      }
+      delete copy.studentAnswers;
+      delete copy.questionScores;
+      delete copy.presentedQuestions;
+      return copy;
+    });
+  }
+  return slim;
+}
+
+function buildSaveBackupPayload(reason) {
+  const actor = window.ArabyaPlatformSync ? window.ArabyaPlatformSync.getCloudSyncActor() : { username: systemState.activeTeacher?.username || "" };
+  const fullData = typeof buildFullCloudBackupData === "function"
+    ? buildFullCloudBackupData()
+    : {
+      teachers: systemState.teachers,
+      students: systemState.students,
+      exams: systemState.exams,
+      results: systemState.results,
+      examDeviceRegistry: loadExamDeviceRegistry()
+    };
+  let data = fullData;
+  let payload = { action: "save_backup", data, actor };
+  let json = JSON.stringify(payload);
+  if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
+    data = slimCloudBackupDataForSize(fullData);
+    payload = { action: "save_backup", data, actor };
+    json = JSON.stringify(payload);
+  }
+  if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
+    throw new Error(`حجم البيانات كبير جداً للرفع (${Math.round(json.length / 1024)} كيلوبايت). قلّل عدد النتائج أو صدّر قاعدة البيانات يدوياً.`);
+  }
+  return payload;
+}
+
+async function postSaveBackupToCloudUrl(url, payload) {
+  const revisionBefore = await fetchCloudRevisionForUrl(url);
+  try {
+    const response = await postToArabyaWebApp(url, payload);
+    return { ok: true, response, mode: "cors" };
+  } catch (corsErr) {
+    const message = corsErr && corsErr.message ? corsErr.message : String(corsErr);
+    const sent = await postToArabyaWebAppNoCors(url, payload);
+    if (!sent) {
+      return { ok: false, error: message };
+    }
+    await delayMs(1500);
+    const revisionAfter = await fetchCloudRevisionForUrl(url);
+    if (revisionAfter && revisionAfter !== revisionBefore) {
+      return { ok: true, response: { status: "success", cloudRevision: revisionAfter }, mode: "no-cors-verified" };
+    }
+    if (navigator.onLine) {
+      return { ok: true, response: { status: "success", cloudRevision: revisionAfter || revisionBefore }, mode: "no-cors-optimistic" };
+    }
+    return { ok: false, error: message || "تعذّر الاتصال بالسحابة" };
+  }
+}
+
 function postToArabyaWebApp(url, payload) {
   const targetUrl = normalizeArabyaWebAppUrl(url);
   if (!targetUrl) return Promise.reject(new Error("رابط Web App غير صالح"));
@@ -3660,54 +3778,52 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
 
 async function pushCloudBackupNow(reason) {
   if (!systemState.cloudPushInProgress) {
-    suspendCloudPullForMs(45000);
-    systemState.ignoreCloudRevisionUntil = Date.now() + 45000;
+    beginCriticalCloudPush(reason);
   }
   ensurePlatformAppVersionBeforeCloudPush();
   const urlList = getCloudBackupTargetUrls();
   if (urlList.length === 0) {
+    systemState.lastCloudPushError = "لم يُضبط رابط Web App في تبويب «الربط بـ Google Sheets».";
     markCloudSyncLocalOnly("لا يوجد رابط Web App");
+    endCriticalCloudPush(false);
     return false;
   }
   refreshCloudSyncStatusUI("جاري رفع النسخة الاحتياطية إلى Google Sheets...", "syncing");
-  const backupData = typeof buildFullCloudBackupData === "function"
-    ? buildFullCloudBackupData()
-    : {
-      teachers: systemState.teachers,
-      students: systemState.students,
-      exams: systemState.exams,
-      results: systemState.results,
-      examDeviceRegistry: loadExamDeviceRegistry()
-    };
-  const actor = window.ArabyaPlatformSync ? window.ArabyaPlatformSync.getCloudSyncActor() : { username: systemState.activeTeacher?.username || "" };
-  const payload = {
-    action: "save_backup",
-    data: backupData,
-    actor
-  };
-  let ok = false;
-  for (const url of urlList) {
-    try {
-      const response = await postToArabyaWebApp(url, payload);
-      ok = true;
-      if (response && response.cloudRevision && window.ArabyaCloudSync) {
-        window.ArabyaCloudSync.setStoredCloudRevision(response.cloudRevision);
-      }
-    } catch (e) {
-      const sent = await postToArabyaWebAppNoCors(url, payload);
-      if (sent) ok = true;
-      console.warn("pushCloudBackupNow:", url, e);
-    }
+  let payload;
+  try {
+    payload = buildSaveBackupPayload(reason);
+  } catch (buildErr) {
+    systemState.lastCloudPushError = buildErr.message || String(buildErr);
+    recordCloudSyncOutcome(false, systemState.lastCloudPushError);
+    endCriticalCloudPush(false);
+    return false;
   }
+  let ok = false;
+  let lastError = "";
+  for (const url of urlList) {
+    const result = await postSaveBackupToCloudUrl(url, payload);
+    if (result.ok) {
+      ok = true;
+      if (result.response && result.response.cloudRevision && window.ArabyaCloudSync) {
+        window.ArabyaCloudSync.setStoredCloudRevision(result.response.cloudRevision);
+      }
+      systemState.lastCloudPushError = "";
+      break;
+    }
+    lastError = result.error || lastError;
+    console.warn("pushCloudBackupNow:", url, result.error);
+  }
+  if (!ok && lastError) {
+    systemState.lastCloudPushError = lastError;
+  }
+  endCriticalCloudPush(ok);
   if (ok) {
-    systemState.lastSuccessfulLocalPushAt = Date.now();
-    systemState.ignoreCloudRevisionUntil = Date.now() + 20000;
     recordCloudSyncOutcome(true, reason && /question|بنك/i.test(String(reason)) ? "مزامنة بنك الأسئلة والنسخة الاحتياطية" : "نسخة احتياطية سحابية");
     if (/question|بنك/i.test(String(reason)) && window.ArabyaPlatformSync) {
       window.ArabyaPlatformSync.recordQuestionBankSync(true, "رفع بنك الأسئلة");
     }
   } else {
-    recordCloudSyncOutcome(false, "فشل رفع النسخة الاحتياطية");
+    recordCloudSyncOutcome(false, systemState.lastCloudPushError || "فشل رفع النسخة الاحتياطية");
   }
   return ok;
 }
@@ -6236,7 +6352,10 @@ window.saveExamMetaSettingsOnly = async function() {
   const cloudOk = await pushLocalStateToCloudNow("save_exam_meta");
   document.getElementById("editor-exam-title").innerText = exam.title;
   renderExamAllowedIpsList(exam);
-  alert(cloudOk ? "تم حفظ إعدادات الامتحان ورفعها إلى السحابة بنجاح." : "تم الحفظ محلياً. تعذّر الرفع السحابي الفوري — أعد المحاولة أو استخدم النسخة الاحتياطية السحابية.");
+  const pushHint = (systemState.lastCloudPushError || "").trim();
+  alert(cloudOk
+    ? "تم حفظ إعدادات الامتحان ورفعها إلى السحابة بنجاح."
+    : `تم الحفظ محلياً.\n\nتعذّر الرفع السحابي${pushHint ? `:\n${pushHint}` : ""}`);
   renderExamsList();
 };
 
@@ -6330,9 +6449,10 @@ async function saveAllEditedQuestions() {
     }
   }
 
+  const pushHint = (systemState.lastCloudPushError || "").trim();
   alert(cloudOk
     ? "تم تعديل وحفظ بيانات الامتحان وكافة الأسئلة ورفعها إلى السحابة بنجاح!"
-    : "تم الحفظ على هذا الجهاز. تعذّر الرفع الفوري إلى السحابة — تحقق من الاتصال ثم اضغط «نسخة احتياطية سحابية» أو أعد المحاولة بعد قليل.");
+    : `تم الحفظ على هذا الجهاز.\n\nتعذّر الرفع إلى السحابة${pushHint ? `:\n${pushHint}` : ""}\n\nتحقق من:\n• رابط /exec في تبويب الربط\n• نشر Apps Script للجميع (Anyone)\n• ثم اضغط «نسخة احتياطية سحابية»`);
   
   // إعادة عرض
   document.getElementById("editor-exam-title").innerText = exam.title;
