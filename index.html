@@ -164,9 +164,9 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="student-id-input">رقم المعرف (ID) <span class="required-badge" aria-hidden="true">*</span></label>
+          <label class="form-label" for="student-id-input">رقم المعرف (ID) (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-id-input" class="form-control" placeholder="أدخل رقمك الأكاديمي أو الجامعي..." required autocomplete="off" aria-required="true">
+            <input type="text" id="student-id-input" class="form-control" placeholder="حروف أو أرقام أو كليهما — يميّزك إن تشابه الاسم..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">badge</span>
           </div>
         </div>
@@ -174,7 +174,7 @@
         <div class="form-group">
           <label class="form-label" for="student-access-code">كود الاشتراك بموقع الامتحان (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-access-code" class="form-control" placeholder="أدخل كود الاشتراك إن وجد..." autocomplete="off">
+            <input type="text" id="student-access-code" class="form-control" placeholder="حروف أو أرقام أو كليهما — اختياري..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">key</span>
           </div>
         </div>
@@ -192,14 +192,11 @@
         <button id="student-start-exam-btn" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">
           انتقل لبدء الامتحان <span class="material-icons" aria-hidden="true">arrow_back</span>
         </button>
-        <p style="margin-top:0.65rem; font-size:0.82rem; color:var(--text-muted); line-height:1.5;">
-          عند الضغط تُجرى مزامنة سريعة مع السحابة (مع عداد وقت تقديري) ثم التحقق من الجهاز وعنوان IP — يُمنع استخدام نفس الجهاز لطالبين مختلفين.
-        </p>
 
         <div id="student-exam-prepare-overlay" class="student-exam-prepare-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="student-exam-prepare-title" aria-hidden="true">
           <div class="student-exam-prepare-card">
             <h3 id="student-exam-prepare-title" style="color:var(--secondary); font-weight:800; margin-bottom:0.5rem;">جاري تجهيز الامتحان</h3>
-            <p id="student-exam-prepare-message" style="color:var(--text-muted); font-size:0.9rem; line-height:1.6; margin-bottom:1rem;">مزامنة سريعة مع السحابة...</p>
+            <p id="student-exam-prepare-message" style="color:var(--text-muted); font-size:0.9rem; line-height:1.6; margin-bottom:1rem;">جاري تجهيز الامتحان...</p>
             <div id="student-exam-prepare-countdown" class="student-exam-prepare-countdown" aria-live="polite">6</div>
             <p style="font-size:0.8rem; color:var(--text-muted); margin-top:0.35rem;">ثانية تقريباً</p>
             <div class="student-exam-prepare-progress" aria-hidden="true">
@@ -232,17 +229,17 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="student-reg-id">رقم المعرف (ID) <span class="required-badge" aria-hidden="true">*</span></label>
+          <label class="form-label" for="student-reg-id">رقم المعرف (ID) (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-reg-id" class="form-control" placeholder="أدخل رقمك الأكاديمي أو الجامعي المميز..." required autocomplete="off" aria-required="true">
+            <input type="text" id="student-reg-id" class="form-control" placeholder="حروف أو أرقام أو كليهما..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">badge</span>
           </div>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="student-reg-code">كود الاشتراك بالموقع <span class="required-badge" aria-hidden="true">*</span></label>
+          <label class="form-label" for="student-reg-code">كود الاشتراك بالموقع (اختياري)</label>
           <div class="input-wrapper">
-            <input type="text" id="student-reg-code" class="form-control" placeholder="أدخل كود الاشتراك الذي أرسله لك المعلم..." required autocomplete="off" aria-required="true">
+            <input type="text" id="student-reg-code" class="form-control" placeholder="حروف أو أرقام أو كليهما..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">key</span>
           </div>
         </div>
@@ -358,7 +355,7 @@
         <div class="card-header">
           <img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1.5rem; width:60px; height:60px;">
           <h2 class="card-title">بوابة الاستعلام عن النتائج</h2>
-          <p class="subtitle">ابحث عن نتائجك باستخدام الاسم بالكامل، أو رقم المعرف (ID)، أو كود الاشتراك</p>
+          <p class="subtitle">ابحث بالاسم أو معرف الهوية (ملخص الدرجة فقط) أو بكود الاشتراك (تفاصيل كاملة للأسئلة والإجابات)</p>
         </div>
 
         <div class="form-group">
@@ -375,6 +372,18 @@
 
         <div id="student-search-results-list" class="result-query-list" role="region" aria-label="النتائج التي عثر عليها">
           <!-- تعبأ ديناميكياً عند الاستعلام -->
+        </div>
+
+        <div id="student-search-detail-panel" class="exam-builder-card hidden" style="margin-top:1.5rem;" role="region" aria-label="تفاصيل النتيجة للعرض فقط">
+          <div class="panel-header" style="margin-bottom:1rem;">
+            <div>
+              <div class="panel-title" id="student-search-detail-title">تفاصيل الامتحان</div>
+              <div style="font-size:0.85rem; color:var(--text-muted);">عرض للقراءة فقط — لا يمكن تعديل الدرجة أو الإجابات</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" id="student-search-detail-close">إغلاق</button>
+          </div>
+          <div id="student-search-detail-meta" style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1rem;"></div>
+          <div id="student-search-detail-questions"></div>
         </div>
       </div>
     </section>
@@ -1739,7 +1748,7 @@ function doGet(e) {
   <script src="js/arabya-platform-sync.js?v=2026.06.02.15"></script>
   <script src="js/arabya-realtime-bridge.js?v=2026.06.02.15"></script>
   <script src="js/arabya-cloud-sync.js?v=2026.06.02.15"></script>
-  <script src="app.js?v=2026.06.02.17"></script>
+  <script src="app.js?v=2026.06.02.18"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");

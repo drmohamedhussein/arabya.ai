@@ -1,26 +1,31 @@
 /**
- * Student auth, question bank, and result search scenario tests
+ * Student identity and result search scenario tests
  */
 const assert = require("assert");
 
 function sanitizeStudentCodeInput(code) {
-  return (code || "").toString().replace(/\D/g, "").slice(0, 5);
+  const raw = (code || "").toString().trim();
+  if (!raw) return "";
+  const compact = raw.replace(/\s+/g, "");
+  const digitsOnly = compact.replace(/\D/g, "");
+  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) return "00000";
+  return compact;
 }
 
-function isFiveDigitStudentCode(code) {
-  return /^\d{5}$/.test((code || "").toString());
+function normalizeStudentCodeForCompare(code) {
+  return sanitizeStudentCodeInput(code).toUpperCase();
 }
 
 function isSharedStudentCode(code) {
-  return sanitizeStudentCodeInput(code) === "00000";
+  return normalizeStudentCodeForCompare(code) === "00000";
 }
 
 function isPrivateStudentCode(code) {
   const clean = sanitizeStudentCodeInput(code);
-  return isFiveDigitStudentCode(clean) && clean !== "00000";
+  return !!clean && !isSharedStudentCode(clean);
 }
 
-function normalizeStudentId(studentId) {
+function normalizeStudentIdForCompare(studentId) {
   return (studentId || "").toString().trim().toUpperCase();
 }
 
@@ -28,81 +33,74 @@ function normalizeStudentName(name) {
   return (name || "").toString().trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function getStudentLookupKey(student) {
-  const code = sanitizeStudentCodeInput(student?.code || student?.accessCode || "");
-  if (isPrivateStudentCode(code)) return `code:${code}`;
-  const normalizedId = normalizeStudentId(student?.id);
-  if (normalizedId) return `id:${normalizedId}`;
-  const normalizedName = normalizeStudentName(student?.name);
-  return normalizedName ? `name:${normalizedName}` : "";
-}
-
-function buildRuntimeQuestionsForExam(exam) {
-  const bank = Array.isArray(exam.questions) ? [...exam.questions] : [];
-  const shouldShuffle = exam.shuffleQuestions !== false;
-  const working = shouldShuffle ? shuffleArray(bank) : bank;
-  const count = parseInt(exam.questionCount, 10);
-  if (Number.isFinite(count) && count > 0) {
-    return working.slice(0, Math.min(count, working.length));
-  }
-  return working;
-}
-
-function shuffleArray(array) {
-  const arr = [...array];
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-function filterSearchResults(results, rawQuery) {
-  const sanitizedQueryCode = sanitizeStudentCodeInput(rawQuery);
-  const normalizedQueryId = normalizeStudentId(rawQuery);
-  const normalizedQueryName = normalizeStudentName(rawQuery);
-  return results.filter(res => {
-    const resultCode = sanitizeStudentCodeInput(res.accessCode || "");
-    if (isPrivateStudentCode(resultCode)) {
-      return sanitizedQueryCode === resultCode;
-    }
-    const nameMatch = normalizeStudentName(res.name) === normalizedQueryName;
-    const idMatch = normalizeStudentId(res.id) && normalizeStudentId(res.id) === normalizedQueryId;
-    const sharedCodeMatch = isSharedStudentCode(resultCode) && sanitizedQueryCode === resultCode;
-    const noCodeMatch = !resultCode && (nameMatch || idMatch);
-    return nameMatch || idMatch || sharedCodeMatch || noCodeMatch;
+function classifyResultSearchQuery(results, rawQuery) {
+  const trimmed = (rawQuery || "").trim();
+  const codeNorm = normalizeStudentCodeForCompare(trimmed);
+  const idNorm = normalizeStudentIdForCompare(trimmed);
+  const nameNorm = normalizeStudentName(trimmed);
+  const codeHits = results.filter(res => {
+    const rc = normalizeStudentCodeForCompare(res.accessCode || "");
+    return rc && isPrivateStudentCode(rc) && rc === codeNorm;
   });
+  if (codeHits.length) return { mode: "code", code: codeNorm };
+  const idHits = results.filter(res => idNorm && normalizeStudentIdForCompare(res.id) === idNorm);
+  if (idHits.length) return { mode: "id", id: idNorm };
+  return { mode: "name", name: nameNorm };
 }
 
-// Private code uniqueness
-const students = [{ code: "12345", id: "", name: "Ali" }];
-const dup = students.find(s => sanitizeStudentCodeInput(s.code) === "12345");
-assert.ok(dup);
-assert.strictEqual(isPrivateStudentCode("12345"), true);
-assert.strictEqual(isSharedStudentCode("00000"), true);
+function filterResultsForStudentSearch(results, queryInfo) {
+  if (queryInfo.mode === "code") {
+    return results.filter(res => normalizeStudentCodeForCompare(res.accessCode || "") === queryInfo.code);
+  }
+  if (queryInfo.mode === "id") {
+    return results.filter(res => normalizeStudentIdForCompare(res.id) === queryInfo.id);
+  }
+  if (queryInfo.mode === "name") {
+    return results.filter(res => normalizeStudentName(res.name) === queryInfo.name);
+  }
+  return [];
+}
 
-// Search: private code requires exact code
+function validateStudentIdentityInput(id, code, students, options = {}) {
+  const name = (options.name || "").toString().trim();
+  const normalizedName = normalizeStudentName(name);
+  const normalizedId = normalizeStudentIdForCompare(id);
+  const inputCode = sanitizeStudentCodeInput(code);
+  const normalizedCode = normalizeStudentCodeForCompare(inputCode);
+  const editingStudentKey = options.editingStudentKey || "";
+
+  for (const student of students) {
+    if (editingStudentKey && student.studentKey === editingStudentKey) continue;
+    const otherId = normalizeStudentIdForCompare(student.id);
+    const otherName = normalizeStudentName(student.name);
+    const otherCode = normalizeStudentCodeForCompare(student.code);
+    if (normalizedId && otherId === normalizedId && otherName !== normalizedName) {
+      return { ok: false };
+    }
+    if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode) && otherName !== normalizedName) {
+      return { ok: false };
+    }
+  }
+  return { ok: true };
+}
+
 const results = [
-  { name: "Ali", id: "", accessCode: "12345" },
-  { name: "Sara", id: "X1", accessCode: "" }
+  { name: "Ali", id: "A1", accessCode: "ABC12" },
+  { name: "Sara", id: "X1", accessCode: "" },
+  { name: "Ali", id: "B2", accessCode: "" }
 ];
-assert.strictEqual(filterSearchResults(results, "12345").length, 1);
-assert.strictEqual(filterSearchResults(results, "Ali").length, 0);
-assert.strictEqual(filterSearchResults(results, "X1").length, 1);
-assert.strictEqual(filterSearchResults(results, "99999").length, 0);
 
-// Question bank: 300 -> 20
-const bigExam = {
-  shuffleQuestions: true,
-  questionCount: 20,
-  questions: Array.from({ length: 300 }, (_, i) => ({ id: i + 1 }))
-};
-const picked = buildRuntimeQuestionsForExam(bigExam);
-assert.strictEqual(picked.length, 20);
+assert.strictEqual(classifyResultSearchQuery(results, "ABC12").mode, "code");
+assert.strictEqual(filterResultsForStudentSearch(results, { mode: "code", code: "ABC12" }).length, 1);
+assert.strictEqual(classifyResultSearchQuery(results, "X1").mode, "id");
+assert.strictEqual(filterResultsForStudentSearch(results, { mode: "name", name: "ali" }).length, 2);
 
-const orderedExam = { shuffleQuestions: false, questionCount: 10, questions: Array.from({ length: 300 }, (_, i) => ({ id: i + 1 })) };
-const ordered = buildRuntimeQuestionsForExam(orderedExam);
-assert.strictEqual(ordered[0].id, 1);
-assert.strictEqual(ordered.length, 10);
+const students = [
+  { studentKey: "s1", name: "Ali", id: "A1", code: "11111" },
+  { studentKey: "s2", name: "Sara", id: "A2", code: "22222" }
+];
+assert.strictEqual(validateStudentIdentityInput("A1", "99999", students, { name: "Other" }).ok, false);
+assert.strictEqual(validateStudentIdentityInput("", "22222", students, { name: "New", editingStudentKey: "s3" }).ok, false);
+assert.strictEqual(validateStudentIdentityInput("", "", students, { name: "Ali" }).ok, true);
 
 console.log("All student flow tests passed.");

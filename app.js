@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.17";
+const ARABYA_APP_VERSION = "2026.06.02.18";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -1074,7 +1074,11 @@ function ensureResultRecordIds() {
 
 
 function normalizeStudentId(studentId) {
-  return (studentId || "").toString().trim().toUpperCase();
+  return (studentId || "").toString().trim();
+}
+
+function normalizeStudentIdForCompare(studentId) {
+  return normalizeStudentId(studentId).toUpperCase();
 }
 
 function normalizeStudentName(name) {
@@ -1085,33 +1089,62 @@ function normalizeContactField(value) {
   return (value || "").toString().trim();
 }
 
+function normalizeStudentCodeForCompare(code) {
+  return sanitizeStudentCodeInput(code).toUpperCase();
+}
+
 function sanitizeStudentCodeInput(code) {
-  const digits = (code || "").toString().replace(/\D/g, "").slice(0, 5);
-  if (digits && /^0+$/.test(digits)) {
+  const raw = (code || "").toString().trim();
+  if (!raw) return "";
+  const compact = raw.replace(/\s+/g, "");
+  const digitsOnly = compact.replace(/\D/g, "");
+  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) {
     return "00000";
   }
-  return digits;
+  return compact;
+}
+
+function isValidStudentIdFormat(studentId) {
+  const id = normalizeStudentId(studentId);
+  if (!id) return true;
+  return /^[A-Za-z0-9]+$/i.test(id) && id.length <= 64;
+}
+
+function isValidStudentCodeFormat(code) {
+  const clean = sanitizeStudentCodeInput(code);
+  if (!clean) return true;
+  return /^[A-Za-z0-9]+$/i.test(clean) && clean.length <= 32;
 }
 
 function isFiveDigitStudentCode(code) {
-  return /^\d{5}$/.test((code || "").toString());
+  return hasStudentCode(code);
+}
+
+function hasStudentCode(code) {
+  return !!sanitizeStudentCodeInput(code);
 }
 
 function isSharedStudentCode(code) {
-  return sanitizeStudentCodeInput(code) === "00000";
+  return normalizeStudentCodeForCompare(code) === "00000";
 }
 
 function isPrivateStudentCode(code) {
   const clean = sanitizeStudentCodeInput(code);
-  return isFiveDigitStudentCode(clean) && clean !== "00000";
+  return !!clean && !isSharedStudentCode(clean);
+}
+
+function studentCodesMatch(codeA, codeB) {
+  const a = normalizeStudentCodeForCompare(codeA);
+  const b = normalizeStudentCodeForCompare(codeB);
+  return !!(a && b && a === b);
 }
 
 function getStudentLookupKey(student) {
   const code = sanitizeStudentCodeInput(student?.code || student?.accessCode || "");
   if (isPrivateStudentCode(code)) {
-    return `code:${code}`;
+    return `code:${normalizeStudentCodeForCompare(code)}`;
   }
-  const normalizedId = normalizeStudentId(student?.id);
+  const normalizedId = normalizeStudentIdForCompare(student?.id);
   if (normalizedId) {
     return `id:${normalizedId}`;
   }
@@ -1121,30 +1154,39 @@ function getStudentLookupKey(student) {
 
 function findStudentByCode(code, options = {}) {
   const clean = sanitizeStudentCodeInput(code);
-  if (!isFiveDigitStudentCode(clean)) return null;
+  if (!clean) return null;
+  const compare = normalizeStudentCodeForCompare(clean);
   if (isSharedStudentCode(clean)) {
-    const normalizedId = normalizeStudentId(options.studentId);
+    const normalizedId = normalizeStudentIdForCompare(options.studentId);
     const normalizedName = normalizeStudentName(options.name);
     if (normalizedId) {
       const byId = systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentId(s.id) === normalizedId
+        s =>
+          studentCodesMatch(s.code, clean) &&
+          normalizeStudentIdForCompare(s.id) === normalizedId
       );
       if (byId) return byId;
     }
     if (normalizedName) {
       return systemState.students.find(
-        s => sanitizeStudentCodeInput(s.code) === clean && normalizeStudentName(s.name) === normalizedName
+        s => studentCodesMatch(s.code, clean) && normalizeStudentName(s.name) === normalizedName
       ) || null;
     }
     return null;
   }
-  return systemState.students.find(student => sanitizeStudentCodeInput(student.code) === clean) || null;
+  return systemState.students.find(s => studentCodesMatch(s.code, clean)) || null;
 }
 
 function findStudentById(studentId) {
-  const normalized = normalizeStudentId(studentId);
+  const normalized = normalizeStudentIdForCompare(studentId);
   if (!normalized) return null;
-  return systemState.students.find(student => normalizeStudentId(student.id) === normalized) || null;
+  return systemState.students.find(s => normalizeStudentIdForCompare(s.id) === normalized) || null;
+}
+
+function findStudentsByName(name) {
+  const normalized = normalizeStudentName(name);
+  if (!normalized) return [];
+  return (systemState.students || []).filter(s => normalizeStudentName(s.name) === normalized);
 }
 
 function findStudentByName(name) {
@@ -1166,7 +1208,7 @@ function ensureStudentsDataShape() {
   systemState.students = systemState.students.map((student, index) => {
     const normalizedId = normalizeStudentId(student.id || "");
     const sanitizedCode = sanitizeStudentCodeInput(student.code || "");
-    const normalizedCode = isFiveDigitStudentCode(sanitizedCode) ? sanitizedCode : "";
+    const normalizedCode = hasStudentCode(sanitizedCode) ? sanitizedCode : "";
     const normalizedName = (student.name || "").toString().trim() || `طالب ${index + 1}`;
     const normalizedStudent = {
       ...student,
@@ -2048,7 +2090,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
   const normalizedStudent = {
     name: (source.name || "").toString().trim(),
     id: normalizedId,
-    code: isFiveDigitStudentCode(normalizedCode) ? normalizedCode : "",
+    code: hasStudentCode(normalizedCode) ? normalizedCode : "",
     email: normalizeContactField(source.email),
     mobile: normalizeContactField(source.mobile)
   };
@@ -2065,8 +2107,9 @@ function upsertStudentRecord(source, fallbackKey = "") {
   if (!existingStudent && normalizedStudent.id) {
     existingStudent = findStudentById(normalizedStudent.id);
   }
-  if (!existingStudent && normalizedStudent.name && !isSharedStudentCode(normalizedStudent.code)) {
-    existingStudent = findStudentByName(normalizedStudent.name);
+  if (!existingStudent && normalizedStudent.name && !hasStudentCode(normalizedStudent.code) && !normalizedStudent.id) {
+    const byName = findStudentsByName(normalizedStudent.name);
+    if (byName.length === 1) existingStudent = byName[0];
   }
 
   if (existingStudent) {
@@ -2255,91 +2298,82 @@ function resultMatchesStudentIdentity(result, student) {
   if (result.studentLookupKey && keys.includes(result.studentLookupKey)) return true;
   if (result.studentKey && keys.includes(result.studentKey)) return true;
 
-  const resultId = normalizeStudentId(result.id || "");
-  const studentId = normalizeStudentId(student.id || "");
-  const resultCode = sanitizeStudentCodeInput(result.accessCode || result.code || "");
-  const studentCode = sanitizeStudentCodeInput(student.accessCode || student.code || "");
+  const resultId = normalizeStudentIdForCompare(result.id || "");
+  const studentId = normalizeStudentIdForCompare(student.id || "");
 
-  if (isSharedStudentCode(studentCode) || isSharedStudentCode(resultCode)) {
+  if (isSharedStudentCode(student.code || student.accessCode) || isSharedStudentCode(result.accessCode || result.code)) {
     const resultName = normalizeStudentName(result.name || "");
     const studentName = normalizeStudentName(student.name || "");
     if (resultId && studentId && resultId === studentId) return true;
-    if (resultName && studentName && resultName === studentName && resultCode === studentCode) return true;
+    if (resultName && studentName && resultName === studentName && studentCodesMatch(result.accessCode || result.code, student.code || student.accessCode)) {
+      return true;
+    }
     return false;
   }
 
-  if (isPrivateStudentCode(studentCode) && studentCode && resultCode === studentCode) return true;
+  if (isPrivateStudentCode(student.code || student.accessCode) && studentCodesMatch(result.accessCode || result.code, student.code || student.accessCode)) {
+    return true;
+  }
   if (resultId && studentId && resultId === studentId) return true;
 
   const resultName = normalizeStudentName(result.name || "");
   const studentName = normalizeStudentName(student.name || "");
   if (resultName && studentName && resultName === studentName) {
-    if (!resultId && !studentId) return true;
+    if (!resultId && !studentId) return false;
     if (resultId && studentId && resultId === studentId) return true;
   }
   return false;
 }
 
 function validateStudentIdentityInput(id, code, options = {}) {
-  const normalizedId = normalizeStudentId(id);
+  const name = (options.name || "").toString().trim();
+  const normalizedName = normalizeStudentName(name);
+  const normalizedId = normalizeStudentIdForCompare(id);
   const inputCode = sanitizeStudentCodeInput(code);
+  const normalizedCode = normalizeStudentCodeForCompare(inputCode);
   const editingStudentKey = options.editingStudentKey || "";
 
-  if (!inputCode) return { ok: true };
-
-  if (!isFiveDigitStudentCode(inputCode)) {
-    return { ok: false, message: "كود الاشتراك يجب أن يكون مكوّناً من 5 أرقام." };
+  if (id && !isValidStudentIdFormat(id)) {
+    return { ok: false, message: "معرف الهوية يجب أن يتكوّن من حروف أو أرقام أو كليهما (بدون رموز)." };
+  }
+  if (inputCode && !isValidStudentCodeFormat(inputCode)) {
+    return { ok: false, message: "كود الاشتراك يجب أن يتكوّن من حروف أو أرقام أو كليهما." };
   }
 
-  if (isPrivateStudentCode(inputCode)) {
-    const owners = systemState.students.filter(student => sanitizeStudentCodeInput(student.code) === inputCode);
-    if (owners.length > 1) {
+  for (const student of systemState.students || []) {
+    if (editingStudentKey && student.studentKey === editingStudentKey) continue;
+
+    const otherId = normalizeStudentIdForCompare(student.id);
+    const otherName = normalizeStudentName(student.name);
+    const otherCode = normalizeStudentCodeForCompare(student.code);
+
+    if (normalizedId && otherId === normalizedId && otherName !== normalizedName) {
       return {
         ok: false,
-        message: "هذا الكود مكرر داخل قاعدة الطلاب، ولا يمكن استخدامه حتى يقوم المعلم بتخصيص كود مختلف لكل طالب."
+        message: "معرف الهوية مسجّل لطالب آخر باسم مختلف. تواصل مع المعلم أو استخدم المعرف الصحيح."
       };
     }
-    if (owners.length === 1) {
-      const owner = owners[0];
-      if (editingStudentKey && owner.studentKey === editingStudentKey) {
-        return { ok: true };
-      }
-      const ownerId = normalizeStudentId(owner.id);
-      if (normalizedId && ownerId && ownerId !== normalizedId) {
+
+    if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode)) {
+      if (otherName !== normalizedName) {
         return {
           ok: false,
-          message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً."
-        };
-      }
-      return { ok: true };
-    }
-    if (normalizedId) {
-      const idOwner = findStudentById(normalizedId);
-      if (idOwner && sanitizeStudentCodeInput(idOwner.code) && sanitizeStudentCodeInput(idOwner.code) !== inputCode) {
-        return {
-          ok: false,
-          message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. استخدم الكود الأصلي لهذا ID أو اترك ID فارغاً واكتب كودك فقط."
+          message: "كود الاشتراك مستخدم لطالب آخر باسم مختلف."
         };
       }
     }
-    return { ok: true };
-  }
 
-  if (isSharedStudentCode(inputCode)) {
-    if (!normalizedId) {
-      return {
-        ok: false,
-        message: "مع كود 00000 المشترك يجب إدخال رقم ID المطابق لسجلك في النظام."
-      };
+    if (isSharedStudentCode(inputCode) && otherCode === "00000") {
+      const sameName = otherName === normalizedName;
+      const sameId = normalizedId && otherId === normalizedId;
+      if (sameName && sameId) continue;
+      if (sameName && !normalizedId && !otherId) {
+        return {
+          ok: false,
+          message: "مع كود 00000 والاسم نفسه يجب إدخال معرف هوية مختلف للتمييز."
+        };
+      }
     }
-    const idOwner = findStudentById(normalizedId);
-    if (idOwner && sanitizeStudentCodeInput(idOwner.code) && sanitizeStudentCodeInput(idOwner.code) !== inputCode) {
-      return {
-        ok: false,
-        message: "رقم المعرف ID مسجل بالفعل بكود اشتراك مختلف. استخدم الكود الأصلي الخاص بهذا الطالب."
-      };
-    }
-    return { ok: true };
   }
 
   return { ok: true };
@@ -2347,10 +2381,12 @@ function validateStudentIdentityInput(id, code, options = {}) {
 
 window.arabyaValidateStudentIdentity = validateStudentIdentityInput;
 window.normalizeStudentId = normalizeStudentId;
+window.normalizeStudentIdForCompare = normalizeStudentIdForCompare;
 window.sanitizeStudentCodeInput = sanitizeStudentCodeInput;
 window.isPrivateStudentCode = isPrivateStudentCode;
 window.isSharedStudentCode = isSharedStudentCode;
 window.isFiveDigitStudentCode = isFiveDigitStudentCode;
+window.hasStudentCode = hasStudentCode;
 
 // ===== أداة التشخيص السريع - اكتب arabya_diagnose() في الكونسول =====
 window.arabya_diagnose = function() {
@@ -2967,9 +3003,9 @@ function isStudentRecordDeleted(student) {
   if (isStudentKeyDeleted(student.studentKey)) return true;
   const lookup = getStudentLookupKey(student);
   if (lookup && isStudentKeyDeleted(lookup)) return true;
-  const nid = normalizeStudentId(student.id);
+  const nid = normalizeStudentIdForCompare(student.id);
   if (nid && isStudentKeyDeleted(`id:${nid}`)) return true;
-  const code = sanitizeStudentCodeInput(student.code);
+  const code = normalizeStudentCodeForCompare(student.code);
   if (code && isStudentKeyDeleted(`code:${code}`)) return true;
   return false;
 }
@@ -2984,9 +3020,9 @@ function isResultFromDeletedStudent(res) {
     code: res.accessCode || res.code || ""
   });
   if (lookup && isStudentKeyDeleted(lookup)) return true;
-  const nid = normalizeStudentId(res.id);
+  const nid = normalizeStudentIdForCompare(res.id);
   if (nid && isStudentKeyDeleted(`id:${nid}`)) return true;
-  const code = sanitizeStudentCodeInput(res.accessCode || res.code);
+  const code = normalizeStudentCodeForCompare(res.accessCode || res.code);
   if (code && isStudentKeyDeleted(`code:${code}`)) return true;
   return false;
 }
@@ -2996,8 +3032,8 @@ function addDeletedStudentKey(student) {
   const keys = new Set(systemState.deletedStudentKeys);
   const primary = student.studentKey || getStudentLookupKey(student);
   if (primary) keys.add(String(primary));
-  if (student.id) keys.add(`id:${normalizeStudentId(student.id)}`);
-  if (student.code) keys.add(`code:${sanitizeStudentCodeInput(student.code)}`);
+  if (student.id) keys.add(`id:${normalizeStudentIdForCompare(student.id)}`);
+  if (student.code) keys.add(`code:${normalizeStudentCodeForCompare(student.code)}`);
   const normalizedName = normalizeStudentName(student.name);
   if (normalizedName) keys.add(`name:${normalizedName}`);
   systemState.deletedStudentKeys = [...keys];
@@ -3615,7 +3651,7 @@ function showStudentExamPrepareOverlay(estimatedMs) {
   const initialSecs = Math.max(1, Math.ceil(totalMs / 1000));
   if (countdownEl) countdownEl.textContent = String(initialSecs);
   if (messageEl) {
-    messageEl.textContent = "مزامنة سريعة مع السحابة للتحقق من محاولاتك السابقة وإعدادات الامتحان...";
+    messageEl.textContent = "جاري تجهيز الامتحان، يرجى الانتظار...";
   }
   if (progressEl) progressEl.style.width = "0%";
   overlay.classList.remove("hidden");
@@ -4623,6 +4659,11 @@ function setupUIEventListeners() {
   const searchResultBtn = document.getElementById("student-search-submit");
   if (searchResultBtn) {
     searchResultBtn.addEventListener("click", searchStudentResults);
+  }
+  const searchDetailClose = document.getElementById("student-search-detail-close");
+  if (searchDetailClose && !searchDetailClose.dataset.bound) {
+    searchDetailClose.dataset.bound = "1";
+    searchDetailClose.addEventListener("click", hideStudentSearchDetailPanel);
   }
 }
 
@@ -6521,8 +6562,12 @@ async function validateStudentAndStart() {
     alert("يرجى إدخال اسمك بالكامل للبدء!");
     return;
   }
-  if (hasCodeInput && !isFiveDigitStudentCode(inputCode)) {
-    alert("إذا أدخلت كود اشتراك، يجب أن يكون مكوناً من 5 أرقام.");
+  if (hasCodeInput && !isValidStudentCodeFormat(rawCode)) {
+    alert("كود الاشتراك غير صالح. استخدم حروفاً أو أرقاماً أو كليهما.");
+    return;
+  }
+  if (id && !isValidStudentIdFormat(id)) {
+    alert("معرف الهوية غير صالح. استخدم حروفاً أو أرقاماً أو كليهما.");
     return;
   }
   if (!examId) {
@@ -6548,17 +6593,23 @@ async function validateStudentAndStart() {
   }
 
   let matchedStudent = null;
-  if (isFiveDigitStudentCode(inputCode)) {
+  if (hasStudentCode(inputCode)) {
     matchedStudent = findStudentByCode(inputCode, { studentId: normalizedId, name });
   }
   if (!matchedStudent && normalizedId) {
     matchedStudent = findStudentById(normalizedId);
   }
-  if (!matchedStudent && !isSharedStudentCode(inputCode)) {
-    matchedStudent = findStudentByName(name);
+  if (!matchedStudent && !hasStudentCode(inputCode) && !normalizedId) {
+    const byName = findStudentsByName(name);
+    if (byName.length === 1) {
+      matchedStudent = byName[0];
+    } else if (byName.length > 1) {
+      alert("يوجد أكثر من طالب بنفس الاسم. يرجى إدخال معرف الهوية أو كود الاشتراك للتمييز.");
+      return;
+    }
   }
 
-  const identityCheck = validateStudentIdentityInput(id, rawCode);
+  const identityCheck = validateStudentIdentityInput(id, rawCode, { name });
   if (!identityCheck.ok) {
     alert(identityCheck.message);
     return;
@@ -7297,49 +7348,182 @@ function sendUpdatedResultToCloud(res, syncStatusEl = null) {
   });
 }
 
-// الاستعلام عن نتائج الطلاب بالاسم، المعرف، أو كود الاشتراك الموزع
-function searchStudentResults() {
-  const rawQuery = document.getElementById("search-student-query").value.trim();
-  const sanitizedQueryCode = sanitizeStudentCodeInput(rawQuery);
-  const normalizedQueryId = normalizeStudentId(rawQuery);
-  const normalizedQueryName = normalizeStudentName(rawQuery);
+function classifyResultSearchQuery(rawQuery) {
+  const trimmed = (rawQuery || "").trim();
+  if (!trimmed) return { mode: "none" };
+  const codeNorm = normalizeStudentCodeForCompare(trimmed);
+  const idNorm = normalizeStudentIdForCompare(trimmed);
+  const nameNorm = normalizeStudentName(trimmed);
+  const results = systemState.results || [];
 
-  if (!rawQuery) {
-    alert("يرجى إدخال اسمك بالكامل، رقم هويتك ID، أو كود اشتراكك للبحث!");
+  const codeHits = results.filter(res => {
+    const rc = normalizeStudentCodeForCompare(res.accessCode || res.code || "");
+    return rc && isPrivateStudentCode(rc) && rc === codeNorm;
+  });
+  if (codeHits.length) return { mode: "code", code: codeNorm };
+
+  const idHits = results.filter(res => idNorm && normalizeStudentIdForCompare(res.id) === idNorm);
+  if (idHits.length) return { mode: "id", id: idNorm };
+
+  return { mode: "name", name: nameNorm };
+}
+
+function filterResultsForStudentSearch(queryInfo) {
+  const results = systemState.results || [];
+  if (queryInfo.mode === "code") {
+    return results.filter(res =>
+      normalizeStudentCodeForCompare(res.accessCode || res.code || "") === queryInfo.code
+    );
+  }
+  if (queryInfo.mode === "id") {
+    return results.filter(res => normalizeStudentIdForCompare(res.id) === queryInfo.id);
+  }
+  if (queryInfo.mode === "name") {
+    return results.filter(res => normalizeStudentName(res.name) === queryInfo.name);
+  }
+  return [];
+}
+
+function hideStudentSearchDetailPanel() {
+  const panel = document.getElementById("student-search-detail-panel");
+  if (panel) panel.classList.add("hidden");
+}
+
+function renderStudentSearchDetailReadOnly(res) {
+  const panel = document.getElementById("student-search-detail-panel");
+  const titleEl = document.getElementById("student-search-detail-title");
+  const metaEl = document.getElementById("student-search-detail-meta");
+  const questionsEl = document.getElementById("student-search-detail-questions");
+  if (!panel || !questionsEl) return;
+
+  const exam = (systemState.exams || []).find(e => e.id === res.examId || e.title === res.examTitle);
+  const presentedQuestions = getPresentedQuestionsForResult(res, exam);
+  if (titleEl) titleEl.textContent = res.examTitle || "تفاصيل الامتحان";
+  if (metaEl) {
+    metaEl.innerHTML =
+      `<div><strong>الطالب:</strong> ${escapeHtml(res.name || "")}</div>` +
+      `<div><strong>المعرف:</strong> <code>${escapeHtml(res.id || "—")}</code></div>` +
+      `<div><strong>النتيجة النهائية:</strong> <span style="color:var(--secondary); font-weight:800;">${escapeHtml(res.score || "")}</span></div>` +
+      `<div><strong>التاريخ:</strong> ${escapeHtml(res.timestamp || "")}</div>`;
+  }
+
+  questionsEl.innerHTML = "";
+  if (!presentedQuestions.length) {
+    questionsEl.innerHTML =
+      `<div style="padding:1rem; color:var(--text-muted); border:1px solid var(--border-color); border-radius:8px;">` +
+      `${escapeHtml(res.details || "لا تتوفر تفاصيل الأسئلة لهذا السجل.")}` +
+      `</div>`;
+    panel.classList.remove("hidden");
+    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
     return;
   }
 
-  const matched = systemState.results.filter(res => {
-    const resultCode = sanitizeStudentCodeInput(res.accessCode || "");
-    if (isPrivateStudentCode(resultCode)) {
-      return sanitizedQueryCode === resultCode;
+  if (!res.studentAnswers) res.studentAnswers = {};
+  presentedQuestions.forEach((q, index) => {
+    const studentAns = res.studentAnswers[q.id];
+    const qPoints = q.points !== undefined ? q.points : 10;
+    let typeName = "اختيار من متعدد";
+    if (q.type === "boolean") typeName = "صواب وخطأ";
+    if (q.type === "essay") typeName = "سؤال مقالي";
+
+    const card = document.createElement("div");
+    card.className = "exam-builder-card";
+    card.style.cssText = "margin-bottom:1rem; padding:1rem; border:1px solid var(--border-color); border-radius:8px;";
+
+    let bodyHtml = "";
+    if (q.type === "essay") {
+      bodyHtml =
+        `<div style="margin:0.5rem 0;"><strong>إجابتك:</strong><div style="margin-top:0.35rem; padding:0.75rem; background:rgba(255,255,255,0.03); border-radius:6px;">${escapeHtml(studentAns || "—")}</div></div>`;
+    } else {
+      const options = Array.isArray(q.options) ? q.options : [];
+      bodyHtml = options.map((opt, optIdx) => {
+        const letter = String.fromCharCode(65 + optIdx);
+        const chosen = studentAns === opt || studentAns === letter || studentAns === optIdx;
+        const correct = q.correctAnswer === opt || q.correctAnswer === letter || q.correctAnswer === optIdx;
+        let mark = "";
+        if (chosen && correct) mark = ' <span style="color:var(--secondary);">✓ صحيح</span>';
+        else if (chosen && !correct) mark = ' <span style="color:var(--error);">✗ خطأ</span>';
+        else if (!chosen && correct) mark = ' <span style="color:var(--text-muted);">(الإجابة الصحيحة)</span>';
+        return `<div style="margin:0.35rem 0; padding:0.35rem 0.5rem; ${chosen ? "background:rgba(56,189,248,0.08);" : ""} border-radius:4px;">${letter}) ${escapeHtml(String(opt))}${mark}</div>`;
+      }).join("");
     }
-    const nameMatch = normalizeStudentName(res.name) === normalizedQueryName;
-    const idMatch = normalizeStudentId(res.id) && normalizeStudentId(res.id) === normalizedQueryId;
-    const sharedCodeMatch = isSharedStudentCode(resultCode) && sanitizedQueryCode === resultCode;
-    const noCodeMatch = !resultCode && (nameMatch || idMatch);
-    return nameMatch || idMatch || sharedCodeMatch || noCodeMatch;
+
+    card.innerHTML =
+      `<div style="font-weight:700; color:var(--secondary); margin-bottom:0.5rem;">سؤال ${index + 1} (${typeName}) · ${qPoints} درجة</div>` +
+      `<div style="font-weight:600; margin-bottom:0.75rem; line-height:1.6;">${escapeHtml(q.question || "")}</div>` +
+      bodyHtml;
+    questionsEl.appendChild(card);
   });
 
-  const listContainer = document.getElementById("student-search-results-list");
-  listContainer.innerHTML = "";
-  if (!matched.length) {
-    listContainer.innerHTML = `<div style="text-align:center; padding:2rem; color:var(--text-muted);">لم يتم العثور على أي نتائج مسجلة تطابق بيانات البحث المدخلة.</div>`;
+  panel.classList.remove("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+window.openStudentSearchResultDetail = function(recordId) {
+  const res = (systemState.results || []).find(r => r.recordId === recordId);
+  if (!res) {
+    alert("لم يتم العثور على تفاصيل هذه النتيجة.");
     return;
   }
+  renderStudentSearchDetailReadOnly(res);
+};
+
+// الاستعلام عن نتائج الطلاب بالاسم، المعرف، أو كود الاشتراك
+function searchStudentResults() {
+  reloadSystemStateFromLocalStorage();
+  const rawQuery = document.getElementById("search-student-query").value.trim();
+  hideStudentSearchDetailPanel();
+
+  if (!rawQuery) {
+    alert("يرجى إدخال الاسم أو معرف الهوية أو كود الاشتراك للبحث!");
+    return;
+  }
+
+  const queryInfo = classifyResultSearchQuery(rawQuery);
+  const matched = filterResultsForStudentSearch(queryInfo);
+  const listContainer = document.getElementById("student-search-results-list");
+  if (!listContainer) return;
+  listContainer.innerHTML = "";
+
+  if (!matched.length) {
+    listContainer.innerHTML =
+      `<div style="text-align:center; padding:2rem; color:var(--text-muted);">لم يتم العثور على نتائج تطابق بيانات البحث.</div>`;
+    return;
+  }
+
+  const summaryOnly = queryInfo.mode === "name" || queryInfo.mode === "id";
+  const modeHint = summaryOnly
+    ? `<div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">عرض الملخص النهائي فقط — للتفاصيل الكاملة استخدم كود الاشتراك.</div>`
+    : `<div style="font-size:0.85rem; color:var(--text-muted); margin-bottom:1rem;">يمكنك فتح تفاصيل كل امتحان (أسئلة وإجابات) للقراءة فقط.</div>`;
+  listContainer.insertAdjacentHTML("afterbegin", modeHint);
 
   matched.forEach(res => {
     const card = document.createElement("div");
     card.className = "result-query-card";
-    card.innerHTML = `
-      <div><div class="result-query-title">${res.examTitle} (${res.examType})</div></div>
-      <div style="display:flex; align-items:center; gap: 1rem;"><span style="font-size:1.1rem; font-weight:800; color:var(--secondary);">${res.score}</span></div>
-    `;
+    const scoreHtml = `<span style="font-size:1.1rem; font-weight:800; color:var(--secondary);">${escapeHtml(res.score || "")}</span>`;
+    const metaHtml =
+      `<div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(res.timestamp || "")}</div>`;
+    let actionsHtml = "";
+    if (!summaryOnly && res.recordId) {
+      actionsHtml =
+        `<button type="button" class="btn btn-outline btn-sm" data-result-id="${escapeHtml(res.recordId)}">عرض التفاصيل</button>`;
+    }
+    card.innerHTML =
+      `<div><div class="result-query-title">${escapeHtml(res.examTitle || "")} (${escapeHtml(res.examType || "")})</div>${metaHtml}</div>` +
+      `<div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">${scoreHtml}${actionsHtml}</div>`;
+    const btn = card.querySelector("button[data-result-id]");
+    if (btn) {
+      btn.addEventListener("click", () => openStudentSearchResultDetail(btn.getAttribute("data-result-id")));
+    }
     listContainer.appendChild(card);
   });
 }
 
 window.viewResultDetailQuery = function(recordId, studentId, examId) {
+  if (recordId && systemState.results.some(r => r.recordId === recordId)) {
+    openStudentSearchResultDetail(recordId);
+    return;
+  }
   if (examId === undefined) {
     examId = studentId;
     studentId = recordId;
@@ -7347,8 +7531,10 @@ window.viewResultDetailQuery = function(recordId, studentId, examId) {
   }
   const result = systemState.results.find(r => r.recordId === recordId) ||
     systemState.results.find(r => r.id === studentId && r.examId === examId);
-  if (result) {
-    alert(`تفاصيل اختبارك الأكاديمي [${result.examTitle}]:\n\n${result.details}`);
+  if (result && result.recordId) {
+    openStudentSearchResultDetail(result.recordId);
+  } else if (result) {
+    alert(`النتيجة النهائية [${result.examTitle}]: ${result.score}`);
   }
 };
 
@@ -9731,19 +9917,22 @@ function handleStudentRegister() {
   const rawCode = document.getElementById("student-reg-code").value.trim();
   const code = sanitizeStudentCodeInput(rawCode);
 
-  if (!fullname || !rawCode) {
-    alert("يرجى إدخال الاسم وكود الاشتراك للتسجيل!");
+  if (!fullname) {
+    alert("يرجى إدخال الاسم للتسجيل!");
     return;
   }
-  if (!isFiveDigitStudentCode(code)) {
-    alert("كود الاشتراك يجب أن يكون مكوّناً من 5 أرقام.");
+  if (rawCode && !isValidStudentCodeFormat(rawCode)) {
+    alert("كود الاشتراك غير صالح.");
+    return;
+  }
+  if (id && !isValidStudentIdFormat(id)) {
+    alert("معرف الهوية غير صالح.");
     return;
   }
 
-  // فحص عدم تكرار الـ ID في قاعدة البيانات
-  const isDuplicate = id && systemState.students.some(s => normalizeStudentId(s.id) === id);
-  if (isDuplicate) {
-    alert("رقم المعرف (ID) هذا مسجل بالفعل لطالب آخر! يرجى التواصل مع المعلم إذا واجهتك مشكلة.");
+  const identityCheck = validateStudentIdentityInput(id, rawCode, { name: fullname });
+  if (!identityCheck.ok) {
+    alert(identityCheck.message);
     return;
   }
 
@@ -9774,7 +9963,7 @@ function setupStudentAutofill() {
     const codeVal = sanitizeStudentCodeInput(codeInput.value.trim());
 
     let matched = null;
-    if (isFiveDigitStudentCode(codeVal) && !isSharedStudentCode(codeVal)) {
+    if (hasStudentCode(codeVal) && isPrivateStudentCode(codeVal)) {
       matched = findStudentByCode(codeVal);
     }
     if (!matched && idVal) {
@@ -10214,8 +10403,21 @@ window.saveNewStudentByTeacher = async function() {
     alert("يرجى إدخال اسم الطالب!");
     return;
   }
-  if (rawCode && !isFiveDigitStudentCode(code)) {
-    alert("كود الاشتراك يجب أن يكون 5 أرقام (أو اتركه فارغاً).");
+  if (rawCode && !isValidStudentCodeFormat(rawCode)) {
+    alert("كود الاشتراك غير صالح (حروف أو أرقام أو كليهما).");
+    return;
+  }
+  if (id && !isValidStudentIdFormat(id)) {
+    alert("معرف الهوية غير صالح (حروف أو أرقام أو كليهما).");
+    return;
+  }
+
+  const identityCheck = validateStudentIdentityInput(id, rawCode, {
+    name,
+    editingStudentKey: systemState.editingStudentKey || ""
+  });
+  if (!identityCheck.ok) {
+    alert(identityCheck.message);
     return;
   }
 
@@ -10225,20 +10427,6 @@ window.saveNewStudentByTeacher = async function() {
     if (!existing) {
       alert("لم يتم العثور على الطالب للتعديل!");
       return;
-    }
-    if (isPrivateStudentCode(code)) {
-      const duplicateCode = systemState.students.find(s => sanitizeStudentCodeInput(s.code) === code && s.studentKey !== existing.studentKey);
-      if (duplicateCode) {
-        alert("كود الاشتراك الخاص مستخدم بالفعل لطالب آخر!");
-        return;
-      }
-    }
-    if (id) {
-      const duplicateId = systemState.students.find(s => normalizeStudentId(s.id) === id && s.studentKey !== existing.studentKey);
-      if (duplicateId) {
-        alert("رقم المعرف ID مسجل بالفعل لطالب آخر!");
-        return;
-      }
     }
     existing.name = name;
     existing.id = id;
@@ -10255,21 +10443,6 @@ window.saveNewStudentByTeacher = async function() {
       .forEach(res => sendUpdatedResultToCloud(res));
     alert(`تم تعديل بيانات الطالب "${name}" بنجاح!${synced ? " وتمت المزامنة مع Google Sheets." : " (محفوظ محلياً — تحقق من رابط المزامنة)"}`);
     return;
-  }
-
-  if (isPrivateStudentCode(code)) {
-    const duplicateCode = findStudentByCode(code);
-    if (duplicateCode) {
-      alert("كود الاشتراك الخاص مستخدم بالفعل لطالب آخر!");
-      return;
-    }
-  }
-  if (id) {
-    const duplicateId = findStudentById(id);
-    if (duplicateId) {
-      alert("رقم المعرف ID مسجل بالفعل لطالب آخر!");
-      return;
-    }
   }
 
   const created = upsertStudentRecord({ name, id, code });

@@ -504,15 +504,23 @@ function normalizeArabyaStudentId_(studentId) {
 }
 
 function sanitizeArabyaStudentCode_(code) {
-  var digits = String(code || "").replace(/\D/g, "").slice(0, 5);
-  if (digits && /^0+$/.test(digits)) return "00000";
-  return digits;
+  var raw = String(code || "").trim();
+  if (!raw) return "";
+  var compact = raw.replace(/\s+/g, "");
+  var digitsOnly = compact.replace(/\D/g, "");
+  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) return "00000";
+  return compact;
+}
+
+function normalizeArabyaStudentCodeForCompare_(code) {
+  return String(sanitizeArabyaStudentCode_(code) || "").toUpperCase();
 }
 
 function getArabyaStudentLookupKey_(student) {
   if (!student) return "";
   var code = sanitizeArabyaStudentCode_(student.code || student.accessCode || "");
-  if (/^\d{5}$/.test(code) && code !== "00000") return "code:" + code;
+  var codeKey = normalizeArabyaStudentCodeForCompare_(code);
+  if (codeKey && codeKey !== "00000") return "code:" + codeKey;
   var id = normalizeArabyaStudentId_(student.id);
   if (id) return "id:" + id;
   var name = String(student.name || "").trim().replace(/\s+/g, " ").toLowerCase();
