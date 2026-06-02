@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.26";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.27";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -39,17 +39,25 @@ function readAppVersionFromLocalStorageConfig() {
   }
 }
 
-function getPlatformAppVersion() {
+function resolvePlatformAppVersionDisplay() {
   return pickLatestAppVersion(
+    ARABYA_APP_BUILD_VERSION,
     systemState.config?.appVersion,
-    readAppVersionFromLocalStorageConfig(),
-    window.ARABYA_APP_BUILD_VERSION,
-    ARABYA_APP_BUILD_VERSION
+    readAppVersionFromLocalStorageConfig()
   ) || ARABYA_APP_BUILD_VERSION;
 }
 
+function getPlatformAppVersion() {
+  return resolvePlatformAppVersionDisplay();
+}
+
 function applyPlatformAppVersion(version, options = {}) {
-  const next = String(version || "").trim();
+  const next = pickLatestAppVersion(
+    ARABYA_APP_BUILD_VERSION,
+    version,
+    systemState.config?.appVersion,
+    readAppVersionFromLocalStorageConfig()
+  );
   if (!next) return;
   systemState.config = systemState.config || {};
   systemState.config.appVersion = next;
@@ -66,26 +74,43 @@ function applyPlatformAppVersion(version, options = {}) {
 }
 
 function bootstrapPlatformAppVersionFromLocal() {
-  const initial = pickLatestAppVersion(
-    readAppVersionFromLocalStorageConfig(),
-    systemState.config?.appVersion,
-    ARABYA_APP_BUILD_VERSION
-  );
-  applyPlatformAppVersion(initial, { persistState: false });
+  applyPlatformAppVersion(ARABYA_APP_BUILD_VERSION, { persistState: false });
 }
 
 function syncPlatformAppVersionFromDatabase(data) {
-  if (!data || typeof data !== "object") return;
-  const remote = String(data.appVersion || data.config?.appVersion || "").trim();
-  if (!remote) return;
-  const next = pickLatestAppVersion(remote, getPlatformAppVersion(), ARABYA_APP_BUILD_VERSION);
+  const remote = data && typeof data === "object"
+    ? String(data.appVersion || data.config?.appVersion || "").trim()
+    : "";
+  const next = pickLatestAppVersion(
+    ARABYA_APP_BUILD_VERSION,
+    remote,
+    systemState.config?.appVersion,
+    readAppVersionFromLocalStorageConfig()
+  );
   applyPlatformAppVersion(next, { persistState: false });
 }
 
 function ensurePlatformAppVersionBeforeCloudPush() {
-  const next = pickLatestAppVersion(ARABYA_APP_BUILD_VERSION, getPlatformAppVersion());
+  const next = pickLatestAppVersion(
+    ARABYA_APP_BUILD_VERSION,
+    getPlatformAppVersion(),
+    readAppVersionFromLocalStorageConfig()
+  );
   applyPlatformAppVersion(next, { persistState: false });
   return next;
+}
+
+async function refreshPlatformAppVersionFromCloud(options = {}) {
+  bootstrapPlatformAppVersionFromLocal();
+  await fetchPlatformAppVersionFromCloudMeta();
+  updateTeacherAppVersionLabel();
+  const buildIsAhead = compareAppVersionStrings(ARABYA_APP_BUILD_VERSION, readAppVersionFromLocalStorageConfig()) > 0
+    || compareAppVersionStrings(ARABYA_APP_BUILD_VERSION, String(systemState.config?.appVersion || "")) > 0;
+  if (options.pushIfBuildAhead !== false && buildIsAhead && typeof scheduleCloudBackupPush === "function") {
+    ensurePlatformAppVersionBeforeCloudPush();
+    scheduleCloudBackupPush("app_version_sync", { immediate: true });
+  }
+  return getPlatformAppVersion();
 }
 
 const ARABYA_ACCOUNT_ROLES = {
@@ -320,7 +345,7 @@ function updateTeacherAppVersionLabel() {
       sidebar.appendChild(versionEl);
     }
   }
-  const label = `إصدار التطبيق: ${getPlatformAppVersion()}`;
+  const label = `إصدار التطبيق: ${resolvePlatformAppVersionDisplay()}`;
   if (versionEl) versionEl.textContent = label;
 }
 
@@ -779,6 +804,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.applyUnifiedCloudSyncModel = applyUnifiedCloudSyncModel;
   window.getPlatformAppVersion = getPlatformAppVersion;
   window.applyPlatformAppVersion = applyPlatformAppVersion;
+  window.refreshPlatformAppVersionFromCloud = refreshPlatformAppVersionFromCloud;
   window.compareAppVersionStrings = compareAppVersionStrings;
   window.pickLatestAppVersion = pickLatestAppVersion;
   window.resolveCloudBackupTargetUrls = resolveCloudBackupTargetUrls;
@@ -934,7 +960,9 @@ function initDatabase() {
       systemState.activeTeacher = matched;
       systemState.teacherProfile = { name: matched.name, subject: matched.subject };
       systemState.config = {
+        ...(systemState.config || {}),
         teacherCode: matched.password,
+        appVersion: systemState.config?.appVersion || ARABYA_APP_BUILD_VERSION,
         googleFormUrl: matched.integrationConfig?.googleFormUrl || "",
         entryName: matched.integrationConfig?.entryName || "",
         entryId: matched.integrationConfig?.entryId || "",
@@ -3750,12 +3778,19 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   ensureStudentsDataShape();
   ensureExamsDataShape();
   if (!examStartOnly && remoteData.config && typeof remoteData.config === "object") {
+    const remoteAppVersion = remoteData.config.appVersion;
     systemState.config = { ...(systemState.config || {}), ...remoteData.config };
+    systemState.config.appVersion = pickLatestAppVersion(
+      ARABYA_APP_BUILD_VERSION,
+      remoteAppVersion,
+      systemState.config.appVersion
+    );
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
   }
   syncPlatformAppVersionFromDatabase(remoteData);
+  updateTeacherAppVersionLabel();
   applyDeletionTombstonesToLocalState();
   return true;
 }
@@ -5907,7 +5942,7 @@ function loadTeacherDashboardData() {
       refreshTeacherDashboardViews({ all: true });
     }
   });
-  void fetchPlatformAppVersionFromCloudMeta();
+  void refreshPlatformAppVersionFromCloud({ pushIfBuildAhead: true });
 
   if (window.ArabyaCloudSync) {
     window.ArabyaCloudSync.startPullLoop();

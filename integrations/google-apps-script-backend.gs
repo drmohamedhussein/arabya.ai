@@ -386,6 +386,27 @@ function mergeArabyaExamDeviceRegistry_(localRegistry, incomingRegistry) {
   return { bindings: Object.keys(map).map(function(key) { return map[key]; }) };
 }
 
+function compareArabyaAppVersionStrings_(a, b) {
+  var partsA = String(a || "").trim().split(".").map(function(part) { return parseInt(part, 10) || 0; });
+  var partsB = String(b || "").trim().split(".").map(function(part) { return parseInt(part, 10) || 0; });
+  var len = Math.max(partsA.length, partsB.length);
+  for (var i = 0; i < len; i++) {
+    var diff = (partsA[i] || 0) - (partsB[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+function pickLatestArabyaAppVersion_() {
+  var best = "";
+  for (var i = 0; i < arguments.length; i++) {
+    var current = String(arguments[i] || "").trim();
+    if (!current) continue;
+    if (!best || compareArabyaAppVersionStrings_(current, best) > 0) best = current;
+  }
+  return best;
+}
+
 function mergeArabyaDatabase_(patch, reason, actor) {
   var db = readArabyaDatabase_();
   if (!Array.isArray(db.deletedStudentKeys)) db.deletedStudentKeys = [];
@@ -423,10 +444,10 @@ function mergeArabyaDatabase_(patch, reason, actor) {
     db.questionBanks = deepMergeArabyaObjects_(db.questionBanks || {}, patch.questionBanks);
   }
   if (patch.config && typeof patch.config === "object" && patch.config.appVersion) {
-    db.appVersion = String(patch.config.appVersion);
+    db.appVersion = pickLatestArabyaAppVersion_(db.appVersion, patch.config.appVersion);
   }
   if (patch.appVersion) {
-    db.appVersion = String(patch.appVersion);
+    db.appVersion = pickLatestArabyaAppVersion_(db.appVersion, patch.appVersion);
   }
   db.schemaVersion = ARABYA_DEFAULT_DB.schemaVersion;
   db.updatedAt = new Date().toISOString();

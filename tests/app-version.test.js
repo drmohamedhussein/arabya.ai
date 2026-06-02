@@ -26,6 +26,10 @@ assert.strictEqual(
   "2026.06.02.22"
 );
 assert.strictEqual(
+  pickLatestAppVersion("2026.06.02.24", "2026.06.02.27"),
+  "2026.06.02.27"
+);
+assert.strictEqual(
   pickLatestAppVersion("", "2026.06.02.20"),
   "2026.06.02.20"
 );
