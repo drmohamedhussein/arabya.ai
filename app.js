@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.18";
+const ARABYA_APP_VERSION = "2026.06.02.19";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -1200,7 +1200,8 @@ function findStudentByKey(studentKey) {
   return systemState.students.find(student => student.studentKey === studentKey) || null;
 }
 
-function ensureStudentsDataShape() {
+function ensureStudentsDataShape(options = {}) {
+  const preserveEmptyTimestamp = !!options.preserveEmptyTimestamp;
   if (!Array.isArray(systemState.students)) {
     systemState.students = [];
     return;
@@ -1210,6 +1211,10 @@ function ensureStudentsDataShape() {
     const sanitizedCode = sanitizeStudentCodeInput(student.code || "");
     const normalizedCode = hasStudentCode(sanitizedCode) ? sanitizedCode : "";
     const normalizedName = (student.name || "").toString().trim() || `طالب ${index + 1}`;
+    let timestamp = String(student.timestamp || "").trim();
+    if (!timestamp && !preserveEmptyTimestamp) {
+      timestamp = new Date().toLocaleDateString("ar-EG");
+    }
     const normalizedStudent = {
       ...student,
       name: normalizedName,
@@ -1217,7 +1222,7 @@ function ensureStudentsDataShape() {
       code: normalizedCode,
       email: normalizeContactField(student.email),
       mobile: normalizeContactField(student.mobile),
-      timestamp: student.timestamp || new Date().toLocaleDateString("ar-EG")
+      timestamp
     };
     normalizedStudent.studentKey = normalizedStudent.studentKey || getStudentLookupKey(normalizedStudent) || createRecordId("student");
     if (!Number.isFinite(normalizedStudent.savedAt)) {
@@ -2118,7 +2123,9 @@ function upsertStudentRecord(source, fallbackKey = "") {
     existingStudent.code = normalizedStudent.code || existingStudent.code || "";
     existingStudent.email = normalizedStudent.email;
     existingStudent.mobile = normalizedStudent.mobile;
-    existingStudent.timestamp = existingStudent.timestamp || new Date().toLocaleDateString("ar-EG");
+    if (source.timestamp) {
+      existingStudent.timestamp = pickEarlierStudentTimestamp(existingStudent.timestamp, source.timestamp);
+    }
     existingStudent.studentKey = existingStudent.studentKey || getStudentLookupKey(existingStudent) || fallbackKey || createRecordId("student");
     return ensureStudentAccountType(existingStudent);
   }
@@ -2129,7 +2136,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
     code: normalizedStudent.code,
     email: normalizedStudent.email,
     mobile: normalizedStudent.mobile,
-    timestamp: new Date().toLocaleDateString("ar-EG"),
+    timestamp: String(source.timestamp || "").trim() || new Date().toLocaleDateString("ar-EG"),
     studentKey: fallbackKey || getStudentLookupKey(normalizedStudent) || createRecordId("student"),
     accountType: ARABYA_ACCOUNT_ROLES.STUDENT
   };
@@ -3135,28 +3142,135 @@ function applyDeletionTombstonesToLocalState() {
   persistDeletedResultKeys();
 }
 
-function hydrateStudentsFromResults(results) {
-  if (!Array.isArray(results)) return;
+function getStudentAggregateKeyFromResult(res) {
+  if (!res) return "";
+  if (res.studentLookupKey) return String(res.studentLookupKey);
+  return getStudentLookupKey({
+    id: res.id,
+    name: res.name,
+    code: res.accessCode || res.code || ""
+  });
+}
+
+function pickEarlierStudentTimestamp(currentTs, candidateTs) {
+  const current = String(currentTs || "").trim();
+  const candidate = String(candidateTs || "").trim();
+  if (!current) return candidate;
+  if (!candidate) return current;
+  const currentDt = parseResultTimestamp(current);
+  const candidateDt = parseResultTimestamp(candidate);
+  if (currentDt && candidateDt) {
+    return candidateDt.getTime() < currentDt.getTime() ? candidate : current;
+  }
+  return current.length <= candidate.length ? current : candidate;
+}
+
+function findBackupStudentForDraft(draft, backupStudents) {
+  if (!draft || !Array.isArray(backupStudents)) return null;
+  const primaryKey = draft.studentLookupKey || getStudentLookupKey(draft);
+  if (primaryKey) {
+    const byKey = backupStudents.find(s => (s.studentKey || getStudentLookupKey(s)) === primaryKey);
+    if (byKey) return byKey;
+  }
+  const id = normalizeStudentIdForCompare(draft.id);
+  const name = normalizeStudentName(draft.name);
+  const code = normalizeStudentCodeForCompare(draft.code);
+  return backupStudents.find(s => {
+    if (id && normalizeStudentIdForCompare(s.id) === id) return true;
+    if (code && isPrivateStudentCode(code) && studentCodesMatch(s.code, code)) return true;
+    if (name && normalizeStudentName(s.name) === name && !id && !hasStudentCode(s.code)) return true;
+    return false;
+  }) || null;
+}
+
+/** يبني قائمة الطلاب من نتائج الشيت (مصدر الحقيقة) ويدمج بيانات النسخة الاحتياطية */
+function buildStudentsFromSheetResults(results, backupStudents = []) {
   loadDeletedStudentKeysFromStorage();
-  loadDeletedResultKeysFromStorage();
-  results.forEach(res => {
-    if (!res || (!res.name && !res.id && !res.accessCode && !res.code)) return;
-    if (isResultFromDeletedStudent(res) || isResultRecordDeleted(res)) return;
+  const backup = filterOutDeletedStudents(backupStudents || []);
+  const map = new Map();
+
+  (results || []).forEach(res => {
+    if (!res || isResultRecordDeleted(res) || isResultFromDeletedStudent(res)) return;
+    if (!res.name && !res.id && !res.accessCode && !res.code) return;
+    const key = getStudentAggregateKeyFromResult(res);
+    if (!key) return;
     const draft = {
-      name: res.name,
-      id: res.id,
-      code: res.accessCode || res.code
+      studentLookupKey: res.studentLookupKey || key,
+      name: (res.name || "").trim(),
+      id: normalizeStudentId(res.id || ""),
+      code: sanitizeStudentCodeInput(res.accessCode || res.code || ""),
+      email: normalizeContactField(res.email),
+      mobile: normalizeContactField(res.mobile),
+      timestamp: String(res.timestamp || "").trim(),
+      lastKnownIp: res.clientIp || "",
+      clientIp: res.clientIp || "",
+      deviceFingerprint: res.deviceFingerprint || "",
+      deviceId: res.deviceId || ""
     };
     if (isStudentRecordDeleted(draft)) return;
-    upsertStudentRecord({
-      name: res.name,
-      id: res.id,
-      code: res.accessCode || res.code,
-      email: res.email,
-      mobile: res.mobile
-    }, res.studentLookupKey || "");
+
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, draft);
+      return;
+    }
+    existing.timestamp = pickEarlierStudentTimestamp(existing.timestamp, draft.timestamp);
+    if (draft.email) existing.email = draft.email;
+    if (draft.mobile) existing.mobile = draft.mobile;
+    if (draft.lastKnownIp) {
+      existing.lastKnownIp = draft.lastKnownIp;
+      existing.clientIp = draft.clientIp;
+    }
+    if (draft.deviceFingerprint) existing.deviceFingerprint = draft.deviceFingerprint;
+    if (draft.deviceId) existing.deviceId = draft.deviceId;
+    if (!existing.name && draft.name) existing.name = draft.name;
+    if (!existing.id && draft.id) existing.id = draft.id;
+    if (!existing.code && draft.code) existing.code = draft.code;
   });
-  ensureStudentsDataShape();
+
+  const merged = [];
+  const usedBackupKeys = new Set();
+
+  map.forEach(draft => {
+    const backupRow = findBackupStudentForDraft(draft, backup);
+    const studentKey = backupRow?.studentKey || draft.studentLookupKey || getStudentLookupKey(draft) || createRecordId("student");
+    if (backupRow?.studentKey) usedBackupKeys.add(backupRow.studentKey);
+    const sheetTimestamp = draft.timestamp || "";
+    const backupTimestamp = String(backupRow?.timestamp || "").trim();
+    const timestamp = sheetTimestamp
+      ? pickEarlierStudentTimestamp(sheetTimestamp, backupTimestamp)
+      : backupTimestamp;
+    merged.push({
+      ...(backupRow || {}),
+      ...draft,
+      studentKey,
+      timestamp: timestamp || sheetTimestamp || backupTimestamp || "",
+      accountType: backupRow?.accountType || ARABYA_ACCOUNT_ROLES.STUDENT
+    });
+  });
+
+  backup.forEach(student => {
+    if (!student || isStudentRecordDeleted(student)) return;
+    const key = student.studentKey || getStudentLookupKey(student);
+    if (key && usedBackupKeys.has(key)) return;
+    if (key && map.has(key)) return;
+    const already = merged.some(row => {
+      if (key && (row.studentKey === key || row.studentLookupKey === key)) return true;
+      return findBackupStudentForDraft(row, [student]) === student;
+    });
+    if (!already) merged.push({ ...student });
+  });
+
+  return merged;
+}
+
+function reconcileStudentsFromCloudData(results, backupStudents) {
+  systemState.students = buildStudentsFromSheetResults(results, backupStudents);
+  ensureStudentsDataShape({ preserveEmptyTimestamp: true });
+}
+
+function hydrateStudentsFromResults(results) {
+  reconcileStudentsFromCloudData(results, systemState.students);
 }
 
 function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
@@ -3186,14 +3300,11 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   systemState.deletedResultKeys = [...new Set([...preserveDeletedResults, ...systemState.deletedResultKeys])];
   persistDeletedStudentKeys();
   persistDeletedResultKeys();
+  const remoteStudentsBackup = filterOutDeletedStudents(
+    Array.isArray(remoteData.students) ? remoteData.students : []
+  );
   if (!examStartOnly) {
-    if (Array.isArray(remoteData.students)) {
-      const remoteStudents = filterOutDeletedStudents(remoteData.students);
-      const mergedStudents = mergeRemoteCollection_(systemState.students, remoteStudents, item => String(item.studentKey || item.id || item.code || item.name || ""), "طالب");
-      systemState.students = filterOutDeletedStudents(mergedStudents);
-    } else {
-      systemState.students = filterOutDeletedStudents(systemState.students);
-    }
+    systemState.students = filterOutDeletedStudents(systemState.students);
   }
   if (Array.isArray(remoteData.exams)) {
     systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
@@ -3211,7 +3322,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     systemState.results = filterOutDeletedResults(systemState.results);
   }
   if (!examStartOnly) {
-    hydrateStudentsFromResults(systemState.results);
+    reconcileStudentsFromCloudData(systemState.results, remoteStudentsBackup);
     systemState.students = filterOutDeletedStudents(systemState.students);
     ensureResultRecordIds();
     hydratePresentedQuestionsForResults();
@@ -3977,10 +4088,6 @@ function applyCloudBackupData(data) {
   if (data.deletedResultKeys && Array.isArray(data.deletedResultKeys)) {
     mergeDeletedResultKeysFromRemote(data.deletedResultKeys);
   }
-  if (data.students && Array.isArray(data.students)) {
-    systemState.students = filterOutDeletedStudents(data.students);
-    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
-  }
   if (data.exams && Array.isArray(data.exams)) {
     systemState.exams = data.exams;
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
@@ -3991,8 +4098,14 @@ function applyCloudBackupData(data) {
     );
     localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
     ensureResultRecordIds();
-    hydrateStudentsFromResults(systemState.results);
+    reconcileStudentsFromCloudData(
+      systemState.results,
+      Array.isArray(data.students) ? data.students : systemState.students
+    );
     systemState.students = filterOutDeletedStudents(systemState.students);
+    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+  } else if (data.students && Array.isArray(data.students)) {
+    systemState.students = filterOutDeletedStudents(data.students);
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
   }
   if (data.examDeviceRegistry) {
@@ -10333,7 +10446,7 @@ function renderTeacherStudentsTable() {
       <td><code style="font-size:0.78rem;">${escapeHtml(studentIp)}</code></td>
       <td>${escapeHtml(s.email || "--")}</td>
       <td>${escapeHtml(s.mobile || "--")}</td>
-      <td>${escapeHtml(s.timestamp || "غير معروف")}</td>
+      <td>${escapeHtml(s.timestamp || "—")}</td>
       <td class="teacher-students-actions teacher-table-actions"></td>
     `;
 

@@ -137,6 +137,7 @@ function doGet(e) {
       var db = readArabyaDatabase_();
       var sheetRowCount = readArabyaResultsFromSheet_().length;
       db.results = buildArabyaResultsForClient_(db);
+      db.students = buildArabyaStudentsForClient_(db, db.results);
       if (db.deletedStudentKeys && db.deletedStudentKeys.length) {
         db.students = filterArabyaStudentsByDeletedKeys_(db.students || [], db.deletedStudentKeys);
       }
@@ -559,6 +560,140 @@ function filterArabyaStudentsByDeletedKeys_(students, deletedKeys) {
   return (students || []).filter(function(student) {
     return !isArabyaStudentDeleted_(student, deletedKeys);
   });
+}
+
+function parseArabyaSheetTimestamp_(value) {
+  if (!value) return null;
+  var raw = String(value).trim();
+  if (!raw) return null;
+  var dt = new Date(raw);
+  if (!isNaN(dt.getTime())) return dt.getTime();
+  return null;
+}
+
+function pickEarlierArabyaTimestamp_(currentTs, candidateTs) {
+  var current = String(currentTs || "").trim();
+  var candidate = String(candidateTs || "").trim();
+  if (!current) return candidate;
+  if (!candidate) return current;
+  var currentMs = parseArabyaSheetTimestamp_(current);
+  var candidateMs = parseArabyaSheetTimestamp_(candidate);
+  if (currentMs !== null && candidateMs !== null) {
+    return candidateMs < currentMs ? candidate : current;
+  }
+  return current;
+}
+
+function getArabyaStudentKeyFromResult_(result) {
+  if (!result) return "";
+  if (result.studentLookupKey) return String(result.studentLookupKey);
+  return getArabyaStudentLookupKey_({
+    id: result.id || "",
+    name: result.name || "",
+    code: result.accessCode || result.code || ""
+  });
+}
+
+function findArabyaBackupStudentForDraft_(draft, backupStudents) {
+  var i;
+  var primaryKey = draft.studentLookupKey || getArabyaStudentLookupKey_(draft);
+  if (primaryKey) {
+    for (i = 0; i < backupStudents.length; i++) {
+      var row = backupStudents[i];
+      if ((row.studentKey || getArabyaStudentLookupKey_(row)) === primaryKey) return row;
+    }
+  }
+  var id = normalizeArabyaStudentId_(draft.id);
+  var name = String(draft.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+  var code = normalizeArabyaStudentCodeForCompare_(sanitizeArabyaStudentCode_(draft.code || ""));
+  for (i = 0; i < backupStudents.length; i++) {
+    row = backupStudents[i];
+    if (id && normalizeArabyaStudentId_(row.id) === id) return row;
+    var rowCode = normalizeArabyaStudentCodeForCompare_(sanitizeArabyaStudentCode_(row.code || row.accessCode || ""));
+    if (code && rowCode === code && code !== "00000") return row;
+    var rowName = String(row.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (name && rowName === name && !id && !rowCode) return row;
+  }
+  return null;
+}
+
+/** طلاب للعميل: من نتائج الشيت + دمج النسخة الاحتياطية (تاريخ التسجيل = أقدم تاريخ نتيجة على الشيت) */
+function buildArabyaStudentsForClient_(db, sheetResults) {
+  var backupStudents = db.students || [];
+  var map = {};
+  var usedBackupKeys = {};
+  var out = [];
+  var key;
+  var res;
+  var draft;
+  var existing;
+  var backupRow;
+  var i;
+
+  (sheetResults || []).forEach(function(result) {
+    if (!result || isArabyaResultFromDeletedStudent_(result, db.deletedStudentKeys || [])) return;
+    if (!result.name && !result.id && !result.accessCode && !result.code) return;
+    key = getArabyaStudentKeyFromResult_(result);
+    if (!key) return;
+    draft = {
+      studentLookupKey: result.studentLookupKey || key,
+      name: String(result.name || "").trim(),
+      id: normalizeArabyaStudentId_(result.id || ""),
+      code: sanitizeArabyaStudentCode_(result.accessCode || result.code || ""),
+      email: String(result.email || "").trim(),
+      mobile: String(result.mobile || "").trim(),
+      timestamp: result.timestamp ? String(result.timestamp) : "",
+      clientIp: result.clientIp || "",
+      lastKnownIp: result.clientIp || "",
+      deviceFingerprint: result.deviceFingerprint || "",
+      deviceId: result.deviceId || ""
+    };
+    if (isArabyaStudentDeleted_(draft, db.deletedStudentKeys || [])) return;
+    existing = map[key];
+    if (!existing) {
+      map[key] = draft;
+      return;
+    }
+    existing.timestamp = pickEarlierArabyaTimestamp_(existing.timestamp, draft.timestamp);
+    if (draft.email) existing.email = draft.email;
+    if (draft.mobile) existing.mobile = draft.mobile;
+    if (draft.lastKnownIp) {
+      existing.lastKnownIp = draft.lastKnownIp;
+      existing.clientIp = draft.clientIp;
+    }
+    if (draft.deviceFingerprint) existing.deviceFingerprint = draft.deviceFingerprint;
+    if (draft.deviceId) existing.deviceId = draft.deviceId;
+  });
+
+  Object.keys(map).forEach(function(mapKey) {
+    draft = map[mapKey];
+    backupRow = findArabyaBackupStudentForDraft_(draft, backupStudents);
+    if (backupRow && backupRow.studentKey) usedBackupKeys[backupRow.studentKey] = true;
+    var sheetTs = draft.timestamp || "";
+    var backupTs = backupRow && backupRow.timestamp ? String(backupRow.timestamp) : "";
+    var mergedTs = sheetTs ? pickEarlierArabyaTimestamp_(sheetTs, backupTs) : backupTs;
+    out.push(Object.assign({}, backupRow || {}, draft, {
+      studentKey: (backupRow && backupRow.studentKey) || draft.studentLookupKey || getArabyaStudentLookupKey_(draft) || Utilities.getUuid(),
+      timestamp: mergedTs || sheetTs || backupTs || ""
+    }));
+  });
+
+  for (i = 0; i < backupStudents.length; i++) {
+    backupRow = backupStudents[i];
+    if (!backupRow || isArabyaStudentDeleted_(backupRow, db.deletedStudentKeys || [])) continue;
+    if (backupRow.studentKey && usedBackupKeys[backupRow.studentKey]) continue;
+    key = backupRow.studentKey || getArabyaStudentLookupKey_(backupRow);
+    if (key && map[key]) continue;
+    var duplicate = false;
+    for (var j = 0; j < out.length; j++) {
+      if (findArabyaBackupStudentForDraft_(out[j], [backupRow]) === backupRow) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (!duplicate) out.push(JSON.parse(JSON.stringify(backupRow)));
+  }
+  return out;
 }
 
 function mergeArabyaCollection_(current, incoming, collection) {
