@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_VERSION = "2026.06.02.15";
+const ARABYA_APP_VERSION = "2026.06.02.16";
 window.ARABYA_APP_VERSION = ARABYA_APP_VERSION;
 const ARABYA_ACCOUNT_ROLES = {
   SUPER_ADMIN: "super_admin",
@@ -2001,6 +2001,7 @@ function getCurrentExamTotalScore() {
 }
 
 function upsertStudentRecord(source, fallbackKey = "") {
+  if (isStudentRecordDeleted(source)) return null;
   const previewKey = fallbackKey || getStudentLookupKey(source) || "";
   if (previewKey && isStudentKeyDeleted(previewKey)) return null;
   const normalizedId = normalizeStudentId(source.id || "");
@@ -2104,7 +2105,7 @@ function getExamMaxStudentsPerSharedIp(exam) {
   if (Number.isFinite(fromExam) && fromExam >= 1) return fromExam;
   const fromCfg = parseInt(systemState.config?.maxStudentsPerSharedIp, 10);
   if (Number.isFinite(fromCfg) && fromCfg >= 1) return fromCfg;
-  return 5;
+  return 15;
 }
 
 function isIpOnExamAllowlist(exam, clientIp) {
@@ -2892,10 +2893,11 @@ const DELETED_STUDENT_KEYS_STORAGE = "arabya_deleted_student_keys";
 
 function loadDeletedStudentKeysFromStorage() {
   if (!Array.isArray(systemState.deletedStudentKeys)) systemState.deletedStudentKeys = [];
+  const inMemory = [...systemState.deletedStudentKeys];
   try {
     const raw = JSON.parse(localStorage.getItem(DELETED_STUDENT_KEYS_STORAGE) || "[]");
     if (Array.isArray(raw)) {
-      systemState.deletedStudentKeys = [...new Set(raw.map(String).filter(Boolean))];
+      systemState.deletedStudentKeys = [...new Set([...inMemory, ...raw.map(String).filter(Boolean)])];
     }
   } catch (e) {}
   return systemState.deletedStudentKeys;
@@ -2978,10 +2980,11 @@ function getResultTombstoneKey(res) {
 
 function loadDeletedResultKeysFromStorage() {
   if (!Array.isArray(systemState.deletedResultKeys)) systemState.deletedResultKeys = [];
+  const inMemory = [...systemState.deletedResultKeys];
   try {
     const raw = JSON.parse(localStorage.getItem(DELETED_RESULT_KEYS_STORAGE) || "[]");
     if (Array.isArray(raw)) {
-      systemState.deletedResultKeys = [...new Set(raw.map(String).filter(Boolean))];
+      systemState.deletedResultKeys = [...new Set([...inMemory, ...raw.map(String).filter(Boolean)])];
     }
   } catch (e) {}
   return systemState.deletedResultKeys;
@@ -3900,7 +3903,9 @@ function applyCloudBackupData(data) {
     localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
   }
   if (data.results && Array.isArray(data.results)) {
-    systemState.results = filterOutDeletedResults(data.results);
+    systemState.results = filterOutDeletedResults(
+      data.results.filter(r => r && !isResultFromDeletedStudent(r))
+    );
     localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
     ensureResultRecordIds();
     hydrateStudentsFromResults(systemState.results);
@@ -5770,7 +5775,7 @@ function applyExamMetaFromEditor(exam, options = {}) {
   exam.entryCode = editEntryCode;
   exam.entryScore = editEntryScore;
   exam.entryDetails = editEntryDetails;
-  const rawMaxSharedIp = document.getElementById("edit-meta-max-shared-ip")?.value ?? "5";
+  const rawMaxSharedIp = document.getElementById("edit-meta-max-shared-ip")?.value ?? "15";
   const maxSharedIp = parseInt(String(rawMaxSharedIp).trim(), 10);
   if (!Number.isFinite(maxSharedIp) || maxSharedIp < 1) {
     alert("حد الطلاب المسموح لهم بنفس عنوان IP يجب أن يكون 1 أو أكثر.");
@@ -8766,10 +8771,7 @@ function mergeDeviceProfileIntoStudent(student, profile) {
 
 function deviceBindingMatchesEntry(profile, entry) {
   if (!profile || !entry) return false;
-  if (profile.deviceFingerprint && entry.deviceFingerprint && profile.deviceFingerprint === entry.deviceFingerprint) {
-    return true;
-  }
-  return !!(profile.deviceId && entry.deviceId && profile.deviceId === entry.deviceId);
+  return !!(profile.deviceFingerprint && entry.deviceFingerprint && profile.deviceFingerprint === entry.deviceFingerprint);
 }
 
 function findDeviceExamAttemptConflict(profile, examId, studentContext) {
@@ -8887,34 +8889,37 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
     studentKey: studentLookupKey,
     name: studentName || ""
   });
+  const ipAllowlisted = isIpOnExamAllowlist(exam, profile.clientIp);
   const ipSlot = checkExamSharedIpAdmission(exam, profile.clientIp, studentLookupKey, ctx);
   if (!ipSlot.ok) {
     void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: ipSlot.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
     return { ok: false, message: ipSlot.message, profile };
   }
-  const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
-  if (attemptConflict?.kind === "same_student") {
-    const msg = getExamBlockingMessage(attemptConflict.result);
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: msg, profile };
-  }
-  if (attemptConflict?.kind === "other_student") {
-    const other = attemptConflict.result || {};
-    const msg =
-      "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
-      `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
-      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: msg, profile };
-  }
-  const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
-  if (conflict) {
-    const msg =
-      "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
-      `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
-      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: msg, profile };
+  if (!ipAllowlisted) {
+    const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
+    if (attemptConflict?.kind === "same_student") {
+      const msg = getExamBlockingMessage(attemptConflict.result);
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      return { ok: false, message: msg, profile };
+    }
+    if (attemptConflict?.kind === "other_student") {
+      const other = attemptConflict.result || {};
+      const msg =
+        "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
+        `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
+        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      return { ok: false, message: msg, profile };
+    }
+    const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
+    if (conflict) {
+      const msg =
+        "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
+        `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
+        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      return { ok: false, message: msg, profile };
+    }
   }
   registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
   return { ok: true, profile };
@@ -9997,7 +10002,8 @@ function renderTeacherStudentsTable() {
 
   const filters = getStudentsTableFilters();
   const filtersActive = isStudentsTableFiltersActive(filters);
-  const totalAll = systemState.students.length;
+  const visibleStudents = filterOutDeletedStudents(systemState.students);
+  const totalAll = visibleStudents.length;
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
@@ -10008,8 +10014,8 @@ function renderTeacherStudentsTable() {
 
   const view = getStudentsTableViewSettings();
   renderSortableTableHeaders("#teacher-tab-students .table-container table", STUDENTS_TABLE_SORTABLE_COLUMNS, view.columnSort, toggleStudentsColumnSort);
-  let sorted = sortStudentsForDisplay(systemState.students, view.sortOrder);
-  sorted = applyStudentsColumnSort(sorted, view.columnSort, systemState.students);
+  let sorted = sortStudentsForDisplay(visibleStudents, view.sortOrder);
+  sorted = applyStudentsColumnSort(sorted, view.columnSort, visibleStudents);
   const filtered = filterStudentsForTeacherTable(sorted);
   const totalItems = filtered.length;
   view.page = clampStudentsTablePage(totalItems, view.pageSize, view.page);
@@ -10217,6 +10223,8 @@ window.deleteStudentByTeacher = async function(studentKey) {
   addDeletedStudentKey(student);
   tombstoneResultsForDeletedStudent(student);
   clearExamDeviceRegistryForStudentAllExams(studentKey);
+  const deleteCtx = buildStudentMatchContext(student);
+  systemState.results = (systemState.results || []).filter(r => !resultMatchesStudentIdentity(r, deleteCtx));
   systemState.students = systemState.students.filter(s => {
     const key = s.studentKey || getStudentLookupKey(s);
     return key !== studentKey && !isStudentRecordDeleted(s);

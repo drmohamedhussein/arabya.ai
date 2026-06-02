@@ -137,6 +137,9 @@ function doGet(e) {
       var db = readArabyaDatabase_();
       var sheetRowCount = readArabyaResultsFromSheet_().length;
       db.results = buildArabyaResultsForClient_(db);
+      if (db.deletedStudentKeys && db.deletedStudentKeys.length) {
+        db.students = filterArabyaStudentsByDeletedKeys_(db.students || [], db.deletedStudentKeys);
+      }
       var resultCount = (db.results || []).length;
       var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
@@ -478,18 +481,22 @@ function filterArabyaResultsByDeletedKeys_(results, deletedKeys) {
 
 /** نتائج للعميل: ورقة الشيت مصدر الحقيقة — لا تُعاد صفوف محذوفة من JSON القديم */
 function buildArabyaResultsForClient_(db) {
-  var deletedKeys = db.deletedResultKeys || [];
+  var deletedResultKeys = db.deletedResultKeys || [];
+  var deletedStudentKeys = db.deletedStudentKeys || [];
   var sheetResults = readArabyaResultsFromSheet_();
   if (sheetResults.length > 0) {
     var map = {};
     sheetResults.forEach(function(result) {
-      if (isArabyaResultDeleted_(result, deletedKeys)) return;
+      if (isArabyaResultDeleted_(result, deletedResultKeys)) return;
+      if (isArabyaResultFromDeletedStudent_(result, deletedStudentKeys)) return;
       var key = getArabyaRecordKey_(result, "results");
       map[key] = result;
     });
     return Object.keys(map).map(function(key) { return map[key]; });
   }
-  return filterArabyaResultsByDeletedKeys_(db.results || [], deletedKeys);
+  return filterArabyaResultsByDeletedKeys_(db.results || [], deletedResultKeys).filter(function(result) {
+    return !isArabyaResultFromDeletedStudent_(result, deletedStudentKeys);
+  });
 }
 
 function normalizeArabyaStudentId_(studentId) {
@@ -525,7 +532,19 @@ function isArabyaStudentDeleted_(student, deletedKeys) {
   if (id && set["id:" + id]) return true;
   var code = sanitizeArabyaStudentCode_(student.code || student.accessCode);
   if (code && set["code:" + code]) return true;
+  var name = String(student.name || "").trim().replace(/\s+/g, " ").toLowerCase();
+  if (name && set["name:" + name]) return true;
   return false;
+}
+
+function isArabyaResultFromDeletedStudent_(result, deletedStudentKeys) {
+  if (!result || !deletedStudentKeys || !deletedStudentKeys.length) return false;
+  return isArabyaStudentDeleted_({
+    studentKey: result.studentLookupKey || "",
+    id: result.id || "",
+    name: result.name || "",
+    code: result.accessCode || result.code || ""
+  }, deletedStudentKeys);
 }
 
 function filterArabyaStudentsByDeletedKeys_(students, deletedKeys) {

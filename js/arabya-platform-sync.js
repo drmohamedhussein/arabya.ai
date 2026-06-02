@@ -370,7 +370,7 @@
     if (hrs) hrs.value = hall.hours != null ? hall.hours : 2;
     if (maxSharedEl) {
       const maxShared = parseInt(exam?.ipAccessPolicy?.maxStudentsPerSharedIp, 10);
-      maxSharedEl.value = Number.isFinite(maxShared) && maxShared >= 1 ? maxShared : 5;
+      maxSharedEl.value = Number.isFinite(maxShared) && maxShared >= 1 ? maxShared : 15;
     }
   }
 
