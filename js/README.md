@@ -2,6 +2,9 @@
 
 | الملف | المسؤولية |
 |--------|-----------|
+| `arabya-utils.js` | إصدارات، `createRecordId`، `delayMs`، `escapeHtml`، `getAppBaseUrl` |
+| `arabya-students.js` | تطبيع هوية الطلاب، البحث، مطابقة النتائج، التحقق من الإدخال |
+| `arabya-exam-config.js` | تهيئة إعدادات الامتحان، حدود الغش، إلغاء الامتحان |
 | `arabya-security.js` | تشفير كلمات مرور المعلمين (SHA-256 + salt)، جلسة خمول (ساعتان) |
 | `arabya-question-bank.js` | بنوك أسئلة مشتركة: حفظ، دمج، استيراد/تصدير JSON و CSV |
 | `arabya-toast.js` | إشعارات نجاح/فشل المزامنة |
