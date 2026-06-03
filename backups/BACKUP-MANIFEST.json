@@ -1,0 +1,23 @@
+{
+  "label": "backup-2026-06-03-pre-refactor",
+  "createdAt": "2026-06-03T00:00:00.000Z",
+  "gitCommit": "2e934fb5b8155e7f08820c381a418ac3c3dcf867",
+  "gitBranch": "backup/pre-refactor-2026-06-03-5c00",
+  "gitTag": "backup-2026-06-03-pre-refactor",
+  "appVersion": "2026.06.02.29",
+  "cloud": {
+    "syncUrlConfigured": true,
+    "saveBackupStatus": "success",
+    "counts": {
+      "teachers": 1,
+      "students": 3,
+      "exams": 3,
+      "results": 7
+    },
+    "backupLabel": "2026-06-03-pre-refactor"
+  },
+  "files": [
+    "backups/cloud-live-snapshot-2026-06-03.json",
+    "backups/repo-db-snapshot-2026-06-03.json"
+  ]
+}
