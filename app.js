@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.27";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.28";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -40,11 +40,20 @@ function readAppVersionFromLocalStorageConfig() {
 }
 
 function resolvePlatformAppVersionDisplay() {
+  // إصدار الكود المحمّل هو مصدر الحقيقة للعرض — لا يُعرض إصدار أقدم من localStorage أو السحابة
   return pickLatestAppVersion(
     ARABYA_APP_BUILD_VERSION,
     systemState.config?.appVersion,
     readAppVersionFromLocalStorageConfig()
   ) || ARABYA_APP_BUILD_VERSION;
+}
+
+function getRunningAppBuildVersion() {
+  return String(
+    window.ARABYA_APP_BUILD_VERSION ||
+    document.documentElement?.getAttribute("data-arabya-build") ||
+    ARABYA_APP_BUILD_VERSION
+  ).trim() || ARABYA_APP_BUILD_VERSION;
 }
 
 function getPlatformAppVersion() {
@@ -345,8 +354,15 @@ function updateTeacherAppVersionLabel() {
       sidebar.appendChild(versionEl);
     }
   }
-  const label = `إصدار التطبيق: ${resolvePlatformAppVersionDisplay()}`;
+  const runningBuild = getRunningAppBuildVersion();
+  const platformVersion = resolvePlatformAppVersionDisplay();
+  const label = compareAppVersionStrings(platformVersion, runningBuild) > 0
+    ? `إصدار التطبيق: ${platformVersion} (بناء ${runningBuild})`
+    : `إصدار التطبيق: ${runningBuild}`;
   if (versionEl) versionEl.textContent = label;
+  try {
+    document.documentElement.setAttribute("data-arabya-build", runningBuild);
+  } catch (e) {}
 }
 
 function updateTeacherDashboardAccessUI() {
@@ -803,6 +819,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.getUnifiedTeacherSyncUrl = getUnifiedTeacherSyncUrl;
   window.applyUnifiedCloudSyncModel = applyUnifiedCloudSyncModel;
   window.getPlatformAppVersion = getPlatformAppVersion;
+  window.getRunningAppBuildVersion = getRunningAppBuildVersion;
   window.applyPlatformAppVersion = applyPlatformAppVersion;
   window.refreshPlatformAppVersionFromCloud = refreshPlatformAppVersionFromCloud;
   window.compareAppVersionStrings = compareAppVersionStrings;
@@ -4638,12 +4655,19 @@ function applyCloudBackupData(data) {
     window.ArabyaCloudSync.applyQuestionBanksFromCloud(data.questionBanks);
   }
   if (data.config && typeof data.config === "object") {
+    const remoteAppVersion = data.config.appVersion;
     systemState.config = { ...(systemState.config || {}), ...data.config };
+    systemState.config.appVersion = pickLatestAppVersion(
+      ARABYA_APP_BUILD_VERSION,
+      remoteAppVersion,
+      systemState.config.appVersion
+    );
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
   }
   syncPlatformAppVersionFromDatabase(data);
+  updateTeacherAppVersionLabel();
   applyDeletionTombstonesToLocalState();
   markTeacherHasCustomData();
 }
