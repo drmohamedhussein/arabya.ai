@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.02.28";
+const ARABYA_APP_BUILD_VERSION = "2026.06.02.29";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -49,11 +49,14 @@ function resolvePlatformAppVersionDisplay() {
 }
 
 function getRunningAppBuildVersion() {
-  return String(
-    window.ARABYA_APP_BUILD_VERSION ||
-    document.documentElement?.getAttribute("data-arabya-build") ||
-    ARABYA_APP_BUILD_VERSION
-  ).trim() || ARABYA_APP_BUILD_VERSION;
+  const fromHtml = document.documentElement?.getAttribute("data-arabya-build")
+    || document.querySelector('meta[name="arabya-app-version"]')?.content
+    || "";
+  return pickLatestAppVersion(
+    ARABYA_APP_BUILD_VERSION,
+    window.ARABYA_APP_BUILD_VERSION,
+    fromHtml
+  ) || ARABYA_APP_BUILD_VERSION;
 }
 
 function getPlatformAppVersion() {
@@ -355,7 +358,7 @@ function updateTeacherAppVersionLabel() {
     }
   }
   const runningBuild = getRunningAppBuildVersion();
-  const platformVersion = resolvePlatformAppVersionDisplay();
+  const platformVersion = pickLatestAppVersion(runningBuild, resolvePlatformAppVersionDisplay());
   const label = compareAppVersionStrings(platformVersion, runningBuild) > 0
     ? `إصدار التطبيق: ${platformVersion} (بناء ${runningBuild})`
     : `إصدار التطبيق: ${runningBuild}`;
@@ -363,6 +366,9 @@ function updateTeacherAppVersionLabel() {
   try {
     document.documentElement.setAttribute("data-arabya-build", runningBuild);
   } catch (e) {}
+  if (typeof window.enforceArabyaBuildVersion === "function") {
+    window.enforceArabyaBuildVersion();
+  }
 }
 
 function updateTeacherDashboardAccessUI() {
