@@ -31,8 +31,8 @@ node scripts/run-cloud-backup.js
 
 ## إضافة وحدة JS جديدة
 
-1. أنشئ الملف في `js/`.
-2. صدّر الدوال على `window` (أو `window.ArabyaX`) للتوافق مع `app.js`.
+1. أنشئ الملف في `js/` أو حدّث `scripts/extract-app-modules.py` ثم شغّله.
+2. صدّر الدوال على `window` للتوافق مع `app.js`.
 3. أضف `<script>` في `index.html` **قبل** `app.js`.
 4. حدّث `js/README.md`.
 5. شغّل `npm run verify`.
