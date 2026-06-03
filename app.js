@@ -765,6 +765,7 @@ let systemState = {
   isExamActive: false,
   isCheatingSuspended: false,
   cheatViolations: 0,
+  examDeadlineTimerId: null,
   
   // إعدادات التكامل مع جوجل شيت
   config: {
@@ -897,7 +898,8 @@ document.addEventListener("DOMContentLoaded", () => {
               renderRunnerQuestion();
               showMobileExamHintIfNeeded();
               const resumeQuestion = systemState.shuffledQuestions[systemState.currentQuestionIndex];
-              startRunnerTimerWithTime(session.timeRemaining || getQuestionTimeSeconds(resumeQuestion, matchedExam));
+              startRunnerTimerWithTime(session.timeRemaining || getEffectiveQuestionTimeSeconds(resumeQuestion, matchedExam));
+              startExamDeadlineWatcher();
               return;
             }
           }
@@ -2449,6 +2451,94 @@ function getExamDeadlineBlockMessage(exam) {
     ? exam.endsAt
     : end.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" });
   return `انتهى موعد هذا الامتحان في ${when}. لا يمكن الدخول أو أداء الأسئلة. يمكن للمعلم تمديد الموعد من إعدادات الامتحان.`;
+}
+
+function syncCurrentExamDeadlineFromCatalog() {
+  if (!systemState.currentExam?.id) return;
+  const fresh = (systemState.exams || []).find(e => e.id === systemState.currentExam.id);
+  if (fresh && fresh.endsAt !== undefined) {
+    systemState.currentExam.endsAt = fresh.endsAt;
+  }
+}
+
+function getMsUntilExamDeadline(exam) {
+  const target = exam || systemState.currentExam;
+  if (!target?.endsAt) return null;
+  const end = new Date(target.endsAt);
+  if (Number.isNaN(end.getTime())) return null;
+  return end.getTime() - Date.now();
+}
+
+function isCurrentExamPastDeadline() {
+  syncCurrentExamDeadlineFromCatalog();
+  return isExamPastDeadline(systemState.currentExam);
+}
+
+function stopExamDeadlineWatcher() {
+  if (systemState.examDeadlineTimerId) {
+    clearInterval(systemState.examDeadlineTimerId);
+    systemState.examDeadlineTimerId = null;
+  }
+}
+
+function markUnansweredQuestionsForExamDeadline() {
+  const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
+  if (currentQ && systemState.studentAnswers[currentQ.id] === undefined) {
+    if (currentQ.type === "essay") {
+      systemState.studentAnswers[currentQ.id] = "(لم يتم كتابة إجابة - انتهى موعد الامتحان)";
+    } else {
+      systemState.studentAnswers[currentQ.id] = -1;
+    }
+  }
+  systemState.shuffledQuestions.forEach((q, idx) => {
+    if (idx <= systemState.currentQuestionIndex) return;
+    if (systemState.studentAnswers[q.id] !== undefined) return;
+    if (q.type === "essay") {
+      systemState.studentAnswers[q.id] = "(لم يتم كتابة إجابة - انتهى موعد الامتحان)";
+    } else {
+      systemState.studentAnswers[q.id] = -1;
+    }
+  });
+}
+
+function forceSubmitExamBecauseDeadline() {
+  if (!systemState.isExamActive) return;
+  stopExamDeadlineWatcher();
+  if (systemState.timer.intervalId) {
+    clearInterval(systemState.timer.intervalId);
+    systemState.timer.intervalId = null;
+  }
+  markUnansweredQuestionsForExamDeadline();
+  saveActiveStudentSession();
+  const message = getExamDeadlineBlockMessage(systemState.currentExam) ||
+    "انتهى موعد هذا الامتحان. تم تسليم إجاباتك تلقائياً.";
+  announceExamAccessibility("انتهى موعد الامتحان المحدد. جاري تسليم إجاباتك تلقائياً.");
+  alert(message);
+  submitFinishedExam();
+}
+
+function checkExamDeadlineDuringSession() {
+  if (!systemState.isExamActive || systemState.isCheatingSuspended) return false;
+  if (!isCurrentExamPastDeadline()) return false;
+  forceSubmitExamBecauseDeadline();
+  return true;
+}
+
+function startExamDeadlineWatcher() {
+  stopExamDeadlineWatcher();
+  syncCurrentExamDeadlineFromCatalog();
+  if (!systemState.currentExam?.endsAt) return;
+  checkExamDeadlineDuringSession();
+  if (!systemState.isExamActive) return;
+  systemState.examDeadlineTimerId = setInterval(checkExamDeadlineDuringSession, 1000);
+}
+
+function getEffectiveQuestionTimeSeconds(question, exam) {
+  const baseSeconds = getQuestionTimeSeconds(question, exam);
+  const msLeft = getMsUntilExamDeadline(exam);
+  if (msLeft === null) return baseSeconds;
+  if (msLeft <= 0) return 0;
+  return Math.min(baseSeconds, Math.max(1, Math.ceil(msLeft / 1000)));
 }
 
 function getQuestionTimeSeconds(question, exam) {
@@ -7418,6 +7508,7 @@ async function validateStudentAndStart() {
   navigateToView("exam-runner-view");
   renderRunnerQuestion();
   startRunnerTimer();
+  startExamDeadlineWatcher();
   requestSecureExamMode();
   showExamSecurityNotice();
 }
@@ -7555,7 +7646,7 @@ function renderRunnerQuestion() {
     nextBtn.setAttribute("aria-label", "الانتقال للسؤال التالي");
   }
 
-  systemState.timer.timeLimit = getQuestionTimeSeconds(question, exam);
+  systemState.timer.timeLimit = getEffectiveQuestionTimeSeconds(question, exam);
 }
 
 function selectRunnerOption(index) {
@@ -7578,11 +7669,28 @@ function selectRunnerOption(index) {
 }
 
 function startRunnerTimer() {
-  startRunnerTimerWithTime(systemState.timer.timeLimit);
+  const question = systemState.shuffledQuestions[systemState.currentQuestionIndex];
+  startRunnerTimerWithTime(getEffectiveQuestionTimeSeconds(question, systemState.currentExam));
 }
 
 function startRunnerTimerWithTime(seconds) {
-  systemState.timer.timeRemaining = seconds;
+  if (checkExamDeadlineDuringSession()) return;
+  const msLeft = getMsUntilExamDeadline();
+  let effectiveSeconds = Number(seconds) || 0;
+  if (msLeft !== null) {
+    if (msLeft <= 0) {
+      checkExamDeadlineDuringSession();
+      return;
+    }
+    effectiveSeconds = Math.min(effectiveSeconds, Math.max(1, Math.ceil(msLeft / 1000)));
+  }
+  if (effectiveSeconds <= 0) {
+    checkExamDeadlineDuringSession();
+    return;
+  }
+
+  systemState.timer.timeLimit = effectiveSeconds;
+  systemState.timer.timeRemaining = effectiveSeconds;
   updateRunnerTimerUI();
 
   if (systemState.timer.intervalId) {
@@ -7596,6 +7704,7 @@ function startRunnerTimerWithTime(seconds) {
   if (container) container.classList.remove("timer-warning");
 
   systemState.timer.intervalId = setInterval(() => {
+    if (checkExamDeadlineDuringSession()) return;
     systemState.timer.timeRemaining--;
     updateRunnerTimerUI();
     saveActiveStudentSession(); // حفظ التقدم مع التوقيت المتبقي
@@ -7606,6 +7715,7 @@ function startRunnerTimerWithTime(seconds) {
 
     if (systemState.timer.timeRemaining <= 0) {
       clearInterval(systemState.timer.intervalId);
+      systemState.timer.intervalId = null;
       const currentQ = systemState.shuffledQuestions[systemState.currentQuestionIndex];
       if (systemState.studentAnswers[currentQ.id] === undefined) {
         if (currentQ.type === "essay") {
@@ -7677,6 +7787,7 @@ function runnerNextQuestion(isAuto = false) {
 // حساب وتوثيق النتيجة مع هيكل الدرجات النسبية المطور
 function submitFinishedExam() {
   systemState.isExamActive = false;
+  stopExamDeadlineWatcher();
   releaseSecureExamMode();
   if (systemState.timer.intervalId) {
     clearInterval(systemState.timer.intervalId);
@@ -10507,6 +10618,7 @@ function triggerRunnerCheatPenalty(reason) {
   }
 }
 function submitCheatedExam() {
+  stopExamDeadlineWatcher();
   // تنظيف الجلسة الحية وحذف السجل غير المكتمل
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === systemState.currentExam.id && r.status === "incomplete"));
