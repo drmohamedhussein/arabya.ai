@@ -25,10 +25,21 @@ function getEffectiveQuestionTimeSeconds(questionSeconds, exam, nowMs) {
   return Math.min(baseSeconds, Math.max(1, Math.ceil(msLeft / 1000)));
 }
 
+function shouldForceSubmitForDeadline(state, exam, nowMs) {
+  if (!state.isExamActive) return false;
+  return isExamPastDeadline(exam, nowMs);
+}
+
 const now = Date.parse("2026-06-02T12:00:00.000Z");
 const exam = { endsAt: "2026-06-02T12:00:01.000Z" };
 assert.strictEqual(isExamPastDeadline(exam, now), false);
 assert.strictEqual(isExamPastDeadline(exam, now + 2000), true);
 assert.strictEqual(getEffectiveQuestionTimeSeconds(60, exam, now), 1);
+assert.strictEqual(
+  shouldForceSubmitForDeadline({ isExamActive: true, isCheatingSuspended: true }, exam, now + 2000),
+  true,
+  "deadline must still force-submit while an anti-cheat suspension overlay is active"
+);
+assert.strictEqual(shouldForceSubmitForDeadline({ isExamActive: false, isCheatingSuspended: true }, exam, now + 2000), false);
 
 console.log("Exam deadline tests passed.");

@@ -764,6 +764,7 @@ let systemState = {
   
   isExamActive: false,
   isCheatingSuspended: false,
+  cheatPenaltyTimeoutId: null,
   cheatViolations: 0,
   examDeadlineTimerId: null,
   
@@ -2504,6 +2505,7 @@ function markUnansweredQuestionsForExamDeadline() {
 function forceSubmitExamBecauseDeadline() {
   if (!systemState.isExamActive) return;
   stopExamDeadlineWatcher();
+  clearRunnerCheatPenaltyState();
   if (systemState.timer.intervalId) {
     clearInterval(systemState.timer.intervalId);
     systemState.timer.intervalId = null;
@@ -2518,7 +2520,7 @@ function forceSubmitExamBecauseDeadline() {
 }
 
 function checkExamDeadlineDuringSession() {
-  if (!systemState.isExamActive || systemState.isCheatingSuspended) return false;
+  if (!systemState.isExamActive) return false;
   if (!isCurrentExamPastDeadline()) return false;
   forceSubmitExamBecauseDeadline();
   return true;
@@ -3946,6 +3948,22 @@ async function postToArabyaWebAppNoCors(url, payload) {
   }
 }
 
+async function postToArabyaWebAppNoCorsVerified(url, payload, revisionBefore) {
+  const sent = await postToArabyaWebAppNoCors(url, payload);
+  if (!sent) {
+    return { ok: false, error: "تعذّر إرسال الطلب إلى السحابة." };
+  }
+  await delayMs(1500);
+  const revisionAfter = await fetchCloudRevisionForUrl(url);
+  if (revisionAfter && revisionAfter !== revisionBefore) {
+    return { ok: true, response: { status: "success", cloudRevision: revisionAfter }, mode: "no-cors-verified" };
+  }
+  return {
+    ok: false,
+    error: "تعذّر تأكيد حفظ البيانات في السحابة. تحقق من رابط Web App وصلاحيات النشر."
+  };
+}
+
 function delayMs(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -3973,9 +3991,6 @@ function slimCloudBackupDataForSize(data) {
   if (Array.isArray(slim.results)) {
     slim.results = slim.results.map(res => {
       const copy = { ...res };
-      if (copy.details && String(copy.details).length > 1500) {
-        copy.details = String(copy.details).slice(0, 1500);
-      }
       if (Array.isArray(copy.presentedQuestions) && copy.presentedQuestions.length) {
         copy.presentedQuestions = compactPresentedQuestionsForCloud(copy.presentedQuestions);
       }
@@ -4017,19 +4032,8 @@ async function postSaveBackupToCloudUrl(url, payload) {
     return { ok: true, response, mode: "cors" };
   } catch (corsErr) {
     const message = corsErr && corsErr.message ? corsErr.message : String(corsErr);
-    const sent = await postToArabyaWebAppNoCors(url, payload);
-    if (!sent) {
-      return { ok: false, error: message };
-    }
-    await delayMs(1500);
-    const revisionAfter = await fetchCloudRevisionForUrl(url);
-    if (revisionAfter && revisionAfter !== revisionBefore) {
-      return { ok: true, response: { status: "success", cloudRevision: revisionAfter }, mode: "no-cors-verified" };
-    }
-    if (navigator.onLine) {
-      return { ok: true, response: { status: "success", cloudRevision: revisionAfter || revisionBefore }, mode: "no-cors-optimistic" };
-    }
-    return { ok: false, error: message || "تعذّر الاتصال بالسحابة" };
+    const verified = await postToArabyaWebAppNoCorsVerified(url, payload, revisionBefore);
+    return verified.ok ? verified : { ok: false, error: verified.error || message || "تعذّر الاتصال بالسحابة" };
   }
 }
 
@@ -7988,7 +7992,9 @@ async function postAddResultToCloudUrls(urlList, slimPayload) {
     } catch (err) {
       console.warn("[ARABYA] add_result failed, retry no-cors:", url, err);
       try {
-        return await postToArabyaWebAppNoCors(url, slimPayload);
+        const revisionBefore = await fetchCloudRevisionForUrl(url);
+        const verified = await postToArabyaWebAppNoCorsVerified(url, slimPayload, revisionBefore);
+        return verified.ok;
       } catch (e2) {
         return false;
       }
@@ -10599,7 +10605,9 @@ function triggerRunnerCheatPenalty(reason) {
       }
     });
 
-    setTimeout(() => {
+    systemState.cheatPenaltyTimeoutId = setTimeout(() => {
+      systemState.cheatPenaltyTimeoutId = null;
+      if (!systemState.isExamActive) return;
       overlay.classList.add("hidden");
       mainWrapper.classList.remove("blurred-content");
       systemState.isCheatingSuspended = false;
@@ -10609,7 +10617,9 @@ function triggerRunnerCheatPenalty(reason) {
   } else {
     msg.innerHTML = getCheatPenaltyMessage(reason, false);
 
-    setTimeout(() => {
+    systemState.cheatPenaltyTimeoutId = setTimeout(() => {
+      systemState.cheatPenaltyTimeoutId = null;
+      if (!systemState.isExamActive) return;
       overlay.classList.add("hidden");
       mainWrapper.classList.remove("blurred-content");
       systemState.isCheatingSuspended = false;
@@ -10617,6 +10627,17 @@ function triggerRunnerCheatPenalty(reason) {
     }, 4000);
   }
 }
+
+function clearRunnerCheatPenaltyState() {
+  if (systemState.cheatPenaltyTimeoutId) {
+    clearTimeout(systemState.cheatPenaltyTimeoutId);
+    systemState.cheatPenaltyTimeoutId = null;
+  }
+  systemState.isCheatingSuspended = false;
+  document.getElementById("runner-cheat-overlay")?.classList.add("hidden");
+  document.getElementById("app-main-wrapper")?.classList.remove("blurred-content");
+}
+
 function submitCheatedExam() {
   stopExamDeadlineWatcher();
   // تنظيف الجلسة الحية وحذف السجل غير المكتمل
