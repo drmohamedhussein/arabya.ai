@@ -1,0 +1,11 @@
+{
+  "name": "arabya.net",
+  "private": true,
+  "description": "ARABYA.NET — Arabic exam platform (static GitHub Pages)",
+  "scripts": {
+    "check": "node --check app.js && node --check questions.js && node --check js/arabya-utils.js && node --check js/arabya-students.js && node --check js/arabya-exam-config.js && node --check js/arabya-cloud-api.js && node --check js/arabya-exam-device.js && node --check js/arabya-exam-anticheat.js && node --check js/arabya-exam-runner.js",
+    "test": "node --test tests/*.test.js",
+    "verify": "npm run check && npm run test",
+    "backup:cloud": "node scripts/run-cloud-backup.js"
+  }
+}

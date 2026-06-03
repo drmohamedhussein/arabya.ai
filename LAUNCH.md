@@ -7,6 +7,12 @@ node --check app.js
 node --test tests/*.test.js
 ```
 
+أو:
+
+```bash
+npm run verify
+```
+
 ## قبل الإطلاق (المعلم)
 
 1. غيّر كلمة مرور المعلم الافتراضية `TEACHER2026` فور أول دخول.
