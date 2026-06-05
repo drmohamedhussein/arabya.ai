@@ -5533,6 +5533,9 @@ function closeMobileSiteNav() {
 }
 
 function navigateToView(viewId) {
+  if (viewId === "student-profile-view") {
+    viewId = "student-profile-after-exam";
+  }
   document.querySelectorAll(".view-section").forEach(v => {
     v.classList.add("hidden");
   });

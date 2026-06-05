@@ -203,37 +203,7 @@ if (typeof window !== 'undefined') {
 if (typeof window !== 'undefined') {
   document.addEventListener("DOMContentLoaded", function() {
     setTimeout(function() {
-      var nav = document.querySelector(".nav-links");
-      if (nav && !document.querySelector("[data-target='student-profile-view']")) {
-        var li = document.createElement("li");
-        li.setAttribute("role", "none");
-        li.innerHTML = '<a href="#" data-target="student-profile-view" role="menuitem">ملف الطالب</a>';
-        var resultLink = nav.querySelector("[data-target='result-search-view']");
-        if (resultLink && resultLink.parentElement) nav.insertBefore(li, resultLink.parentElement);
-        else nav.appendChild(li);
-        li.querySelector("a").addEventListener("click", function(e) {
-          e.preventDefault();
-          if (window.navigateToView) window.navigateToView("student-profile-view");
-          renderArabyaStudentProfile();
-        });
-      }
-
-      var studentLogin = document.getElementById("student-login-view");
-      if (studentLogin && !document.getElementById("student-profile-login-btn")) {
-        var startBtn = document.getElementById("student-start-exam-btn");
-        var profileBtn = document.createElement("button");
-        profileBtn.id = "student-profile-login-btn";
-        profileBtn.className = "btn btn-outline";
-        profileBtn.style.cssText = "width:100%; margin-top:0.75rem; border-color:var(--secondary); color:var(--secondary);";
-        profileBtn.innerHTML = 'دخول ملفي الأكاديمي بكود الاشتراك <span class="material-icons" aria-hidden="true">account_circle</span>';
-        profileBtn.addEventListener("click", function() {
-          var code = (document.getElementById("student-access-code") || {}).value || "";
-          showArabyaStudentProfile(code.trim());
-        });
-        if (startBtn && startBtn.parentNode) startBtn.parentNode.insertBefore(profileBtn, startBtn.nextSibling);
-      }
-
-      ensureArabyaStudentProfileView();
+      removeLegacyArabyaStudentProfileUi();
       enhanceArabyaTeacherDashboard();
       ensureArabyaDefaultExamsSeeded();
       patchArabyaDirectLinks();
@@ -332,20 +302,19 @@ function validateArabyaStudentIdentity(id, code, options) {
   return { ok: true };
 }
 
-function enforceArabyaUniqueStudentCodes() {
-  var resultsPanel = document.getElementById("student-profile-results");
-  if (resultsPanel) {
-    var panelHeader = resultsPanel.previousElementSibling;
-    var title = panelHeader ? panelHeader.querySelector(".panel-title") : null;
-    var hint = panelHeader ? panelHeader.querySelector("div[style*='font-size']") : null;
-    if (title) title.textContent = "نتائج الامتحانات";
-    if (hint) hint.textContent = "درجاتك محفوظة للعرض فقط ولا يمكن تعديلها من حساب الطالب";
-  }
+function removeLegacyArabyaStudentProfileUi() {
+  var legacyView = document.getElementById("student-profile-view");
+  if (legacyView) legacyView.remove();
+  var legacyNav = document.querySelector(".nav-links [data-target='student-profile-view']");
+  if (legacyNav && legacyNav.parentElement) legacyNav.parentElement.remove();
+  var legacyLoginBtn = document.getElementById("student-profile-login-btn");
+  if (legacyLoginBtn) legacyLoginBtn.remove();
+}
 
+function enforceArabyaUniqueStudentCodes() {
   document.addEventListener("click", function(event) {
     var startBtn = event.target.closest && event.target.closest("#student-start-exam-btn");
     var registerBtn = event.target.closest && event.target.closest("#student-register-submit-btn");
-    var profileBtn = event.target.closest && event.target.closest("#student-profile-submit-btn, #student-profile-login-btn");
     var teacherSaveBtn = event.target.closest && event.target.closest("button[onclick='saveNewStudentByTeacher()']");
     var validation = null;
 
@@ -363,11 +332,6 @@ function enforceArabyaUniqueStudentCodes() {
         (document.getElementById("student-reg-id") || {}).value,
         (document.getElementById("student-reg-code") || {}).value
       );
-    } else if (profileBtn) {
-      var profileCode = ((document.getElementById("student-profile-code-input") || {}).value || (document.getElementById("student-access-code") || {}).value || "").trim();
-      var matches = arabyaFindStudentsByCode(profileCode);
-      if (!profileCode) validation = { ok: false, message: "اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي." };
-      else if (matches.length > 1) validation = { ok: false, message: "هذا الكود مكرر ولا يمكن استخدامه للدخول حتى يتم تصحيح قاعدة الطلاب بواسطة المعلم." };
     } else if (teacherSaveBtn) {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("new-student-id") || {}).value,
@@ -549,141 +513,6 @@ function arabyaEscape(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
-}
-
-function ensureArabyaStudentProfileView() {
-  if (document.getElementById("student-profile-view")) return;
-  var main = document.getElementById("app-main-wrapper");
-  if (!main) return;
-  var section = document.createElement("section");
-  section.id = "student-profile-view";
-  section.className = "view-section hidden";
-  section.setAttribute("aria-label", "الملف الأكاديمي للطالب");
-  section.innerHTML = [
-    '<div class="card" style="max-width:980px;">',
-    '<div class="card-header">',
-    '<img src="logo.jpg" alt="Logo" class="logo-img-tag" style="margin:0 auto 1rem; width:60px; height:60px;">',
-    '<h2 class="card-title">الملف الأكاديمي للطالب</h2>',
-    '<p class="subtitle">ادخل بكود الاشتراك لعرض بياناتك وامتحاناتك ونتائجك</p>',
-    '</div>',
-    '<div id="student-profile-login-panel">',
-    '<div class="form-group"><label class="form-label" for="student-profile-code-input">كود الاشتراك</label>',
-    '<div class="input-wrapper"><input type="text" id="student-profile-code-input" class="form-control" placeholder="اكتب كود الاشتراك الخاص بك..." autocomplete="off"><span class="material-icons input-icon" aria-hidden="true">vpn_key</span></div></div>',
-    '<button id="student-profile-submit-btn" class="btn btn-primary" style="width:100%;">دخول الملف الأكاديمي <span class="material-icons" aria-hidden="true">login</span></button>',
-    '</div>',
-    '<div id="student-profile-content" class="hidden">',
-    '<div id="student-profile-summary" class="profile-summary-grid" aria-live="polite"></div>',
-    '<div class="panel-header" style="margin-top:2rem;"><div><div class="panel-title">الامتحانات المتاحة</div><div style="font-size:0.85rem; color:var(--text-muted);">يمكنك بدء أي امتحان من هنا</div></div></div>',
-    '<div id="student-profile-exams" class="exams-list-container"></div>',
-    '<div class="panel-header" style="margin-top:2rem;"><div><div class="panel-title">نتائج الامتحانات</div><div style="font-size:0.85rem; color:var(--text-muted);">درجاتك محفوظة للعرض فقط ولا يمكن تعديلها من حساب الطالب</div></div></div>',
-    '<div id="student-profile-results" class="result-query-list"></div>',
-    '</div></div>'
-  ].join("");
-  var runner = document.getElementById("exam-runner-view");
-  if (runner) main.insertBefore(section, runner);
-  else main.appendChild(section);
-
-  var submit = document.getElementById("student-profile-submit-btn");
-  if (submit) {
-    submit.addEventListener("click", function() {
-      var code = (document.getElementById("student-profile-code-input") || {}).value || "";
-      showArabyaStudentProfile(code.trim());
-    });
-  }
-}
-
-function showArabyaStudentProfile(code) {
-  ensureArabyaStudentProfileView();
-  if (!code) {
-    if (window.navigateToView) window.navigateToView("student-profile-view");
-    var input = document.getElementById("student-profile-code-input");
-    if (input) input.focus();
-    alert("اكتب كود الاشتراك أولاً للدخول إلى ملفك الأكاديمي.");
-    return;
-  }
-  var student = arabyaGetStudents().find(function(s) {
-    return String(s.code || "").toLowerCase() === code.toLowerCase();
-  });
-  if (!student) {
-    if (window.navigateToView) window.navigateToView("student-profile-view");
-    alert("لم يتم العثور على طالب بهذا الكود. تأكد من الكود أو تواصل مع المعلم.");
-    return;
-  }
-  localStorage.setItem("arabya_active_student_code", student.code);
-  if (window.navigateToView) window.navigateToView("student-profile-view");
-  renderArabyaStudentProfile(student);
-}
-
-function renderArabyaStudentProfile(student) {
-  ensureArabyaStudentProfileView();
-  if (!student) {
-    var savedCode = localStorage.getItem("arabya_active_student_code") || "";
-    student = arabyaGetStudents().find(function(s) { return s.code === savedCode; });
-  }
-  var loginPanel = document.getElementById("student-profile-login-panel");
-  var content = document.getElementById("student-profile-content");
-  if (!student) {
-    if (loginPanel) loginPanel.classList.remove("hidden");
-    if (content) content.classList.add("hidden");
-    return;
-  }
-  if (loginPanel) loginPanel.classList.add("hidden");
-  if (content) content.classList.remove("hidden");
-
-  var results = arabyaGetResults().filter(function(r) {
-    return r.id === student.id || String(r.accessCode || "").toLowerCase() === String(student.code || "").toLowerCase();
-  });
-  var exams = arabyaGetExams();
-  var summary = document.getElementById("student-profile-summary");
-  if (summary) {
-    summary.innerHTML =
-      '<div class="profile-stat-card"><div class="profile-stat-label">اسم الطالب</div><div class="profile-stat-value">' + arabyaEscape(student.name) + '</div></div>' +
-      '<div class="profile-stat-card"><div class="profile-stat-label">رقم ID</div><div class="profile-stat-value">' + arabyaEscape(student.id) + '</div></div>' +
-      '<div class="profile-stat-card"><div class="profile-stat-label">كود الاشتراك</div><div class="profile-stat-value">' + arabyaEscape(student.code) + '</div></div>' +
-      '<div class="profile-stat-card"><div class="profile-stat-label">تاريخ التسجيل</div><div class="profile-stat-value">' + arabyaEscape(student.timestamp || "غير محدد") + '</div></div>' +
-      '<div class="profile-stat-card"><div class="profile-stat-label">عدد النتائج</div><div class="profile-stat-value">' + results.length + '</div></div>';
-  }
-
-  var examsBox = document.getElementById("student-profile-exams");
-  if (examsBox) {
-    examsBox.innerHTML = "";
-    if (!exams.length) {
-      examsBox.innerHTML = '<div style="grid-column:1/-1; color:var(--text-muted); text-align:center; padding:1.5rem;">لا توجد امتحانات متاحة حالياً.</div>';
-    } else {
-      exams.forEach(function(exam) {
-        var card = document.createElement("div");
-        card.className = "exam-info-card";
-        card.innerHTML = '<div><div class="exam-info-title">' + arabyaEscape(exam.title) + '</div><div class="exam-info-details"><span>' + arabyaEscape(exam.subject || "مادة غير محددة") + ' | ' + arabyaEscape(exam.level || "عام") + '</span><span>' + arabyaEscape(exam.examType || "اختبار") + ' | ' + ((exam.questions || []).length) + ' سؤال</span></div></div><button class="btn btn-primary btn-sm">بدء الامتحان</button>';
-        card.querySelector("button").addEventListener("click", function() {
-          document.getElementById("student-fullname-input").value = student.name || "";
-          document.getElementById("student-id-input").value = student.id || "";
-          document.getElementById("student-access-code").value = student.code || "";
-          if (window.navigateToView) window.navigateToView("student-login-view");
-          var select = document.getElementById("student-exam-select");
-          if (select) select.value = exam.id;
-        });
-        examsBox.appendChild(card);
-      });
-    }
-  }
-
-  var resultsBox = document.getElementById("student-profile-results");
-  if (resultsBox) {
-    resultsBox.innerHTML = "";
-    if (!results.length) {
-      resultsBox.innerHTML = '<div style="text-align:center; padding:1.5rem; color:var(--text-muted);">لا توجد نتائج محفوظة بعد.</div>';
-    } else {
-      results.slice().reverse().forEach(function(res) {
-        var card = document.createElement("div");
-        card.className = "result-query-card";
-        card.innerHTML = '<div><div class="result-query-title">' + arabyaEscape(res.examTitle) + ' (' + arabyaEscape(res.examType || "اختبار") + ')</div><div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">' + arabyaEscape(res.timestamp || "") + '</div></div><div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;"><span style="font-size:1.05rem; font-weight:800; color:var(--secondary);">' + arabyaEscape(res.score) + '</span><button class="btn btn-outline btn-sm">عرض</button></div>';
-        card.querySelector("button").addEventListener("click", function() {
-          alert("تفاصيل اختبارك [" + (res.examTitle || "") + "]:\n\n" + (res.details || "لا توجد تفاصيل محفوظة."));
-        });
-        resultsBox.appendChild(card);
-      });
-    }
-  }
 }
 
 function enhanceArabyaTeacherDashboard() {
