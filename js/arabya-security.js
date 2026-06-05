@@ -19,24 +19,52 @@
     return sha256Hex(`arabya.v1|${salt}|${password}`);
   }
 
-  async function ensureTeacherPasswordHashed(teacher, plainCredential) {
-    if (!teacher || !plainCredential) return teacher;
-    if (teacher.passwordHash && teacher.passwordSalt) return teacher;
-    const salt = generateSalt();
-    teacher.passwordSalt = salt;
-    teacher.passwordHash = await hashTeacherPassword(String(plainCredential).trim(), salt);
+  function stripTeacherPlainPassword(teacher) {
+    if (!teacher) return teacher;
+    if (teacher.passwordHash && teacher.passwordSalt) {
+      delete teacher.password;
+    }
     return teacher;
   }
 
-  async function teacherCredentialMatches(teacher, credential) {
+  function sanitizeTeacherForLocalStorage(teacher) {
+    if (!teacher) return teacher;
+    const copy = { ...teacher };
+    stripTeacherPlainPassword(copy);
+    return copy;
+  }
+
+  async function ensureTeacherPasswordHashed(teacher, plainCredential) {
+    if (!teacher || !plainCredential) return teacher;
+    if (teacher.passwordHash && teacher.passwordSalt) {
+      return stripTeacherPlainPassword(teacher);
+    }
+    const salt = generateSalt();
+    teacher.passwordSalt = salt;
+    teacher.passwordHash = await hashTeacherPassword(String(plainCredential).trim(), salt);
+    return stripTeacherPlainPassword(teacher);
+  }
+
+  async function teacherPasswordMatches(teacher, credential) {
     if (!teacher || credential === undefined || credential === null) return false;
     const val = String(credential).trim();
     if (!val) return false;
     if (teacher.passwordHash && teacher.passwordSalt) {
       const hashed = await hashTeacherPassword(val, teacher.passwordSalt);
-      if (hashed === teacher.passwordHash) return true;
+      return hashed === teacher.passwordHash;
     }
-    return teacher.password === val || teacher.autoEntryCode === val;
+    return String(teacher.password || "").trim() === val;
+  }
+
+  async function teacherAutoEntryCodeMatches(teacher, credential) {
+    if (!teacher || credential === undefined || credential === null) return false;
+    const val = String(credential).trim();
+    if (!val) return false;
+    return String(teacher.autoEntryCode || "").trim() === val;
+  }
+
+  async function teacherCredentialMatches(teacher, credential) {
+    return teacherPasswordMatches(teacher, credential) || teacherAutoEntryCodeMatches(teacher, credential);
   }
 
   function touchTeacherActivity() {
@@ -70,16 +98,38 @@
     if (!teacher) return teacher;
     const copy = { ...teacher };
     delete copy.password;
+    delete copy.passwordHash;
+    delete copy.passwordSalt;
+    delete copy.loginTokens;
+    return copy;
+  }
+
+  function sanitizeTeacherForCloud(teacher) {
+    if (!teacher) return teacher;
+    const copy = JSON.parse(JSON.stringify(teacher));
+    delete copy.password;
+    delete copy.passwordHash;
+    delete copy.passwordSalt;
+    delete copy.autoEntryCode;
+    delete copy.loginTokens;
+    if (copy.integrationConfig && copy.integrationConfig.teacherCode) {
+      delete copy.integrationConfig.teacherCode;
+    }
     return copy;
   }
 
   global.ArabyaSecurity = {
     hashTeacherPassword,
     ensureTeacherPasswordHashed,
+    stripTeacherPlainPassword,
+    sanitizeTeacherForLocalStorage,
+    teacherPasswordMatches,
+    teacherAutoEntryCodeMatches,
     teacherCredentialMatches,
     touchTeacherActivity,
     setupTeacherIdleSessionGuard,
     sanitizeTeacherForExport,
+    sanitizeTeacherForCloud,
     IDLE_MS
   };
 })(window);

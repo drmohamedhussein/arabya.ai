@@ -257,9 +257,17 @@ function arabyaGetExams() {
 }
 
 function normalizeArabyaStudentCode(code) {
-  var digits = String(code || "").replace(/\D/g, "").slice(0, 5);
-  if (digits && /^0+$/.test(digits)) return "00000";
-  return digits;
+  if (typeof window.sanitizeStudentCodeInput === "function") {
+    return window.sanitizeStudentCodeInput(code);
+  }
+  var raw = String(code || "").trim();
+  if (!raw) return "";
+  var compact = raw.replace(/\s+/g, "");
+  var digitsOnly = compact.replace(/\D/g, "");
+  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) {
+    return "00000";
+  }
+  return compact;
 }
 
 function arabyaFindStudentsByCode(code) {
@@ -268,12 +276,6 @@ function arabyaFindStudentsByCode(code) {
   return arabyaGetStudents().filter(function(student) {
     return normalizeArabyaStudentCode(student.code) === normalized;
   });
-}
-
-function normalizeArabyaStudentCode(code) {
-  var digits = String(code || "").replace(/\D/g, "").slice(0, 5);
-  if (digits && /^0+$/.test(digits)) return "00000";
-  return digits;
 }
 
 function validateArabyaStudentIdentity(id, code, currentId) {

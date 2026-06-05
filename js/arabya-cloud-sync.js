@@ -84,9 +84,16 @@
   }
 
   function sanitizeTeacherForCloud(teacher) {
+    if (global.ArabyaSecurity && typeof global.ArabyaSecurity.sanitizeTeacherForCloud === "function") {
+      return global.ArabyaSecurity.sanitizeTeacherForCloud(teacher);
+    }
     if (!teacher) return teacher;
     const copy = JSON.parse(JSON.stringify(teacher));
     delete copy.password;
+    delete copy.passwordHash;
+    delete copy.passwordSalt;
+    delete copy.autoEntryCode;
+    delete copy.loginTokens;
     if (copy.integrationConfig && copy.integrationConfig.teacherCode) {
       delete copy.integrationConfig.teacherCode;
     }

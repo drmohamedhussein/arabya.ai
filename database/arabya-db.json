@@ -1,16 +1,15 @@
 {
-  "schemaVersion": 1,
-  "updatedAt": "2026-06-03T00:36:37.357Z",
+  "schemaVersion": 2,
+  "updatedAt": "2026-06-05T12:00:00.000Z",
   "source": "arabya.net",
   "teachers": [
     {
       "name": "د. محمد حسين محمد",
       "username": "معلم اللغة العربية",
       "subject": "النحو والصرف",
-      "password": "TEACHER2026",
-      "autoEntryCode": "TEACHER2026",
+      "role": "teacher",
       "integrationConfig": {
-        "googleFormUrl": "https://script.google.com/macros/s/AKfycbys8gg5jrscGI4C7AJjg7Zl4p7U06dR2lxQIs1-CJjTLo_ZTQqzxeyPKykS_ZdhSqn1/exec",
+        "googleFormUrl": "",
         "entryName": "",
         "entryId": "",
         "entryCode": "",
@@ -164,7 +163,7 @@
       ],
       "teacher": "معلم اللغة العربية",
       "timeLimit": 20,
-      "googleFormUrl": "https://script.google.com/macros/s/AKfycbys8gg5jrscGI4C7AJjg7Zl4p7U06dR2lxQIs1-CJjTLo_ZTQqzxeyPKykS_ZdhSqn1/exec",
+      "googleFormUrl": "",
       "entryName": "",
       "entryId": "",
       "entryCode": "",
@@ -335,51 +334,6 @@
     }
   ],
   "results": [
-    {
-      "recordId": "test-agent-001",
-      "timestamp": "2026-05-29T23:36:05.779Z",
-      "name": "test",
-      "id": "",
-      "accessCode": "",
-      "examTitle": "",
-      "examId": "",
-      "university": "",
-      "faculty": "",
-      "level": "",
-      "examType": "",
-      "score": "",
-      "details": ""
-    },
-    {
-      "recordId": "agent-test-002",
-      "timestamp": "2026-05-29T23:40:00Z",
-      "name": "اختبار وكيل",
-      "id": "888",
-      "accessCode": "TEST",
-      "examTitle": "امتحان تجريبي",
-      "examId": "exam-test",
-      "university": "جامعة",
-      "faculty": "كلية",
-      "level": "1",
-      "examType": "mcq",
-      "score": "5/10",
-      "details": "تفاصيل"
-    },
-    {
-      "recordId": "node-test-003",
-      "timestamp": "2026-05-29T23:36:55.184Z",
-      "name": "Node Test",
-      "id": "777",
-      "accessCode": "",
-      "examTitle": "Test",
-      "examId": "t1",
-      "university": "",
-      "faculty": "",
-      "level": "",
-      "examType": "",
-      "score": "1/1",
-      "details": ""
-    },
     {
       "recordId": "review-step2-1780098727745",
       "timestamp": "٢٩‏/٥‏/٢٠٢٦، ١١:٥٢:٠٧ م",

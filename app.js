@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.30";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.31";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -346,6 +346,10 @@ async function applyMandatoryTeacherPasswordChange() {
       role: teacher.role
     };
   }
+  if (window.ArabyaSecurity) {
+    window.ArabyaSecurity.stripTeacherPlainPassword(teacher);
+    if (idx !== -1) window.ArabyaSecurity.stripTeacherPlainPassword(systemState.teachers[idx]);
+  }
   saveTeachersToLocalStorage();
   syncActiveTeacherCredentials(teacher.autoEntryCode);
   hideMandatoryPasswordChangeModal();
@@ -385,7 +389,7 @@ function normalizeTeacherAccount(teacher) {
 function normalizeAllTeacherAccounts() {
   systemState.teachers = (systemState.teachers || []).map(t => normalizeTeacherAccount(t));
   try {
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    saveTeachersToLocalStorage();
   } catch (e) {}
   if (systemState.activeTeacher) {
     const refreshed = systemState.teachers.find(t => t.username === systemState.activeTeacher.username);
@@ -784,8 +788,12 @@ window.saveTeacherAccountBySuperAdmin = async function() {
 
   if (window.ArabyaSecurity) {
     await window.ArabyaSecurity.ensureTeacherPasswordHashed(teacherRecord, form.password);
+    window.ArabyaSecurity.stripTeacherPlainPassword(teacherRecord);
     const idx = systemState.teachers.findIndex(t => t.username === teacherRecord.username);
-    if (idx !== -1) systemState.teachers[idx] = teacherRecord;
+    if (idx !== -1) {
+      systemState.teachers[idx] = teacherRecord;
+      window.ArabyaSecurity.stripTeacherPlainPassword(systemState.teachers[idx]);
+    }
   }
 
   saveTeachersToLocalStorage();
@@ -1022,6 +1030,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initDatabase();
+  void migrateAllTeacherPasswordsToHash();
   bootstrapPlatformAppVersionFromLocal();
   applyUnifiedCloudSyncModel();
   stripEmptyHashFromUrl();
@@ -1219,7 +1228,7 @@ function initDatabase() {
       }
     };
     systemState.teachers.push(normalizeTeacherAccount(defaultTeacher));
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    saveTeachersToLocalStorage();
     systemState._pendingFirstRunCredentials = {
       username: defaultTeacher.username,
       password: initialPassword,
@@ -1239,7 +1248,6 @@ function initDatabase() {
       systemState.teacherProfile = { name: matched.name, subject: matched.subject };
       systemState.config = {
         ...(systemState.config || {}),
-        teacherCode: matched.password,
         appVersion: systemState.config?.appVersion || ARABYA_APP_BUILD_VERSION,
         googleFormUrl: matched.integrationConfig?.googleFormUrl || "",
         entryName: matched.integrationConfig?.entryName || "",
@@ -1247,7 +1255,7 @@ function initDatabase() {
         entryCode: matched.integrationConfig?.entryCode || "",
         entryScore: matched.integrationConfig?.entryScore || "",
         entryDetails: matched.integrationConfig?.entryDetails || "",
-        autoEntryCode: matched.autoEntryCode || matched.password
+        autoEntryCode: matched.autoEntryCode || ""
       };
     }
   } else {
@@ -1268,11 +1276,13 @@ function initDatabase() {
         entryScore: systemState.config.entryScore,
         entryDetails: systemState.config.entryDetails
       };
-      const configCode = parsedConfig.teacherCode || parsedConfig.autoEntryCode;
-      if (configCode) {
-        syncActiveTeacherCredentials(String(configCode).trim());
+      const configAutoCode = parsedConfig.autoEntryCode;
+      if (configAutoCode) {
+        syncActiveTeacherCredentials(String(configAutoCode).trim());
+      } else if (parsedConfig.teacherCode && !systemState.activeTeacher.autoEntryCode) {
+        syncActiveTeacherCredentials(String(parsedConfig.teacherCode).trim());
       }
-      localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+      saveTeachersToLocalStorage();
     } catch(e){}
   }
 
@@ -1283,14 +1293,14 @@ function initDatabase() {
       systemState.teacherProfile = parsedProfile;
       if (parsedProfile.name) systemState.activeTeacher.name = parsedProfile.name;
       if (parsedProfile.subject) systemState.activeTeacher.subject = parsedProfile.subject;
-      const storedCode = systemState.activeTeacher.autoEntryCode || systemState.activeTeacher.password || systemState.config?.teacherCode || systemState.config?.autoEntryCode;
+      const storedCode = systemState.activeTeacher.autoEntryCode || systemState.config?.autoEntryCode || parsedProfile.autoEntryCode;
       if (storedCode) {
         systemState.teacherProfile.autoEntryCode = storedCode;
       } else if (parsedProfile.autoEntryCode) {
         syncActiveTeacherCredentials(parsedProfile.autoEntryCode);
       }
       localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
-      localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+      saveTeachersToLocalStorage();
     } catch(e){}
   }
 
@@ -1377,37 +1387,68 @@ async function fetchPlatformAppVersionFromCloudMeta() {
 
 // حفظ قاعدة بيانات المعلمين محلياً (دون مزامنة سحابية)
 
-function syncActiveTeacherCredentials(preferredCode = "") {
+function syncActiveTeacherCredentials(preferredAutoCode = "") {
   if (!systemState.activeTeacher) return;
-  const code = String(
-    preferredCode ||
+  const autoCode = String(
+    preferredAutoCode ||
     systemState.activeTeacher.autoEntryCode ||
-    systemState.activeTeacher.password ||
     systemState.config?.autoEntryCode ||
-    systemState.config?.teacherCode ||
     ""
   ).trim();
-  if (!code) return;
-  systemState.activeTeacher.autoEntryCode = code;
-  systemState.activeTeacher.password = code;
+  if (!autoCode) return;
+  systemState.activeTeacher.autoEntryCode = autoCode;
   systemState.config = {
     ...(systemState.config || {}),
-    autoEntryCode: code,
-    teacherCode: code
+    autoEntryCode: autoCode
   };
+  if ("teacherCode" in (systemState.config || {})) {
+    delete systemState.config.teacherCode;
+  }
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
   if (idx !== -1) {
-    systemState.teachers[idx].autoEntryCode = code;
-    systemState.teachers[idx].password = code;
+    systemState.teachers[idx].autoEntryCode = autoCode;
   }
   try {
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    saveTeachersToLocalStorage();
     localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   } catch (e) {}
 }
 
+function getTeachersForLocalStorage() {
+  return (systemState.teachers || []).map(teacher => {
+    if (window.ArabyaSecurity && typeof window.ArabyaSecurity.sanitizeTeacherForLocalStorage === "function") {
+      return window.ArabyaSecurity.sanitizeTeacherForLocalStorage(teacher);
+    }
+    const copy = { ...teacher };
+    if (copy.passwordHash && copy.passwordSalt) delete copy.password;
+    return copy;
+  });
+}
+
 function saveTeachersToLocalStorage() {
-  localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+  localStorage.setItem("arabya_teachers_db", JSON.stringify(getTeachersForLocalStorage()));
+}
+
+async function migrateAllTeacherPasswordsToHash() {
+  if (!window.ArabyaSecurity || !Array.isArray(systemState.teachers)) return;
+  let changed = false;
+  for (const teacher of systemState.teachers) {
+    if (!teacher) continue;
+    const plain = String(teacher.password || "").trim();
+    if (plain && (!teacher.passwordHash || !teacher.passwordSalt)) {
+      await window.ArabyaSecurity.ensureTeacherPasswordHashed(teacher, plain);
+      changed = true;
+    }
+    if (teacher.passwordHash && teacher.passwordSalt && teacher.password) {
+      window.ArabyaSecurity.stripTeacherPlainPassword(teacher);
+      changed = true;
+    }
+  }
+  if (systemState.activeTeacher) {
+    const refreshed = systemState.teachers.find(t => t.username === systemState.activeTeacher.username);
+    if (refreshed) systemState.activeTeacher = refreshed;
+  }
+  if (changed) saveTeachersToLocalStorage();
 }
 
 // حفظ قاعدة بيانات الطلاب محلياً (دون مزامنة سحابية)
@@ -1477,7 +1518,7 @@ function saveSystemState(syncToCloud = true) {
     persistDeletedStudentKeys();
     persistDeletedResultKeys();
     if (Array.isArray(systemState.teachers)) {
-      localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+      saveTeachersToLocalStorage();
     }
     if (Array.isArray(systemState.exams)) {
       localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
@@ -2654,12 +2695,26 @@ function calculateRuntimeExamMeta(questions) {
   return { maxScore };
 }
 
+async function teacherPasswordMatches(teacher, credential) {
+  if (!teacher || credential === undefined || credential === null) return false;
+  if (window.ArabyaSecurity) return window.ArabyaSecurity.teacherPasswordMatches(teacher, credential);
+  const val = String(credential).trim();
+  if (!val) return false;
+  return String(teacher.password || "").trim() === val;
+}
+
+async function teacherAutoEntryCodeMatches(teacher, credential) {
+  if (!teacher || credential === undefined || credential === null) return false;
+  if (window.ArabyaSecurity) return window.ArabyaSecurity.teacherAutoEntryCodeMatches(teacher, credential);
+  const val = String(credential).trim();
+  if (!val) return false;
+  return String(teacher.autoEntryCode || "").trim() === val;
+}
+
 async function teacherCredentialMatches(teacher, credential) {
   if (!teacher || credential === undefined || credential === null) return false;
   if (window.ArabyaSecurity) return window.ArabyaSecurity.teacherCredentialMatches(teacher, credential);
-  const val = String(credential).trim();
-  if (!val) return false;
-  return teacher.password === val || teacher.autoEntryCode === val;
+  return teacherPasswordMatches(teacher, credential) || teacherAutoEntryCodeMatches(teacher, credential);
 }
 
 function getTeacherAnalyticsHelpers() {
@@ -4426,26 +4481,16 @@ async function syncTeacherCredentialsToCloud(teacher = systemState.activeTeacher
   const urlList = getGeneralTeacherSyncUrls();
   if (urlList.length === 0) return { ok: false, reason: "no_url" };
 
+  const baseRecord = {
+    username: teacher.username || teacher.name || "",
+    name: teacher.name || "",
+    subject: teacher.subject || "",
+    role: inferTeacherRole(teacher),
+    integrationConfig: teacher.integrationConfig || {}
+  };
   const record = window.ArabyaCloudSync
-    ? window.ArabyaCloudSync.sanitizeTeacherForCloud({
-      username: teacher.username || teacher.name || "",
-      name: teacher.name || "",
-      subject: teacher.subject || "",
-      password: teacher.password || "",
-      autoEntryCode: teacher.autoEntryCode || teacher.password || "",
-      passwordHash: teacher.passwordHash || "",
-      passwordSalt: teacher.passwordSalt || "",
-      role: inferTeacherRole(teacher),
-      integrationConfig: teacher.integrationConfig || {}
-    })
-    : {
-      username: teacher.username || teacher.name || "",
-      name: teacher.name || "",
-      subject: teacher.subject || "",
-      autoEntryCode: teacher.autoEntryCode || "",
-      role: inferTeacherRole(teacher),
-      integrationConfig: teacher.integrationConfig || {}
-    };
+    ? window.ArabyaCloudSync.sanitizeTeacherForCloud(baseRecord)
+    : baseRecord;
 
   const payload = {
     action: "save_entity",
@@ -4964,7 +5009,7 @@ function applyCloudBackupData(data) {
   if (data.teachers && Array.isArray(data.teachers)) {
     const localTeachers = systemState.teachers || [];
     systemState.teachers = mergeTeachersPreservingLocalAuth_(localTeachers, data.teachers);
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    saveTeachersToLocalStorage();
     if (systemState.activeTeacher) {
       const restoredTeacher = systemState.teachers.find(t => t.username === systemState.activeTeacher.username)
         || systemState.teachers[0];
@@ -5405,14 +5450,13 @@ async function checkUrlParameters() {
     const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
     if (matchedTeacher) {
       systemState.config = {
-        teacherCode: matchedTeacher.password,
         googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
         entryName: matchedTeacher.integrationConfig?.entryName || "",
         entryId: matchedTeacher.integrationConfig?.entryId || "",
         entryCode: matchedTeacher.integrationConfig?.entryCode || "",
         entryScore: matchedTeacher.integrationConfig?.entryScore || "",
         entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
-        autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
+        autoEntryCode: matchedTeacher.autoEntryCode || ""
       };
       systemState.targetTeacherUsername = matchedTeacher.username;
     }
@@ -5481,14 +5525,13 @@ async function checkUrlParameters() {
           const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
           if (matchedTeacher) {
             systemState.config = {
-              teacherCode: matchedTeacher.password,
               googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
               entryName: matchedTeacher.integrationConfig?.entryName || "",
               entryId: matchedTeacher.integrationConfig?.entryId || "",
               entryCode: matchedTeacher.integrationConfig?.entryCode || "",
               entryScore: matchedTeacher.integrationConfig?.entryScore || "",
               entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
-              autoEntryCode: matchedTeacher.autoEntryCode || matchedTeacher.password
+              autoEntryCode: matchedTeacher.autoEntryCode || ""
             };
             systemState.targetTeacherUsername = matchedTeacher.username;
           }
@@ -5543,14 +5586,13 @@ async function loginTeacherObject(teacher, loginCredential, options = {}) {
   
   systemState.teacherProfile = { name: teacher.name, subject: teacher.subject };
   systemState.config = {
-    teacherCode: teacher.password,
     googleFormUrl: teacher.integrationConfig?.googleFormUrl || "",
     entryName: teacher.integrationConfig?.entryName || "",
     entryId: teacher.integrationConfig?.entryId || "",
     entryCode: teacher.integrationConfig?.entryCode || "",
     entryScore: teacher.integrationConfig?.entryScore || "",
     entryDetails: teacher.integrationConfig?.entryDetails || "",
-    autoEntryCode: teacher.autoEntryCode || teacher.password
+    autoEntryCode: teacher.autoEntryCode || ""
   };
   updateTeacherDashboardAccessUI();
 }
@@ -5688,7 +5730,7 @@ async function handleTeacherLogin() {
   let matched = null;
   for (const t of systemState.teachers) {
     const identityOk = t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput;
-    if (identityOk && await teacherCredentialMatches(t, passwordInput)) {
+    if (identityOk && await teacherPasswordMatches(t, passwordInput)) {
       matched = t;
       break;
     }
@@ -5715,7 +5757,7 @@ async function handleTeacherQuickLogin() {
 
   let matched = null;
   for (const t of systemState.teachers) {
-    if (await teacherCredentialMatches(t, codeVal)) {
+    if (await teacherAutoEntryCodeMatches(t, codeVal)) {
       matched = t;
       break;
     }
@@ -5776,6 +5818,10 @@ async function handleTeacherRegister() {
     }
   });
 
+  if (window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(newTeacher, password);
+    window.ArabyaSecurity.stripTeacherPlainPassword(newTeacher);
+  }
   systemState.teachers.push(newTeacher);
   saveTeachersToLocalStorage();
   if (isSuperAdminTeacher()) {
@@ -6296,7 +6342,9 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
   document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
   document.getElementById("teacher-profile-autocode").value = systemState.activeTeacher.autoEntryCode || "";
-  document.getElementById("teacher-config-code").value = systemState.activeTeacher.password;
+  document.getElementById("teacher-config-code").value = systemState.activeTeacher.passwordHash
+    ? ""
+    : (systemState.activeTeacher.password || "");
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
   document.getElementById("teacher-config-name").value = systemState.activeTeacher.integrationConfig?.entryName || "";
   document.getElementById("teacher-config-id").value = systemState.activeTeacher.integrationConfig?.entryId || "";
@@ -6381,10 +6429,9 @@ async function saveTeacherProfile() {
   systemState.activeTeacher.name = name;
   systemState.activeTeacher.subject = subject;
   systemState.activeTeacher.autoEntryCode = autoCode;
-  systemState.activeTeacher.password = autoCode;
   if (systemState.config) {
     systemState.config.autoEntryCode = autoCode;
-    systemState.config.teacherCode = autoCode;
+    if ("teacherCode" in systemState.config) delete systemState.config.teacherCode;
   }
 
   systemState.teacherProfile = { name, subject, autoEntryCode: autoCode };
@@ -6395,11 +6442,6 @@ async function saveTeacherProfile() {
   }
 
   syncActiveTeacherCredentials(autoCode);
-  if (window.ArabyaSecurity) {
-    await window.ArabyaSecurity.ensureTeacherPasswordHashed(systemState.activeTeacher, autoCode);
-    if (idx !== -1) systemState.teachers[idx] = systemState.activeTeacher;
-    saveTeachersToLocalStorage();
-  }
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
@@ -6430,7 +6472,6 @@ async function saveTeacherIntegrationConfig() {
   }
 
   systemState.activeTeacher.password = code;
-  systemState.activeTeacher.autoEntryCode = code;
   systemState.activeTeacher.integrationConfig = {
     ...(systemState.activeTeacher.integrationConfig || {}),
     googleFormUrl: url,
@@ -6443,7 +6484,6 @@ async function saveTeacherIntegrationConfig() {
   };
 
   systemState.config = {
-    teacherCode: code,
     googleFormUrl: url,
     entryName,
     entryId,
@@ -6451,21 +6491,32 @@ async function saveTeacherIntegrationConfig() {
     entryScore,
     entryDetails,
     cloudBackupScope,
-    autoEntryCode: systemState.activeTeacher.autoEntryCode || code
+    autoEntryCode: systemState.activeTeacher.autoEntryCode || systemState.config?.autoEntryCode || ""
   };
 
-  // تحديث القائمة العامة والـ local storage
   const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
   if (idx !== -1) {
     systemState.teachers[idx] = systemState.activeTeacher;
   }
 
+  if (window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(systemState.activeTeacher, code);
+    window.ArabyaSecurity.stripTeacherPlainPassword(systemState.activeTeacher);
+    if (idx !== -1) {
+      systemState.teachers[idx] = {
+        ...systemState.teachers[idx],
+        passwordHash: systemState.activeTeacher.passwordHash,
+        passwordSalt: systemState.activeTeacher.passwordSalt
+      };
+      window.ArabyaSecurity.stripTeacherPlainPassword(systemState.teachers[idx]);
+    }
+  }
+
   systemState.teacherProfile = {
     name: systemState.activeTeacher.name,
     subject: systemState.activeTeacher.subject,
-    autoEntryCode: code
+    autoEntryCode: systemState.activeTeacher.autoEntryCode || ""
   };
-  syncActiveTeacherCredentials(code);
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
@@ -11836,7 +11887,9 @@ function fallbackCopyTextToClipboard(text) {
 function applyCompleteDatabaseReplace(data) {
   if (data.teachers && Array.isArray(data.teachers)) {
     systemState.teachers = data.teachers;
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    normalizeAllTeacherAccounts();
+    void migrateAllTeacherPasswordsToHash();
+    saveTeachersToLocalStorage();
   }
   if (data.students && Array.isArray(data.students)) {
     systemState.students = data.students;
@@ -11873,7 +11926,9 @@ function mergeCompleteDatabaseImport(data) {
       summary.teachers++;
     });
     systemState.teachers = [...map.values()];
-    localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    normalizeAllTeacherAccounts();
+    void migrateAllTeacherPasswordsToHash();
+    saveTeachersToLocalStorage();
   }
   if (Array.isArray(data.students)) {
     ensureStudentsDataShape();
