@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.5";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.6";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -5087,12 +5087,43 @@ function formatSheetSyncNote(syncResult) {
   return ` — ${imported} صفاً في ورقة «نتائج الطلاب»`;
 }
 
-window.pullTeacherResultsFromCloud = async function() {
+function formatCloudPullFailureMessage(syncResult) {
+  if (!syncResult) {
+    return "تعذّر الجلب من السحابة. تحقق من رابط /exec وسر API في تبويب الربط.";
+  }
+  if (syncResult.skipped && syncResult.reason === "push_in_progress") {
+    return "جاري رفع نسخة سحابية — انتظر قليلاً ثم اضغط «مزامنة من السحابة» مجدداً.";
+  }
+  if (syncResult.skipped && (syncResult.reason === "local_push_guard" || syncResult.reason === "pull_suspended_after_delete")) {
+    return "المزامنة مؤجّلة مؤقتاً بعد حفظ/رفع البيانات — انتظر 10–30 ثانية ثم أعد المحاولة.";
+  }
+  if (syncResult.code === "unauthorized") {
+    return "سر API غير صحيح — طابق ARABYA_API_SECRET بين Script Properties وتبويب الربط.";
+  }
+  if (syncResult.message) {
+    return String(syncResult.message);
+  }
+  return "تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، وانسخ الكود الكامل من تبويب الربط ثم أعد النشر كإصدار جديد.";
+}
+
+window.pullTeacherResultsFromCloud = async function(options = {}) {
   const el = document.getElementById("teacher-results-sync-status");
   if (el) {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
-  const syncResult = await syncDatabaseFromCloud({ silent: false });
+
+  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: !!options.forcePull });
+  if (!syncResult.ok && syncResult.skipped && !options.forcePull) {
+    const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
+    if (retryReasons.has(syncResult.reason)) {
+      if (el) {
+        el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري انتظار اكتمال الرفع السحابي ثم إعادة الجلب...`;
+      }
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+    }
+  }
+
   if (syncResult.ok) {
     getResultsTableViewSettings().page = 1;
     getStudentsTableViewSettings().page = 1;
@@ -5102,8 +5133,10 @@ window.pullTeacherResultsFromCloud = async function() {
     if (syncResult.ok) {
       const sheetNote = formatSheetSyncNote(syncResult);
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} سجلاً نتائج · ${systemState.students.length} طالب${sheetNote}`;
+    } else if (systemState.results.length > 0 && syncResult.skipped) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--warning);">cloud_queue</span> عرض ${systemState.results.length} نتيجة محلياً — ${escapeHtml(formatCloudPullFailureMessage(syncResult))}`;
     } else {
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، ثم انسخ الكود الذي يحتوي readArabyaSheetResults_ من تبويب الربط وأعد النشر كإصدار جديد.`;
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">cloud_off</span> ${escapeHtml(formatCloudPullFailureMessage(syncResult))}`;
     }
   }
   return syncResult.ok;
@@ -5155,9 +5188,16 @@ async function fetchCloudBackupJson_(rawUrl, timeoutMs, mergeOptions = {}) {
       headers: { Accept: "application/json" },
       signal: controller ? controller.signal : undefined
     });
-    if (!res.ok) return null;
+    if (!res.ok) return { _fetchFailed: true, httpStatus: res.status };
     const response = await res.json();
     if (response && response.status === "success" && response.data) return response;
+    if (response && response.status === "error") {
+      return {
+        _fetchFailed: true,
+        code: response.code || "",
+        message: response.message || "Cloud backup error"
+      };
+    }
   } catch (err) {
     if (err && err.name === "AbortError") {
       console.warn("[ARABYA] cloud backup fetch timed out", timeoutMs, "ms", rawUrl);
@@ -5328,6 +5368,16 @@ async function syncDatabaseFromCloud(options = {}) {
     : {};
   const pullResult = await fetchAndMergeAllCloudBackups(mergeOpts, timeoutMs);
   const response = pullResult.lastResponse;
+
+  if (!pullResult.ok && response && response._fetchFailed) {
+    recordCloudSyncOutcome(false, response.message || "تعذّر الجلب من السحابة");
+    return {
+      ok: false,
+      code: response.code || "",
+      message: response.message || "",
+      httpStatus: response.httpStatus || null
+    };
+  }
 
   if (pullResult.ok && response && response.data) {
     try {

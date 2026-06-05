@@ -1538,8 +1538,9 @@ function readArabyaResultsFromSheet_() {
   if (!sheet || sheet.getLastRow() < 2) return [];
   ensureArabyaResultsHeaders_(sheet);
   var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
   var lastCol = Math.max(sheet.getLastColumn(), ARABYA_RESULTS_HEADERS.length);
-  var values = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var values = sheet.getRange(2, 1, lastRow, lastCol).getValues();
   var out = [];
   values.forEach(function(row) {
     if (!row || !String(row[0] || "").trim()) return;
