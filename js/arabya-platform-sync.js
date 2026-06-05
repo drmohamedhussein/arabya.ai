@@ -2,6 +2,15 @@
  * صحة المزامنة، تعارضات، بنك أسئلة، اختبار اتصال، أمان أجهزة إضافي.
  */
 (function (global) {
+  function escapeHtml(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   const QB_SYNC_KEY = "arabya_question_bank_last_sync";
   const CONFLICT_MODE_KEY = "arabya_conflict_merge_mode";
   const MAX_STUDENT_DEVICES = 3;
@@ -143,7 +152,7 @@
     const when = Number.isNaN(dt.getTime()) ? meta.at : dt.toLocaleString("ar-EG", { timeStyle: "short", dateStyle: "short" });
     const color = meta.ok ? "var(--success)" : "var(--error)";
     const icon = meta.ok ? "cloud_done" : "cloud_off";
-    el.innerHTML = `<span class="material-icons" style="font-size:1rem;vertical-align:middle;color:${color};">${icon}</span> آخر رفع بنك: <strong style="color:${color};">${when}</strong>${meta.detail ? ` · ${meta.detail}` : ""}`;
+    el.innerHTML = `<span class="material-icons" style="font-size:1rem;vertical-align:middle;color:${color};">${icon}</span> آخر رفع بنك: <strong style="color:${color};">${escapeHtml(when)}</strong>${meta.detail ? ` · ${escapeHtml(meta.detail)}` : ""}`;
   }
 
   function getCloudUrls() {
@@ -173,16 +182,16 @@
     const meta = await fetchSyncMeta();
     if (!meta) {
       const msg = "تعذّر الاتصال — تحقق من رابط /exec والنشر (Anyone).";
-      if (outEl) outEl.innerHTML = `<span style="color:var(--error);">${msg}</span>`;
+      if (outEl) outEl.innerHTML = `<span style="color:var(--error);">${escapeHtml(msg)}</span>`;
       if (global.ArabyaToast) global.ArabyaToast.showToast(msg, "error");
       return { ok: false };
     }
     const html =
       `<div style="font-size:0.85rem;line-height:1.6;">` +
-      `<div><strong>cloudRevision:</strong> <code>${meta.cloudRevision || "—"}</code></div>` +
-      `<div><strong>بنوك أسئلة (معلمون):</strong> ${meta.questionBankTeachers ?? "—"} · <strong>بنوك:</strong> ${meta.questionBankItems ?? "—"}</div>` +
-      `<div><strong>حجم JSON الاحتياطي:</strong> ${meta.backupJsonChars != null ? meta.backupJsonChars.toLocaleString("ar-EG") + " حرف" : "—"}</div>` +
-      `<div><strong>سجلات:</strong> معلمون ${meta.teachers ?? 0} · طلاب ${meta.students ?? 0} · امتحانات ${meta.exams ?? 0} · نتائج ${meta.results ?? 0}</div>` +
+      `<div><strong>cloudRevision:</strong> <code>${escapeHtml(meta.cloudRevision || "—")}</code></div>` +
+      `<div><strong>بنوك أسئلة (معلمون):</strong> ${escapeHtml(String(meta.questionBankTeachers ?? "—"))} · <strong>بنوك:</strong> ${escapeHtml(String(meta.questionBankItems ?? "—"))}</div>` +
+      `<div><strong>حجم JSON الاحتياطي:</strong> ${meta.backupJsonChars != null ? escapeHtml(meta.backupJsonChars.toLocaleString("ar-EG") + " حرف") : "—"}</div>` +
+      `<div><strong>سجلات:</strong> معلمون ${escapeHtml(String(meta.teachers ?? 0))} · طلاب ${escapeHtml(String(meta.students ?? 0))} · امتحانات ${escapeHtml(String(meta.exams ?? 0))} · نتائج ${escapeHtml(String(meta.results ?? 0))}</div>` +
       `</div>`;
     if (outEl) outEl.innerHTML = html;
     if (global.ArabyaToast) global.ArabyaToast.showToast("اتصال السحابة ناجح", "success");
@@ -208,11 +217,11 @@
     }
     panel.innerHTML =
       `<div class="sync-health-grid">` +
-      `<div><span>آخر revision</span><code>${meta.cloudRevision || "—"}</code></div>` +
-      `<div><span>بنوك محلية</span><strong>${localBanks}</strong> (${localBankItems} بنك)</div>` +
-      `<div><span>بنوك سحابية</span><strong>${meta.questionBankTeachers ?? "—"}</strong> معلم</div>` +
-      `<div><span>حجم ARABYA_BACKUP</span><strong>${meta.backupJsonChars != null ? meta.backupJsonChars.toLocaleString("ar-EG") : "—"}</strong> حرف</div>` +
-      `<div><span>نتائج / طلاب</span>${meta.results ?? 0} / ${meta.students ?? 0}</div>` +
+      `<div><span>آخر revision</span><code>${escapeHtml(meta.cloudRevision || "—")}</code></div>` +
+      `<div><span>بنوك محلية</span><strong>${escapeHtml(String(localBanks))}</strong> (${escapeHtml(String(localBankItems))} بنك)</div>` +
+      `<div><span>بنوك سحابية</span><strong>${escapeHtml(String(meta.questionBankTeachers ?? "—"))}</strong> معلم</div>` +
+      `<div><span>حجم ARABYA_BACKUP</span><strong>${meta.backupJsonChars != null ? escapeHtml(meta.backupJsonChars.toLocaleString("ar-EG")) : "—"}</strong> حرف</div>` +
+      `<div><span>نتائج / طلاب</span>${escapeHtml(String(meta.results ?? 0))} / ${escapeHtml(String(meta.students ?? 0))}</div>` +
       `</div>`;
   }
 

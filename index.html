@@ -548,7 +548,7 @@
               <span class="material-icons" aria-hidden="true">manage_accounts</span>
               <span id="teacher-profile-tab-menu-label">الملف الشخصي للمعلم</span>
             </li>
-            <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" onclick="logoutTeacher();" role="none">
+            <li class="teacher-menu-item" style="color:var(--error); margin-top: 2rem;" role="menuitem" tabindex="0" id="teacher-logout-menu-item">
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
             </li>
           </ul>
@@ -1203,7 +1203,7 @@
                 </div>
                 <div class="form-group" style="margin:0;">
                   <label class="form-label" for="super-admin-teacher-password">الرقم السري</label>
-                  <input type="text" id="super-admin-teacher-password" class="form-control" dir="ltr">
+                  <input type="password" id="super-admin-teacher-password" class="form-control" dir="ltr" autocomplete="new-password">
                 </div>
                 <div class="form-group" style="margin:0;">
                   <label class="form-label" for="super-admin-teacher-autocode">رمز الدخول السريع</label>
@@ -1755,10 +1755,10 @@ function doGet(e) {
       <div class="footer-links">
         <h4>روابط السوشيال ميديا</h4>
         <div class="social-links-row">
-          <a href="https://facebook.com/ARABYA.AI" target="_blank" class="social-btn facebook" aria-label="تابعنا على فيسبوك">
+          <a href="https://facebook.com/ARABYA.AI" target="_blank" rel="noopener noreferrer" class="social-btn facebook" aria-label="تابعنا على فيسبوك">
             <span class="social-icon-wrapper"><span class="material-icons" style="font-size:1.2rem;vertical-align:middle;">link</span></span> facebook/ARABYA.AI
           </a>
-          <a href="https://instagram.com/ARABYA.AI" target="_blank" class="social-btn instagram" aria-label="تابعنا على انستغرام">
+          <a href="https://instagram.com/ARABYA.AI" target="_blank" rel="noopener noreferrer" class="social-btn instagram" aria-label="تابعنا على انستغرام">
             <span class="social-icon-wrapper"><span class="material-icons" style="font-size:1.2rem;vertical-align:middle;">camera_alt</span></span> instagram/ARABYA.AI
           </a>
         </div>
@@ -1767,7 +1767,7 @@ function doGet(e) {
       <div class="footer-developer">
         <h4>تطوير ودعم المنصة</h4>
         <p class="dev-signature">تم التطوير من خلال <strong>EGYWEBDEV</strong></p>
-        <a href="https://wa.me/201037890525" target="_blank" class="btn btn-primary btn-sm dev-contact-btn" style="margin-top:0.5rem; text-decoration:none;" aria-label="تواصل مع المطور عبر واتساب">
+        <a href="https://wa.me/201037890525" target="_blank" rel="noopener noreferrer" class="btn btn-primary btn-sm dev-contact-btn" style="margin-top:0.5rem; text-decoration:none;" aria-label="تواصل مع المطور عبر واتساب">
           <span class="material-icons">phone</span> +201037890525
         </a>
       </div>

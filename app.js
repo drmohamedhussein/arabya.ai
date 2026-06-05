@@ -5591,6 +5591,19 @@ function setupUIEventListeners() {
     });
   });
 
+  const logoutMenuItem = document.getElementById("teacher-logout-menu-item");
+  if (logoutMenuItem && !logoutMenuItem.dataset.bound) {
+    logoutMenuItem.dataset.bound = "1";
+    const doLogout = () => logoutTeacher();
+    logoutMenuItem.addEventListener("click", doLogout);
+    logoutMenuItem.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        doLogout();
+      }
+    });
+  }
+
   const saveProfileBtn = document.getElementById("save-teacher-profile-btn");
   if (saveProfileBtn) {
     saveProfileBtn.addEventListener("click", saveTeacherProfile);
@@ -6491,34 +6504,36 @@ function renderExamsList() {
     const questionMode = exam.shuffleQuestions === false ? "ترتيبي" : "عشوائي";
     const syncUrl = getUnifiedTeacherSyncUrl(exam);
     const badge = syncUrl
-      ? `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_queue</span> مزامنة موحّدة (رابط المعلم) — اختبر الاتصال</span>`
-      : `<span id="sync-badge-${exam.id}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_off</span> لا يوجد رابط موحّد في تبويب الربط (محلي فقط)</span>`;
+      ? `<span id="sync-badge-${escapeAttr(exam.id)}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--secondary); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_queue</span> مزامنة موحّدة (رابط المعلم) — اختبر الاتصال</span>`
+      : `<span id="sync-badge-${escapeAttr(exam.id)}" style="display:inline-flex; align-items:center; gap:0.25rem; color:var(--error); font-weight:700;"><span class="material-icons" style="font-size:1rem;">cloud_off</span> لا يوجد رابط موحّد في تبويب الربط (محلي فقط)</span>`;
+    const ownerSuffix = showOwner && exam.teacher ? ` | المعلم: ${escapeHtml(exam.teacher)}` : "";
 
     card.innerHTML = `
       <div>
-        <div class="exam-info-title">${exam.title}</div>
+        <div class="exam-info-title">${escapeHtml(exam.title || "")}</div>
         <div style="font-size:0.8rem; color:var(--secondary); font-weight:600; margin-bottom:0.5rem;">
-          المادة: ${exam.subject} | الفرقة: ${exam.level || 'غير محددة'}${showOwner && exam.teacher ? ` | المعلم: ${exam.teacher}` : ""}
+          المادة: ${escapeHtml(exam.subject || "")} | الفرقة: ${escapeHtml(exam.level || "غير محددة")}${ownerSuffix}
         </div>
         <div class="exam-info-details">
-          <span>الكلية: ${exam.faculty || 'عام'} | الجامعة: ${exam.university || 'عام'}</span>
-          <span>المجموع النهائي الكلي: <code style="color:var(--accent); font-weight:700;">${totalExamScore} درجة</code></span>
-          <span>النوع: ${exam.examType || 'أعمال فصلية'} | بنك الأسئلة: ${bankCount}</span>
-          <span>المعروض للطالب: ${displayedCount} | النمط: ${questionMode}</span>
+          <span>الكلية: ${escapeHtml(exam.faculty || "عام")} | الجامعة: ${escapeHtml(exam.university || "عام")}</span>
+          <span>المجموع النهائي الكلي: <code style="color:var(--accent); font-weight:700;">${escapeHtml(String(totalExamScore))} درجة</code></span>
+          <span>النوع: ${escapeHtml(exam.examType || "أعمال فصلية")} | بنك الأسئلة: ${escapeHtml(String(bankCount))}</span>
+          <span>المعروض للطالب: ${escapeHtml(String(displayedCount))} | النمط: ${escapeHtml(questionMode)}</span>
           <span style="margin-top:0.35rem; font-size:0.82rem;">${badge}</span>
         </div>
       </div>
       <div>
         <div class="exam-actions-row">
-          <button class="btn btn-primary btn-sm" onclick="editExamQuestions('${exam.id}')">تعديل الامتحان والأسئلة</button>
-          <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="testExamSync('${exam.id}')">اختبار المزامنة</button>
-          <button class="btn btn-outline btn-sm" style="border-color:var(--accent); color:var(--accent);" onclick="setTeacherResultsExamFilter('${exam.id}')">عرض النتائج</button>
-          <button class="btn btn-outline btn-sm" onclick="copyExamLink('${examUrl}')">نسخ الرابط</button>
-          <button class="btn btn-outline btn-sm" onclick="generateGoogleFormScript('${exam.id}')">تصدير لجوجل فورم</button>
-          <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteExam('${exam.id}')">حذف</button>
+          <button type="button" class="btn btn-primary btn-sm exam-act-edit">تعديل الامتحان والأسئلة</button>
+          <button type="button" class="btn btn-outline btn-sm exam-act-sync" style="border-color:var(--secondary); color:var(--secondary);">اختبار المزامنة</button>
+          <button type="button" class="btn btn-outline btn-sm exam-act-results" style="border-color:var(--accent); color:var(--accent);">عرض النتائج</button>
+          <button type="button" class="btn btn-outline btn-sm exam-act-copy">نسخ الرابط</button>
+          <button type="button" class="btn btn-outline btn-sm exam-act-gform">تصدير لجوجل فورم</button>
+          <button type="button" class="btn btn-outline btn-sm exam-act-delete" style="border-color:var(--error); color:var(--error);">حذف</button>
         </div>
       </div>
     `;
+    bindExamCardActions(card, exam, examUrl);
     container.appendChild(card);
   });
 }
@@ -6722,8 +6737,8 @@ function renderQuestionsForEdit(exam) {
 
     card.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 0.5rem;">
-        <span style="font-weight:700; color:white;">سؤال ${index + 1} (${typeName})</span>
-        <button class="btn btn-outline btn-sm" style="border-color:var(--error); color:var(--error);" onclick="deleteQuestion(${index})">حذف السؤال</button>
+        <span style="font-weight:700; color:white;">سؤال ${index + 1} (${escapeHtml(typeName)})</span>
+        <button type="button" class="btn btn-outline btn-sm editor-delete-question-btn" style="border-color:var(--error); color:var(--error);">حذف السؤال</button>
       </div>
       
       <div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(90px, 1fr) minmax(110px, 1fr); gap: 1rem; margin-bottom:1rem;">
@@ -6741,6 +6756,9 @@ function renderQuestionsForEdit(exam) {
         </div>
       </div>
     `;
+
+    const deleteBtn = card.querySelector(".editor-delete-question-btn");
+    if (deleteBtn) deleteBtn.addEventListener("click", () => deleteQuestion(index));
 
     const questionTextInput = card.querySelector(".edit-q-text");
     if (questionTextInput) {
@@ -6827,9 +6845,14 @@ function renderQuestionsForEdit(exam) {
       actionRow.style.display = "flex";
       actionRow.style.gap = "0.5rem";
       
-      actionRow.innerHTML = `
-        <button class="btn btn-outline btn-sm" style="border-color:var(--secondary); color:var(--secondary);" onclick="addOptionToQuestion(${index})">+ إضافة خيار إضافي</button>
-      `;
+      const addOptBtn = document.createElement("button");
+      addOptBtn.type = "button";
+      addOptBtn.className = "btn btn-outline btn-sm";
+      addOptBtn.style.borderColor = "var(--secondary)";
+      addOptBtn.style.color = "var(--secondary)";
+      addOptBtn.textContent = "+ إضافة خيار إضافي";
+      addOptBtn.addEventListener("click", () => addOptionToQuestion(index));
+      actionRow.appendChild(addOptBtn);
       optionsWrapper.appendChild(actionRow);
     }
 
@@ -7138,6 +7161,27 @@ function escapeHtml(value) {
     .replace(/'/g, "&#39;");
 }
 
+/** تهريب قيم سمات HTML (href, id, data-*, value في بعض السياقات) */
+function escapeAttr(value) {
+  return escapeHtml(value).replace(/`/g, "&#96;");
+}
+
+function bindExamCardActions(card, exam, examUrl) {
+  const examId = exam.id;
+  const map = [
+    [".exam-act-edit", () => editExamQuestions(examId)],
+    [".exam-act-sync", () => testExamSync(examId)],
+    [".exam-act-results", () => setTeacherResultsExamFilter(examId)],
+    [".exam-act-copy", () => copyExamLink(examUrl)],
+    [".exam-act-gform", () => generateGoogleFormScript(examId)],
+    [".exam-act-delete", () => deleteExam(examId)]
+  ];
+  map.forEach(([selector, handler]) => {
+    const el = card.querySelector(selector);
+    if (el) el.addEventListener("click", handler);
+  });
+}
+
 function escapeAppsScriptString(str) {
   if (!str) return "";
   return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -7211,9 +7255,17 @@ function createArabyaExamForm() {
     box.id = "apps-script-output-container";
     box.innerHTML = `
       <h4 style="color:var(--secondary); margin-bottom:0.5rem; font-weight:700;">كود Google Apps Script للامتحان الحالي:</h4>
-      <textarea id="google-apps-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem;" readonly>${script}</textarea>
-      <button class="btn btn-primary btn-sm" style="margin-top:0.5rem;" onclick="copyAppsScriptCode()">نسخ الكود البرمجي</button>
+      <textarea id="google-apps-script-code" class="essay-textarea" style="font-family:monospace; font-size:0.8rem;" readonly></textarea>
     `;
+    const codeArea = box.querySelector("#google-apps-script-code");
+    if (codeArea) codeArea.value = script;
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "btn btn-primary btn-sm";
+    copyBtn.style.marginTop = "0.5rem";
+    copyBtn.textContent = "نسخ الكود البرمجي";
+    copyBtn.addEventListener("click", () => copyAppsScriptCode());
+    box.appendChild(copyBtn);
     tabIntegration.appendChild(box);
   }
   
@@ -7807,9 +7859,9 @@ function renderRunnerQuestion() {
   const qPoints = question.points !== undefined ? question.points : 10;
 
   document.getElementById("runner-exam-title").innerHTML = `
-    ${exam.title} 
+    ${escapeHtml(exam.title || "")}
     <div style="font-size:0.75rem; color:var(--accent); font-weight:normal; margin-top:0.25rem;">
-      الجامعة: ${exam.university} | الكلية: ${exam.faculty} | الفرقة: ${exam.level} | النوع: ${exam.examType || 'أعمال سنة'} | المجموع: ${examTotalScore} درجة
+      الجامعة: ${escapeHtml(exam.university || "")} | الكلية: ${escapeHtml(exam.faculty || "")} | الفرقة: ${escapeHtml(exam.level || "")} | النوع: ${escapeHtml(exam.examType || "أعمال سنة")} | المجموع: ${escapeHtml(String(examTotalScore))} درجة
     </div>
   `;
 
@@ -9392,7 +9444,7 @@ function renderStudentResultsTable() {
     const emptyMsg = filters.searchQuery
       ? `لا توجد نتائج تطابق «${escapeHtml(filters.searchQuery)}»`
       : "لا توجد نتائج تطابق الفلاتر المحددة";
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} سجل.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${escapeHtml(emptyMsg)} من ${escapeHtml(String(totalAll))} سجل.</td></tr>`;
     updateResultsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
@@ -9560,8 +9612,8 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
       scoreRow.style.gap = "0.5rem";
       scoreRow.innerHTML = `
         <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
-        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
-        <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات كحد أقصى</span>
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${escapeAttr(q.id)}" value="${escapeAttr(String(currentScore))}" max="${escapeAttr(String(qPoints))}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <span style="font-size:0.85rem; color:var(--text-muted);">من ${escapeHtml(String(qPoints))} درجات كحد أقصى</span>
       `;
 
       body.appendChild(textarea);
@@ -9611,8 +9663,8 @@ window.viewTeacherResultDetail = function(recordId, studentId, examId) {
       scoreRow.style.gap = "0.5rem";
       scoreRow.innerHTML = `
         <label style="color:var(--text-muted); font-size:0.9rem;">الدرجة المستحقة للطالب:</label>
-        <input type="number" class="form-control edit-student-q-score" data-q-id="${q.id}" value="${currentScore}" max="${qPoints}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
-        <span style="font-size:0.85rem; color:var(--text-muted);">من ${qPoints} درجات</span>
+        <input type="number" class="form-control edit-student-q-score" data-q-id="${escapeAttr(q.id)}" value="${escapeAttr(String(currentScore))}" max="${escapeAttr(String(qPoints))}" min="0" style="width:100px; padding:0.4rem 0.8rem;">
+        <span style="font-size:0.85rem; color:var(--text-muted);">من ${escapeHtml(String(qPoints))} درجات</span>
       `;
 
       select.addEventListener("change", (e) => {
@@ -11364,7 +11416,7 @@ function renderTeacherStudentsTable() {
     const emptyMsg = filters.searchQuery
       ? `لا يوجد طلاب يطابقون «${escapeHtml(filters.searchQuery)}»`
       : "لا يوجد طلاب يطابقون الفلاتر المحددة";
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${emptyMsg} من ${totalAll} طالب.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">${escapeHtml(emptyMsg)} من ${escapeHtml(String(totalAll))} طالب.</td></tr>`;
     updateStudentsPaginationUI(0, 1, view.pageSize, totalAll, filtersActive);
     return;
   }
