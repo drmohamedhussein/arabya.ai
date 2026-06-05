@@ -35,11 +35,13 @@
 4. احفظ الملف باسم واضح، مثلاً:  
    `arabya_full_export_2026-06-05.json`
 
-**الطريقة ب — تصدير كل localStorage (أشمل):**
-1. افتح الموقع في المتصفح الذي تستخدمه يومياً.
-2. F12 → Console.
-3. الصق محتوى الملف `LOCALSTORAGE_EXPORT.js` واضغط Enter.
-4. احفظ الملف المُنزّل: `arabya_localStorage_backup_YYYY-MM-DD.json`
+**الطريقة ب — تصدير كل localStorage (بدون لصق في الكونسول):**
+
+> الكونسول قد يمنع اللصق بسبب حماية الموقع. استخدم بدلاً منه:
+
+1. **Bookmarklet (موصى به):** افتح `export-localstorage-bookmarklet.html` → اسحب الرابط للمفضلة → افتح arabya.net → اضغط الإشارة المرجعية.
+2. **Chrome Snippets:** F12 → Sources → Snippets → New → الصق `LOCALSTORAGE_EXPORT.js` هنا (اللصق يعمل) → Run.
+3. راجع الدليل الكامل: `EXPORT_WITHOUT_CONSOLE.md`
 
 **مفاتيح localStorage المهمة:**
 
