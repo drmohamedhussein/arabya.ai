@@ -34,9 +34,9 @@ test("phase5: exam_start backup strips correctAnswer on server", () => {
   assert.ok(gasSource.includes("stripCorrectAnswersFromExams_"));
 });
 
-test("phase5: first-run admin alert hidden on student exam links", () => {
-  assert.ok(appSource.includes("isLikelyStudentExamRequest"));
-  assert.ok(appSource.includes("hasTeacherLoginToken || !isLikelyStudentExamRequest"));
+test("phase5: no first-run admin credential alert on public site", () => {
+  assert.ok(!appSource.includes("_pendingFirstRunCredentials"));
+  assert.ok(!appSource.includes("تم إنشاء حساب مدير المنصة لأول مرة"));
 });
 
 console.log("Phase 5 scoped backup guard tests passed.");

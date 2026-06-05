@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.3";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.4";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1320,40 +1320,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
   
-  if (systemState._pendingFirstRunCredentials) {
-    const creds = systemState._pendingFirstRunCredentials;
-    delete systemState._pendingFirstRunCredentials;
-
-    const hasTeacherLoginToken = !!(getUrlParameter("tlt") && getUrlParameter("tlk"));
-    const isLikelyStudentExamRequest = (() => {
-      try {
-        // الروابط المباشرة للامتحان غالباً تحتوي exam= أو يكون مسار الصفحة ينتهي بمعرف امتحان.
-        if (getUrlParameter("exam")) return true;
-      } catch (e) {}
-      try {
-        const path = String(window.location.pathname || "");
-        if (path.includes("online_exam_portal")) return true;
-        const segs = path.split("/").filter(Boolean);
-        if (segs.length > 0) {
-          const last = segs[segs.length - 1];
-          if (last && last !== "index.html") return true;
-        }
-      } catch (e) {}
-      return false;
-    })();
-
-    // منع كشف بيانات الحساب الأولي للطلاب عند فتح رابط امتحان لأول مرة على جهازهم.
-    if (hasTeacherLoginToken || !isLikelyStudentExamRequest) {
-      alert(
-        "تم إنشاء حساب مدير المنصة لأول مرة.\n\n" +
-        "اسم المستخدم: " + creds.username + "\n" +
-        "كلمة المرور: " + creds.password + "\n" +
-        "رمز الدخول السريع: " + creds.autoEntryCode + "\n\n" +
-        "احفظ هذه البيانات الآن — لن تُعرض مرة أخرى."
-      );
-    }
-  }
-
   void (async () => {
   const wasRedirected = await checkUrlParameters();
   if (!wasRedirected) {
@@ -1404,34 +1370,9 @@ function initDatabase() {
     }
   }
   
-  // إذا لم يكن هناك معلمون، نُنشئ حساب مدير أولي بكلمة مرور عشوائية (تُعرض مرة واحدة)
-  if (systemState.teachers.length === 0) {
-    const initialPassword = generateSecureRandomCode(12);
-    const initialQuickCode = generateSecureRandomCode(10);
-    const defaultTeacher = {
-      name: "مدير المنصة ARABYA",
-      username: "platform_admin",
-      subject: "إدارة المنصة الشاملة",
-      password: initialPassword,
-      autoEntryCode: initialQuickCode,
-      role: ARABYA_ACCOUNT_ROLES.SUPER_ADMIN,
-      mustChangePassword: false,
-      integrationConfig: {
-        googleFormUrl: "",
-        entryName: "",
-        entryId: "",
-        entryCode: "",
-        entryScore: "",
-        entryDetails: ""
-      }
-    };
-    systemState.teachers.push(normalizeTeacherAccount(defaultTeacher));
-    saveTeachersToLocalStorage();
-    systemState._pendingFirstRunCredentials = {
-      username: defaultTeacher.username,
-      password: initialPassword,
-      autoEntryCode: initialQuickCode
-    };
+  // لا نُنشئ حساب مدير تلقائياً على أجهزة الزوار — يمنع كشف بيانات دخول لأي شخص يفتح الموقع.
+  if (!Array.isArray(systemState.teachers)) {
+    systemState.teachers = [];
   }
 
   normalizeAllTeacherAccounts();
@@ -6371,7 +6312,9 @@ async function handleTeacherRegister() {
     subject,
     password,
     autoEntryCode: autoCode,
-    role: ARABYA_ACCOUNT_ROLES.TEACHER,
+    role: (systemState.teachers || []).length === 0
+      ? ARABYA_ACCOUNT_ROLES.SUPER_ADMIN
+      : ARABYA_ACCOUNT_ROLES.TEACHER,
     integrationConfig: {
       googleFormUrl: "",
       entryName: "",
