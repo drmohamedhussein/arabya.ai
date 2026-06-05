@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.8";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.9";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3333,16 +3333,39 @@ function isIpOnExamAllowlist(exam, clientIp) {
 
 function shouldBypassExamDeviceLock(exam, profile, conflictResult) {
   if (!exam) return false;
+  const allowlist = getExamIpAllowlist(exam);
+  if (!allowlist.length) return false;
   if (isIpOnExamAllowlist(exam, profile?.clientIp)) return true;
   if (conflictResult && isIpOnExamAllowlist(exam, conflictResult.clientIp)) return true;
   return false;
 }
 
-function formatExamIpAllowlistHint(exam, profile) {
+const STUDENT_DEVICE_USED_BY_OTHER_MESSAGE =
+  "تم حظر الدخول إلى الامتحان.\n\n" +
+  "سبق استخدام هذا الجهاز أو المتصفح لمحاولة أخرى على نفس الامتحان.\n\n" +
+  "يرجى التواصل مع المعلم أو مدير المنصة.";
+
+const STUDENT_SHARED_IP_LIMIT_MESSAGE =
+  "تم حظر الدخول إلى الامتحان.\n\n" +
+  "وصل عدد الطلاب المسموح لهم على نفس الشبكة إلى الحد الأقصى.\n\n" +
+  "يرجى التواصل مع المعلم أو مدير المنصة.";
+
+function formatTeacherDeviceBlockDetail(kind, exam, profile, extra = {}) {
   const allowed = getExamIpAllowlist(exam);
-  const current = String(profile?.clientIp || "").trim() || "غير متاح";
-  const allowedText = allowed.length ? allowed.join(" ، ") : "لا يوجد";
-  return `\n\nعنوان IP الحالي للطالب: ${current}\nالعناوين المسموحة في الامتحان: ${allowedText}`;
+  const lines = [
+    `[تفاصيل للمعلم] ${kind}`,
+    profile?.clientIp ? `IP الحالي: ${profile.clientIp}` : "",
+    allowed.length ? `IPs المسموحة: ${allowed.join(" ، ")}` : "IPs المسموحة: لا يوجد",
+    extra.otherName ? `آخر طالب على الجهاز: ${extra.otherName}` : "",
+    extra.otherKey ? `مفتاح الطالب السابق: ${extra.otherKey}` : "",
+    extra.fingerprint ? `بصمة الجهاز: ${String(extra.fingerprint).slice(0, 16)}…` : ""
+  ].filter(Boolean);
+  return lines.join("\n");
+}
+
+function getStudentDeviceBlockMessage(kind) {
+  if (kind === "shared_ip_limit") return STUDENT_SHARED_IP_LIMIT_MESSAGE;
+  return STUDENT_DEVICE_USED_BY_OTHER_MESSAGE;
 }
 
 function countDistinctStudentsOnExamIp(examId, clientIp, excludeLookupKey) {
@@ -3392,9 +3415,8 @@ function checkExamSharedIpAdmission(exam, clientIp, studentLookupKey, studentCon
   if (others >= max) {
     return {
       ok: false,
-      message:
-        `تم رفض الدخول: وصل عدد الحسابات على نفس عنوان IP (${ip}) إلى الحد (${max}) لهذا الامتحان.\n\n` +
-        `يمكنك زيادة «حد الطلاب لنفس IP» في إعدادات الامتحان، أو إضافة عنوانك إلى IP الاستثناء / إعادة الدخول.`
+      message: getStudentDeviceBlockMessage("shared_ip_limit"),
+      teacherDetail: `حد IP مشترك — العنوان: ${ip} — الحد: ${max} — المستخدمون: ${others}`
     };
   }
   return { ok: true, othersOnIp: others, max };
@@ -3419,6 +3441,33 @@ function buildExamSharedIpStudentMap() {
   return map;
 }
 
+function buildExamSharedDeviceStudentMap() {
+  const map = {};
+  (systemState.results || []).forEach(res => {
+    if (!res || isSupersededResult(res)) return;
+    const fp = String(res.deviceFingerprint || "").trim();
+    const examId = res.examId || "";
+    if (!fp || !examId) return;
+    if (!map[examId]) map[examId] = {};
+    if (!map[examId][fp]) map[examId][fp] = new Set();
+    const key = res.studentLookupKey || getStudentLookupKey({
+      id: res.id,
+      name: res.name,
+      code: res.accessCode || res.code || ""
+    });
+    if (key) map[examId][fp].add(key);
+  });
+  (loadExamDeviceRegistry().bindings || []).forEach(binding => {
+    if (!binding || !binding.examId) return;
+    const fp = String(binding.deviceFingerprint || "").trim();
+    if (!fp) return;
+    if (!map[binding.examId]) map[binding.examId] = {};
+    if (!map[binding.examId][fp]) map[binding.examId][fp] = new Set();
+    if (binding.studentLookupKey) map[binding.examId][fp].add(binding.studentLookupKey);
+  });
+  return map;
+}
+
 function formatResultSharedIpBadgeHtml(res, sharedMap) {
   const ip = normalizeDeviceIp(res?.clientIp);
   const examId = res?.examId || "";
@@ -3431,6 +3480,46 @@ function formatResultSharedIpBadgeHtml(res, sharedMap) {
     `font-size:0.68rem;font-weight:800;background:rgba(245,158,11,0.18);color:var(--accent);` +
     `border:1px solid rgba(245,158,11,0.4);vertical-align:middle;">IP مشترك · ${set.size}</span>`
   );
+}
+
+function formatResultSharedDeviceBadgeHtml(res, sharedMap) {
+  const fp = String(res?.deviceFingerprint || "").trim();
+  const examId = res?.examId || "";
+  if (!fp || !examId) return "";
+  const set = sharedMap[examId]?.[fp];
+  if (!set || set.size <= 1) return "";
+  return (
+    `<span class="shared-device-badge" title="جهاز/متصفح مشترك مع ${set.size} حساب/طالب على هذا الامتحان" ` +
+    `style="display:inline-block;margin-inline-start:0.35rem;padding:0.12rem 0.45rem;border-radius:999px;` +
+    `font-size:0.68rem;font-weight:800;background:rgba(59,130,246,0.16);color:#93c5fd;` +
+    `border:1px solid rgba(59,130,246,0.35);vertical-align:middle;">جهاز مشترك · ${set.size}</span>`
+  );
+}
+
+function buildStudentSharingBadgeSummary(studentKey) {
+  if (!studentKey) return "";
+  const ipMap = buildExamSharedIpStudentMap();
+  const devMap = buildExamSharedDeviceStudentMap();
+  let maxSharedIp = 0;
+  let maxSharedDevice = 0;
+  Object.keys(ipMap).forEach(examId => {
+    Object.values(ipMap[examId] || {}).forEach(set => {
+      if (set.has(studentKey) && set.size > 1) maxSharedIp = Math.max(maxSharedIp, set.size);
+    });
+  });
+  Object.keys(devMap).forEach(examId => {
+    Object.values(devMap[examId] || {}).forEach(set => {
+      if (set.has(studentKey) && set.size > 1) maxSharedDevice = Math.max(maxSharedDevice, set.size);
+    });
+  });
+  const parts = [];
+  if (maxSharedIp > 1) {
+    parts.push(`<span class="shared-ip-badge" style="display:inline-block;margin-inline-start:0.25rem;padding:0.1rem 0.4rem;border-radius:999px;font-size:0.68rem;font-weight:800;background:rgba(245,158,11,0.18);color:var(--accent);border:1px solid rgba(245,158,11,0.4);">IP مشترك · ${maxSharedIp}</span>`);
+  }
+  if (maxSharedDevice > 1) {
+    parts.push(`<span class="shared-device-badge" style="display:inline-block;margin-inline-start:0.25rem;padding:0.1rem 0.4rem;border-radius:999px;font-size:0.68rem;font-weight:800;background:rgba(59,130,246,0.16);color:#93c5fd;border:1px solid rgba(59,130,246,0.35);">جهاز مشترك · ${maxSharedDevice}</span>`);
+  }
+  return parts.join("");
 }
 
 function resultMatchesStudentIdentity(result, student) {
@@ -10276,6 +10365,7 @@ function renderStudentResultsTable() {
   }
 
   const sharedIpMap = buildExamSharedIpStudentMap();
+  const sharedDeviceMap = buildExamSharedDeviceStudentMap();
 
   pageItems.forEach(res => {
     const row = document.createElement("tr");
@@ -10284,8 +10374,9 @@ function renderStudentResultsTable() {
     else if (displayStatus === "incomplete") row.style.borderRight = "3px solid var(--warning)";
     const statusBadge = formatResultStatusBadge(res);
     const sharedIpBadge = formatResultSharedIpBadgeHtml(res, sharedIpMap);
+    const sharedDeviceBadge = formatResultSharedDeviceBadgeHtml(res, sharedDeviceMap);
     row.innerHTML = `
-      <td>${statusBadge}${escapeHtml(res.name || "")}${sharedIpBadge}</td>
+      <td>${statusBadge}${escapeHtml(res.name || "")}${sharedIpBadge}${sharedDeviceBadge}</td>
       <td><code>${escapeHtml(res.id || "--")}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(res.accessCode || "لا يوجد")}</span></td>
       <td>${escapeHtml(res.examTitle || "")} (${escapeHtml(res.level || "عام")})</td>
@@ -11134,7 +11225,8 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
   if (window.ArabyaPlatformSync) {
     const hallCheck = window.ArabyaPlatformSync.checkExamHallIp(exam, profile.clientIp);
     if (!hallCheck.ok) {
-      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: hallCheck.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+      const teacherDetail = hallCheck.teacherDetail || hallCheck.message || "";
+      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: teacherDetail, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
       return { ok: false, message: hallCheck.message, profile };
     }
     const maxDev = window.ArabyaPlatformSync.checkMaxStudentDevices(studentLookupKey);
@@ -11149,7 +11241,14 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
   });
   const ipSlot = checkExamSharedIpAdmission(exam, profile.clientIp, studentLookupKey, ctx);
   if (!ipSlot.ok) {
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: ipSlot.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    void logExamDeviceReject_({
+      studentLookupKey,
+      studentName,
+      examId,
+      message: ipSlot.teacherDetail || formatTeacherDeviceBlockDetail("حد IP مشترك", exam, profile),
+      deviceFingerprint: profile.deviceFingerprint,
+      clientIp: profile.clientIp
+    });
     return { ok: false, message: ipSlot.message, profile };
   }
   const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
@@ -11160,24 +11259,25 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
   }
   if (attemptConflict?.kind === "other_student" && !shouldBypassExamDeviceLock(exam, profile, attemptConflict.result)) {
     const other = attemptConflict.result || {};
-    const msg =
-      "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
-      `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
-      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز." +
-      formatExamIpAllowlistHint(exam, profile) +
-      "\n\nللسماح في قاعة مشتركة: أضف عنوان IP الظاهر أعلاه في «IP مسموح بإعادة الدخول» ثم احفظ الامتحان وارفع نسخة سحابية.";
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: msg, profile };
+    const studentMsg = getStudentDeviceBlockMessage("other_student");
+    const teacherDetail = formatTeacherDeviceBlockDetail("جهاز مستخدم لطالب آخر", exam, profile, {
+      otherName: other.name || other.studentName || "",
+      otherKey: other.studentLookupKey || "",
+      fingerprint: profile.deviceFingerprint
+    });
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: teacherDetail, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: studentMsg, profile };
   }
   const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
   if (conflict && !shouldBypassExamDeviceLock(exam, profile, conflict)) {
-    const msg =
-      "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
-      `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
-      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز." +
-      formatExamIpAllowlistHint(exam, profile);
-    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: msg, profile };
+    const studentMsg = getStudentDeviceBlockMessage("registry_conflict");
+    const teacherDetail = formatTeacherDeviceBlockDetail("سجل جهاز مرتبط بطالب آخر", exam, profile, {
+      otherName: conflict.studentName || "",
+      otherKey: conflict.studentLookupKey || "",
+      fingerprint: profile.deviceFingerprint
+    });
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: teacherDetail, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: studentMsg, profile };
   }
   registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
   return { ok: true, profile };
@@ -12311,8 +12411,9 @@ function renderTeacherStudentsTable() {
       : "";
     const row = document.createElement("tr");
     const studentIp = getStudentDisplayIp(s);
+    const sharingBadges = buildStudentSharingBadgeSummary(studentKey);
     row.innerHTML = `
-      <td>${escapeHtml(s.name || "")}${canceledBadge}</td>
+      <td>${escapeHtml(s.name || "")}${sharingBadges}${canceledBadge}</td>
       <td><code>${escapeHtml(s.id || "--")}</code></td>
       <td><span style="color:var(--accent); font-weight:700;">${escapeHtml(s.code || "لا يوجد")}</span></td>
       <td><code style="font-size:0.78rem;">${escapeHtml(studentIp)}</code></td>

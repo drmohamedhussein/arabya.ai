@@ -256,4 +256,11 @@ assert.ok(!shouldBypassExamDeviceLock(
   blockedOther
 ), "no allowlist keeps device lock");
 
+const studentBlockMsg =
+  "تم حظر الدخول إلى الامتحان.\n\n" +
+  "سبق استخدام هذا الجهاز أو المتصفح لمحاولة أخرى على نفس الامتحان.\n\n" +
+  "يرجى التواصل مع المعلم أو مدير المنصة.";
+assert.ok(!studentBlockMsg.includes("آخر طالب"), "student block message must not expose other student");
+assert.ok(!studentBlockMsg.includes("قاعة مشتركة"), "student block message must not include teacher instructions");
+
 console.log("All exam device lock tests passed.");

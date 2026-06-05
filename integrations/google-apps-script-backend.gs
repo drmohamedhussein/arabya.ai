@@ -570,11 +570,17 @@ function registerArabyaExamAttempt_(data) {
   var clientIp = String(data.clientIp || "").trim();
   var attemptConflict = findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
   if (attemptConflict && attemptConflict.kind === "other_student") {
-    return { error: "تم رفض الدخول: هذا الجهاز استُخدم لطالب آخر.", code: "device_conflict" };
+    return {
+      error: "تم حظر الدخول إلى الامتحان. سبق استخدام هذا الجهاز لمحاولة أخرى. يرجى التواصل مع المعلم أو مدير المنصة.",
+      code: "device_conflict"
+    };
   }
   var registryConflict = findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
   if (registryConflict) {
-    return { error: "تم رفض الدخول: الجهاز مرتبط بطالب آخر.", code: "device_registry_conflict" };
+    return {
+      error: "تم حظر الدخول إلى الامتحان. سبق استخدام هذا الجهاز لمحاولة أخرى. يرجى التواصل مع المعلم أو مدير المنصة.",
+      code: "device_registry_conflict"
+    };
   }
   var token = Utilities.getUuid();
   var attempt = {

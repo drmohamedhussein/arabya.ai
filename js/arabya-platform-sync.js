@@ -388,12 +388,17 @@
     ];
     const ip = String(clientIp || "").trim();
     if (!ip) {
-      return { ok: false, message: "وضع قاعة الامتحان مفعّل — تعذّر التحقق من عنوان IP." };
+      return {
+        ok: false,
+        message: "تعذّر التحقق من شبكة الاتصال. يرجى التواصل مع المعلم أو مدير المنصة.",
+        teacherDetail: "وضع قاعة الامتحان مفعّل — تعذّر التحقق من عنوان IP للطالب."
+      };
     }
     if (!ipMatchesAllowedList(ip, allowedList)) {
       return {
         ok: false,
-        message: `الامتحان مقفول على عناوين IP محددة فقط. المسموح: ${allowedList.join(" ، ")} — عنوانك: ${ip}`
+        message: "الامتحان متاح من شبكة القاعة المحددة فقط. يرجى التواصل مع المعلم أو مدير المنصة إن كنت داخل القاعة.",
+        teacherDetail: `وضع قاعة IP — المسموح: ${allowedList.join(" ، ")} — عنوان الطالب: ${ip}`
       };
     }
     return { ok: true };
