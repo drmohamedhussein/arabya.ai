@@ -278,10 +278,13 @@ function arabyaFindStudentsByCode(code) {
   });
 }
 
-function validateArabyaStudentIdentity(id, code, currentId) {
+function validateArabyaStudentIdentity(id, code, options) {
+  var opts = typeof options === "string" ? { editingStudentKey: options } : (options || {});
   if (typeof window.arabyaValidateStudentIdentity === "function") {
     return window.arabyaValidateStudentIdentity(id, code, {
-      editingStudentKey: currentId || (window.systemState && window.systemState.editingStudentKey) || ""
+      editingStudentKey: opts.editingStudentKey || (window.systemState && window.systemState.editingStudentKey) || "",
+      name: opts.name || "",
+      purpose: opts.purpose || ""
     });
   }
 
@@ -302,6 +305,12 @@ function validateArabyaStudentIdentity(id, code, currentId) {
     var ownerId = typeof window.normalizeStudentId === "function"
       ? window.normalizeStudentId(owner.id)
       : String(owner.id || "").trim().toUpperCase();
+    if (opts.purpose === "exam_start") {
+      if (normalizedId && ownerId && ownerId !== normalizedId) {
+        return { ok: false, message: "كود الاشتراك لا يطابق معرف الهوية المُدخل. اترك المعرف فارغاً أو استخدم المعرف الصحيح لهذا الكود." };
+      }
+      return { ok: true };
+    }
     if (normalizedId && ownerId && ownerId !== normalizedId) {
       return { ok: false, message: "كود الاشتراك الذي أدخلته مخصص لطالب آخر. اكتب الكود الصحيح الخاص بك أو اترك حقل ID فارغاً." };
     }
@@ -343,7 +352,11 @@ function enforceArabyaUniqueStudentCodes() {
     if (startBtn) {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("student-id-input") || {}).value,
-        (document.getElementById("student-access-code") || {}).value
+        (document.getElementById("student-access-code") || {}).value,
+        {
+          name: (document.getElementById("student-fullname-input") || {}).value,
+          purpose: "exam_start"
+        }
       );
     } else if (registerBtn) {
       validation = validateArabyaStudentIdentity(
@@ -359,7 +372,10 @@ function enforceArabyaUniqueStudentCodes() {
       validation = validateArabyaStudentIdentity(
         (document.getElementById("new-student-id") || {}).value,
         (document.getElementById("new-student-code") || {}).value,
-        window.systemState ? (window.systemState.editingStudentKey || window.systemState.editingStudentId || "") : ""
+        {
+          editingStudentKey: window.systemState ? (window.systemState.editingStudentKey || window.systemState.editingStudentId || "") : "",
+          name: (document.getElementById("new-student-name") || {}).value
+        }
       );
     }
 

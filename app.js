@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.36";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.37";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3256,6 +3256,16 @@ function validateStudentIdentityInput(id, code, options = {}) {
     }
 
     if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode)) {
+      if (options.purpose === "exam_start") {
+        // الكود يعمل كاسم مستخدم للدخول — نفس الكود يعني نفس حساب الطالب عبر امتحانات متعددة.
+        if (normalizedId && otherId && otherId !== normalizedId) {
+          return {
+            ok: false,
+            message: "كود الاشتراك لا يطابق معرف الهوية المُدخل. اترك المعرف فارغاً أو استخدم المعرف الصحيح لهذا الكود."
+          };
+        }
+        continue;
+      }
       if (otherName !== normalizedName) {
         return {
           ok: false,
@@ -7987,7 +7997,7 @@ async function validateStudentAndStart() {
     }
   }
 
-  const identityCheck = validateStudentIdentityInput(id, rawCode, { name });
+  const identityCheck = validateStudentIdentityInput(id, rawCode, { name, purpose: "exam_start" });
   if (!identityCheck.ok) {
     alert(identityCheck.message);
     return;

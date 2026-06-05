@@ -77,8 +77,12 @@ function validateStudentIdentityInput(id, code, students, options = {}) {
     if (normalizedId && otherId === normalizedId && otherName !== normalizedName) {
       return { ok: false };
     }
-    if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode) && otherName !== normalizedName) {
-      return { ok: false };
+    if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode)) {
+      if (options.purpose === "exam_start") {
+        if (normalizedId && otherId && otherId !== normalizedId) return { ok: false };
+        continue;
+      }
+      if (otherName !== normalizedName) return { ok: false };
     }
   }
   return { ok: true };
@@ -102,5 +106,9 @@ const students = [
 assert.strictEqual(validateStudentIdentityInput("A1", "99999", students, { name: "Other" }).ok, false);
 assert.strictEqual(validateStudentIdentityInput("", "22222", students, { name: "New", editingStudentKey: "s3" }).ok, false);
 assert.strictEqual(validateStudentIdentityInput("", "", students, { name: "Ali" }).ok, true);
+assert.strictEqual(validateStudentIdentityInput("", "22222", students, { name: "Sara", purpose: "exam_start" }).ok, true);
+assert.strictEqual(validateStudentIdentityInput("", "22222", students, { name: "Different Name", purpose: "exam_start" }).ok, true);
+assert.strictEqual(validateStudentIdentityInput("WRONG", "22222", students, { name: "Sara", purpose: "exam_start" }).ok, false);
+assert.strictEqual(validateStudentIdentityInput("A2", "22222", students, { name: "Sara", purpose: "exam_start" }).ok, true);
 
 console.log("All student flow tests passed.");
