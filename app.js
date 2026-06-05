@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.34";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.35";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -4394,11 +4394,14 @@ function buildSaveBackupPayload(reason) {
       results: systemState.results,
       examDeviceRegistry: loadExamDeviceRegistry()
     };
+  const clientReason = String(reason || "push");
   let data = fullData;
+  data._clientReason = clientReason;
   let payload = { action: "save_backup", data, actor };
   let json = JSON.stringify(payload);
   if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
     data = slimCloudBackupDataForSize(fullData);
+    data._clientReason = clientReason;
     payload = { action: "save_backup", data, actor };
     json = JSON.stringify(payload);
   }

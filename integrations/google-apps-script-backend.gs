@@ -100,7 +100,10 @@ function doPost(e) {
 
     if (action === "save_backup") {
       var actor = data.actor || (data.data && data.data._actor) || {};
-      var merged = mergeArabyaDatabase_(data.data || {}, "save_backup", actor);
+      var clientReason = data && data.data && data.data._clientReason
+        ? String(data.data._clientReason)
+        : "";
+      var merged = mergeArabyaDatabase_(data.data || {}, "save_backup", actor, clientReason);
       return jsonArabya_({
         status: "success",
         action: action,
@@ -226,6 +229,7 @@ function sanitizeArabyaDbForClient_(db) {
   var copy = JSON.parse(JSON.stringify(db));
   delete copy._sha;
   delete copy._githubSyncSkipped;
+  delete copy._clientReason;
   if (Array.isArray(copy.teachers)) {
     copy.teachers = copy.teachers.map(function(teacher) {
       if (!teacher) return teacher;
@@ -573,7 +577,12 @@ function pickLatestArabyaAppVersion_() {
   return best;
 }
 
-function mergeArabyaDatabase_(patch, reason, actor) {
+function shouldSkipExamMetaMerge_(clientReason) {
+  return /exam_submit/i.test(String(clientReason || ""));
+}
+
+function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
+  if (patch && patch._clientReason) delete patch._clientReason;
   var db = readArabyaDatabase_();
   if (!Array.isArray(db.deletedStudentKeys)) db.deletedStudentKeys = [];
   if (!Array.isArray(db.deletedResultKeys)) db.deletedResultKeys = [];
@@ -585,6 +594,7 @@ function mergeArabyaDatabase_(patch, reason, actor) {
   }
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
     if (!Array.isArray(patch[collection])) return;
+    if (collection === "exams" && shouldSkipExamMetaMerge_(clientReason)) return;
     if (reason === "save_backup" && collection === "students") {
       db.students = patch.students.map(function(item) {
         return JSON.parse(JSON.stringify(item || {}));
