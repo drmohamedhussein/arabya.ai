@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.6";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.7";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3958,6 +3958,7 @@ function activateTeacherTab(tabId, options = {}) {
   } else if (normalizedTab === "stats") {
     renderTeacherStatsDashboard();
   } else if (normalizedTab === "results") {
+    renderStudentResultsTable();
     if (typeof pullTeacherResultsFromCloud === "function") {
       pullTeacherResultsFromCloud();
     } else {
@@ -5112,15 +5113,18 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
 
+  const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
   let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: !!options.forcePull });
-  if (!syncResult.ok && syncResult.skipped && !options.forcePull) {
-    const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
-    if (retryReasons.has(syncResult.reason)) {
+  if (!syncResult.ok && syncResult.skipped && !options.forcePull && retryReasons.has(syncResult.reason)) {
+    const retryDelays = [6000, 10000, 14000];
+    for (const delayMs of retryDelays) {
       if (el) {
         el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري انتظار اكتمال الرفع السحابي ثم إعادة الجلب...`;
       }
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      await new Promise(resolve => setTimeout(resolve, delayMs));
       syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+      if (syncResult.ok) break;
+      if (!syncResult.skipped || !retryReasons.has(syncResult.reason)) break;
     }
   }
 
