@@ -28,6 +28,8 @@ test("cross-browser: GAS exposes teacher_login scope with auth fields", () => {
   assert.ok(teacherLoginBlock.includes("delete safe.password"));
   assert.ok(!teacherLoginBlock.includes("delete safe.passwordHash"));
   assert.ok(!teacherLoginBlock.includes("delete safe.autoEntryCode"));
+  assert.ok(teacherLoginBlock.includes("config: {"));
+  assert.ok(teacherLoginBlock.includes("googleFormUrl"));
 });
 
 test("cross-browser: cloud backup preserves teacher auth hashes", () => {

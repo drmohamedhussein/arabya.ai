@@ -24,7 +24,8 @@ var ARABYA_DEFAULT_DB = {
   questionBanks: {},
   deletedStudentKeys: [],
   deletedResultKeys: [],
-  auditLog: []
+  auditLog: [],
+  config: {}
 };
 
 /** أعمدة ورقة «نتائج الطلاب» — يجب أن يطابق ترتيب buildArabyaResultRow_ */
@@ -299,10 +300,15 @@ function sanitizeArabyaDbForClient_(db) {
 
 /** يُعيد بيانات دخول المعلمين فقط — يتطلب ARABYA_API_SECRET عند تفعيله. */
 function sanitizeArabyaDbForTeacherLogin_(db) {
-  if (!db) return { teachers: [], schemaVersion: ARABYA_DEFAULT_DB.schemaVersion };
+  if (!db) return { teachers: [], schemaVersion: ARABYA_DEFAULT_DB.schemaVersion, config: {} };
   var teachers = Array.isArray(db.teachers) ? db.teachers : [];
+  var storedConfig = db.config && typeof db.config === "object" ? db.config : {};
   return {
     schemaVersion: db.schemaVersion || ARABYA_DEFAULT_DB.schemaVersion,
+    config: {
+      googleFormUrl: String(storedConfig.googleFormUrl || "").trim(),
+      apiSecret: String(storedConfig.apiSecret || "").trim()
+    },
     teachers: teachers.map(function(teacher) {
       if (!teacher) return teacher;
       var safe = Object.assign({}, teacher);
@@ -1142,8 +1148,11 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
   if (patch.questionBanks && typeof patch.questionBanks === "object") {
     db.questionBanks = deepMergeArabyaObjects_(db.questionBanks || {}, patch.questionBanks);
   }
-  if (patch.config && typeof patch.config === "object" && patch.config.appVersion) {
-    db.appVersion = pickLatestArabyaAppVersion_(db.appVersion, patch.config.appVersion);
+  if (patch.config && typeof patch.config === "object") {
+    db.config = deepMergeArabyaObjects_(db.config || {}, patch.config);
+    if (patch.config.appVersion) {
+      db.appVersion = pickLatestArabyaAppVersion_(db.appVersion, patch.config.appVersion);
+    }
   }
   if (patch.appVersion) {
     db.appVersion = pickLatestArabyaAppVersion_(db.appVersion, patch.appVersion);

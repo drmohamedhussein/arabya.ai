@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.12";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.13";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -4351,8 +4351,16 @@ function mergeTeacherIntegrationConfigPreservingLocalSync_(remoteCfg, localCfg) 
   const localSecret = [vault.apiSecret, localCfg?.apiSecret, storedCfg.apiSecret]
     .map(s => String(s || "").trim())
     .find(Boolean);
-  if (localUrl) merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
-  if (localSecret) merged.apiSecret = localSecret;
+  if (localUrl) {
+    merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
+  } else if (isValidCloudSyncUrl(remoteCfg?.googleFormUrl)) {
+    merged.googleFormUrl = normalizeArabyaWebAppUrl(String(remoteCfg.googleFormUrl).trim());
+  }
+  if (localSecret) {
+    merged.apiSecret = localSecret;
+  } else if (String(remoteCfg?.apiSecret || "").trim()) {
+    merged.apiSecret = String(remoteCfg.apiSecret).trim();
+  }
   return merged;
 }
 
@@ -4771,7 +4779,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
       remoteAppVersion,
       systemState.config.appVersion
     );
-    applyTeacherSyncCredentialsToState();
+    persistTeacherSyncCredentialsFromConfig(systemState.config);
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
@@ -4868,9 +4876,65 @@ function mergeRemoteConfigPreservingLocalSync_(localCfg, remoteCfg) {
   const localSecret = [vault.apiSecret, local.apiSecret, storedCfg.apiSecret]
     .map(s => String(s || "").trim())
     .find(Boolean);
-  if (localUrl) merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
-  if (localSecret) merged.apiSecret = localSecret;
+  if (localUrl) {
+    merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
+  } else if (isValidCloudSyncUrl(remote.googleFormUrl)) {
+    merged.googleFormUrl = normalizeArabyaWebAppUrl(String(remote.googleFormUrl).trim());
+  }
+  if (localSecret) {
+    merged.apiSecret = localSecret;
+  } else if (String(remote.apiSecret || "").trim()) {
+    merged.apiSecret = String(remote.apiSecret).trim();
+  }
+  if (!localUrl && merged.googleFormUrl) {
+    saveTeacherSyncCredentials(merged.googleFormUrl, merged.apiSecret || "");
+  } else if (!localSecret && merged.apiSecret) {
+    saveTeacherSyncCredentials(merged.googleFormUrl || localUrl || "", merged.apiSecret);
+  }
   return merged;
+}
+
+function persistTeacherSyncCredentialsFromConfig(config) {
+  if (!config || typeof config !== "object") return false;
+  const url = String(config.googleFormUrl || "").trim();
+  const secret = String(config.apiSecret || "").trim();
+  if (!isValidCloudSyncUrl(url) && !secret) return false;
+  saveTeacherSyncCredentials(url, secret);
+  applyTeacherSyncCredentialsToState();
+  return true;
+}
+
+function ensureSyncCredentialsInStateBeforeCloudPush() {
+  applyTeacherSyncCredentialsToState();
+  const creds = loadTeacherSyncCredentials();
+  systemState.config = systemState.config || {};
+  if (isValidCloudSyncUrl(creds.googleFormUrl)) {
+    systemState.config.googleFormUrl = normalizeArabyaWebAppUrl(String(creds.googleFormUrl).trim());
+  }
+  if (String(creds.apiSecret || "").trim()) {
+    systemState.config.apiSecret = String(creds.apiSecret).trim();
+  }
+  if (systemState.activeTeacher) {
+    systemState.activeTeacher.integrationConfig = mergeTeacherIntegrationConfigPreservingLocalSync_(
+      {},
+      systemState.activeTeacher.integrationConfig || {}
+    );
+    const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+    if (idx !== -1) {
+      systemState.teachers[idx].integrationConfig = {
+        ...(systemState.teachers[idx].integrationConfig || {}),
+        ...(systemState.activeTeacher.integrationConfig || {})
+      };
+    }
+  }
+}
+
+async function pushLocalStateToCloudNow(reason) {
+  ensureSyncCredentialsInStateBeforeCloudPush();
+  if (typeof suspendCloudPullForMs === "function") {
+    suspendCloudPullForMs(30000);
+  }
+  return pushCloudBackupNow(reason || "immediate_push");
 }
 
 function getTeacherLoginFormApiSecret() {
@@ -5013,6 +5077,7 @@ function slimCloudBackupDataForSize(data) {
 }
 
 function buildSaveBackupPayload(reason) {
+  ensureSyncCredentialsInStateBeforeCloudPush();
   const actor = window.ArabyaPlatformSync ? window.ArabyaPlatformSync.getCloudSyncActor() : { username: systemState.activeTeacher?.username || "" };
   const fullData = typeof buildFullCloudBackupData === "function"
     ? buildFullCloudBackupData()
@@ -5851,6 +5916,9 @@ async function prefetchTeacherAccountsFromCloud(syncUrl, apiSecret) {
     pruneOrphanTeacherAccounts();
     reconcileDuplicateSuperAdminAccounts();
     persistTeacherLoginCloudSettings(url, apiSecret);
+    if (response.data.config) {
+      persistTeacherSyncCredentialsFromConfig(response.data.config);
+    }
     return { ok: true, count: systemState.teachers.length };
   } catch (err) {
     console.warn("prefetchTeacherAccountsFromCloud:", err);
@@ -5921,7 +5989,7 @@ function applyCloudBackupData(data) {
       remoteAppVersion,
       systemState.config.appVersion
     );
-    applyTeacherSyncCredentialsToState();
+    persistTeacherSyncCredentialsFromConfig(systemState.config);
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
@@ -7407,12 +7475,16 @@ async function saveTeacherProfile() {
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   saveSystemState(false);
-  loadTeacherDashboardData();
 
   updateTeacherCredentialSyncIndicator(null, true);
-  const syncResult = await syncTeacherCredentialsToCloud();
-  updateTeacherCredentialSyncIndicator(syncResult, false);
-  alert(formatTeacherCredentialSyncMessage(syncResult));
+  const cloudOk = await pushLocalStateToCloudNow("teacher_profile_save");
+  updateTeacherCredentialSyncIndicator({ ok: cloudOk, reason: cloudOk ? "synced" : "failed" }, false);
+  loadTeacherDashboardData();
+  alert(
+    cloudOk
+      ? "تم حفظ الملف الشخصي ورفعه إلى السحابة فوراً. يمكنك استعادته من أي متصفح."
+      : "تم الحفظ محلياً. تعذّر الرفع الفوري للسحابة — تحقق من رابط الربط وسر API ثم أعد الحفظ."
+  );
 }
 
 async function saveTeacherIntegrationConfig() {
@@ -7491,34 +7563,33 @@ async function saveTeacherIntegrationConfig() {
   if (isValidCloudSyncUrl(url)) persistCloudSyncUrlForTeacher(url);
   saveSystemState(false);
 
-  updateTeacherCredentialSyncIndicator(null, true);
-  let syncResult = { ok: false, reason: "no_url" };
-  if (isValidCloudSyncUrl(url)) {
-    syncResult = await syncTeacherCredentialsToCloud();
-    try {
-      await pushCloudBackupNow("integration_config_save");
-    } catch (e) {
-      console.warn("[ARABYA] integration_config_save push failed:", e);
-    }
-  } else {
-    syncResult = { ok: false, reason: "invalid_url" };
+  if (!isValidCloudSyncUrl(url)) {
+    alert("صيغة رابط المزامنة غير صالحة. يجب أن ينتهي الرابط بـ /exec");
+    return;
   }
-  updateTeacherCredentialSyncIndicator(syncResult, false);
+
+  updateTeacherCredentialSyncIndicator(null, true);
+  refreshCloudSyncStatusUI("جاري رفع إعدادات الربط إلى السحابة...", "syncing");
+  const cloudOk = await pushLocalStateToCloudNow("integration_config_save");
+  if (cloudOk) {
+    try {
+      await ensureCloudTeacherAuthBackup();
+    } catch (e) {
+      console.warn("[ARABYA] ensureCloudTeacherAuthBackup:", e);
+    }
+  }
+  updateTeacherCredentialSyncIndicator({ ok: cloudOk, reason: cloudOk ? "synced" : "failed" }, false);
+  refreshCloudSyncStatusUI();
 
   const urlInput = document.getElementById("teacher-config-url");
   const secretInput = document.getElementById("teacher-config-api-secret");
   if (urlInput) urlInput.value = url;
   if (secretInput) secretInput.value = apiSecret;
 
-  if (!isValidCloudSyncUrl(url)) {
-    alert("صيغة رابط المزامنة غير صالحة. يجب أن ينتهي الرابط بـ /exec");
-    return;
-  }
   alert(
-    (syncResult.ok
-      ? "تم حفظ إعدادات الربط والمزامنة بنجاح."
-      : "تم الحفظ محلياً. تحقق من الاتصال بالسحابة إن لم تُرفع الإعدادات.") +
-    "\n\nلن يُستبدَل الرابط أو سر API بقيم قديمة من السحابة."
+    cloudOk
+      ? "تم حفظ إعدادات الربط ورفعها إلى السحابة فوراً.\n\nيمكنك استعادة الرابط وسر API وبياناتك من أي متصفح بعد تسجيل الدخول."
+      : "تم الحفظ محلياً فقط. تعذّر الرفع الفوري للسحابة.\n\nتحقق من:\n- صحة رابط /exec\n- نشر Apps Script كـ New version\n- تطابق سر API مع Script Properties"
   );
 }
 
