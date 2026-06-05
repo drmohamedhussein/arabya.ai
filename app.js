@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.11";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.12";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1411,6 +1411,7 @@ function initDatabase() {
       systemState.config = { ...systemState.config, ...parsedConfig }; 
       systemState.activeTeacher.integrationConfig = {
         googleFormUrl: systemState.config.googleFormUrl,
+        apiSecret: systemState.config.apiSecret || "",
         entryName: systemState.config.entryName,
         entryId: systemState.config.entryId,
         entryCode: systemState.config.entryCode,
@@ -1448,7 +1449,8 @@ function initDatabase() {
   if (systemState.activeTeacher) {
     syncActiveTeacherCredentials();
   }
-  
+  applyTeacherSyncCredentialsToState();
+
   // 2. تهيئة قاعدة بيانات الامتحانات
   const savedExams = localStorage.getItem("arabya_exams_db");
   loadExamsForCurrentSession(savedExams);
@@ -4213,6 +4215,10 @@ function getArabyaWebAppUrls() {
 
 function getGeneralTeacherSyncUrls() {
   const urls = new Set();
+  const vault = loadTeacherSyncCredentials();
+  if (isValidCloudSyncUrl(vault.googleFormUrl)) {
+    urls.add(normalizeArabyaWebAppUrl(String(vault.googleFormUrl).trim()));
+  }
   if (systemState.config && isValidCloudSyncUrl(systemState.config.googleFormUrl)) {
     urls.add(normalizeArabyaWebAppUrl(systemState.config.googleFormUrl.trim()));
   }
@@ -4329,6 +4335,27 @@ function mergeRemoteCollection_(current, incoming, keyFn, label) {
 
 
 
+function mergeTeacherIntegrationConfigPreservingLocalSync_(remoteCfg, localCfg) {
+  const merged = { ...(remoteCfg || {}), ...(localCfg || {}) };
+  const vault = loadTeacherSyncCredentials();
+  const storedCfg = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    } catch (e) {
+      return {};
+    }
+  })();
+  const localUrl = [vault.googleFormUrl, localCfg?.googleFormUrl, storedCfg.googleFormUrl]
+    .map(u => String(u || "").trim())
+    .find(u => isValidCloudSyncUrl(u));
+  const localSecret = [vault.apiSecret, localCfg?.apiSecret, storedCfg.apiSecret]
+    .map(s => String(s || "").trim())
+    .find(Boolean);
+  if (localUrl) merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
+  if (localSecret) merged.apiSecret = localSecret;
+  return merged;
+}
+
 function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
   const keyFn = item => String(item.username || item.name || "");
   const map = {};
@@ -4347,10 +4374,10 @@ function mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers) {
       passwordSalt: local.passwordSalt || remote.passwordSalt,
       password: local.password || (local.passwordHash ? "" : remote.password),
       autoEntryCode: local.autoEntryCode || remote.autoEntryCode || remote.password,
-      integrationConfig: {
-        ...(remote.integrationConfig || {}),
-        ...(local.integrationConfig || {})
-      }
+      integrationConfig: mergeTeacherIntegrationConfigPreservingLocalSync_(
+        remote.integrationConfig || {},
+        local.integrationConfig || {}
+      )
     };
     if (map[key].passwordHash) delete map[key].password;
   });
@@ -4738,12 +4765,13 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   if (!examStartOnly && remoteData.config && typeof remoteData.config === "object") {
     const remoteAppVersion = remoteData.config.appVersion;
-    systemState.config = { ...(systemState.config || {}), ...remoteData.config };
+    systemState.config = mergeRemoteConfigPreservingLocalSync_(systemState.config, remoteData.config);
     systemState.config.appVersion = pickLatestAppVersion(
       ARABYA_APP_BUILD_VERSION,
       remoteAppVersion,
       systemState.config.appVersion
     );
+    applyTeacherSyncCredentialsToState();
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
@@ -4768,6 +4796,82 @@ function normalizeArabyaWebAppUrl(rawUrl) {
 }
 
 const ARABYA_API_SECRET_QUERY = "apiSecret";
+const ARABYA_TEACHER_SYNC_CREDENTIALS_KEY = "arabya_teacher_sync_credentials";
+
+function loadTeacherSyncCredentials() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(ARABYA_TEACHER_SYNC_CREDENTIALS_KEY) || "{}");
+    return raw && typeof raw === "object" ? raw : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveTeacherSyncCredentials(syncUrl, apiSecret) {
+  const creds = loadTeacherSyncCredentials();
+  const cleanUrl = isValidCloudSyncUrl(syncUrl) ? normalizeArabyaWebAppUrl(String(syncUrl).trim()) : "";
+  const secret = String(apiSecret || "").trim();
+  if (cleanUrl) creds.googleFormUrl = cleanUrl;
+  if (secret) creds.apiSecret = secret;
+  if (!cleanUrl && !secret) return;
+  creds.updatedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(ARABYA_TEACHER_SYNC_CREDENTIALS_KEY, JSON.stringify(creds));
+  } catch (e) {}
+  persistTeacherLoginCloudSettings(cleanUrl || creds.googleFormUrl || "", secret || creds.apiSecret || "");
+}
+
+function applyTeacherSyncCredentialsToState() {
+  const creds = loadTeacherSyncCredentials();
+  const url = isValidCloudSyncUrl(creds.googleFormUrl) ? normalizeArabyaWebAppUrl(String(creds.googleFormUrl).trim()) : "";
+  const secret = String(creds.apiSecret || "").trim();
+  if (!url && !secret) return false;
+  systemState.config = systemState.config || {};
+  if (url) systemState.config.googleFormUrl = url;
+  if (secret) systemState.config.apiSecret = secret;
+  if (systemState.activeTeacher) {
+    systemState.activeTeacher.integrationConfig = {
+      ...(systemState.activeTeacher.integrationConfig || {}),
+      ...(url ? { googleFormUrl: url } : {}),
+      ...(secret ? { apiSecret: secret } : {})
+    };
+    const idx = systemState.teachers.findIndex(t => t.username === systemState.activeTeacher.username);
+    if (idx !== -1) {
+      systemState.teachers[idx].integrationConfig = {
+        ...(systemState.teachers[idx].integrationConfig || {}),
+        ...(systemState.activeTeacher.integrationConfig || {})
+      };
+    }
+  }
+  try {
+    localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    saveTeachersToLocalStorage();
+  } catch (e) {}
+  return true;
+}
+
+function mergeRemoteConfigPreservingLocalSync_(localCfg, remoteCfg) {
+  const local = { ...(localCfg || {}) };
+  const remote = { ...(remoteCfg || {}) };
+  const merged = { ...local, ...remote };
+  const vault = loadTeacherSyncCredentials();
+  const storedCfg = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    } catch (e) {
+      return {};
+    }
+  })();
+  const localUrl = [vault.googleFormUrl, local.googleFormUrl, storedCfg.googleFormUrl]
+    .map(u => String(u || "").trim())
+    .find(u => isValidCloudSyncUrl(u));
+  const localSecret = [vault.apiSecret, local.apiSecret, storedCfg.apiSecret]
+    .map(s => String(s || "").trim())
+    .find(Boolean);
+  if (localUrl) merged.googleFormUrl = normalizeArabyaWebAppUrl(localUrl);
+  if (localSecret) merged.apiSecret = localSecret;
+  return merged;
+}
 
 function getTeacherLoginFormApiSecret() {
   try {
@@ -4781,14 +4885,15 @@ function getTeacherLoginFormApiSecret() {
 }
 
 function getArabyaApiSecret() {
+  const vault = loadTeacherSyncCredentials();
   const fromTeacher = systemState.activeTeacher?.integrationConfig?.apiSecret;
   const fromConfig = systemState.config?.apiSecret;
   try {
     const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
     const pending = localStorage.getItem("arabya_pending_api_secret") || "";
-    return String(fromTeacher || fromConfig || cfg.apiSecret || pending || "").trim();
+    return String(vault.apiSecret || fromTeacher || fromConfig || cfg.apiSecret || pending || "").trim();
   } catch (e) {
-    return String(fromTeacher || fromConfig || getTeacherLoginFormApiSecret() || "").trim();
+    return String(vault.apiSecret || fromTeacher || fromConfig || getTeacherLoginFormApiSecret() || "").trim();
   }
 }
 
@@ -5810,12 +5915,13 @@ function applyCloudBackupData(data) {
   }
   if (data.config && typeof data.config === "object") {
     const remoteAppVersion = data.config.appVersion;
-    systemState.config = { ...(systemState.config || {}), ...data.config };
+    systemState.config = mergeRemoteConfigPreservingLocalSync_(systemState.config, data.config);
     systemState.config.appVersion = pickLatestAppVersion(
       ARABYA_APP_BUILD_VERSION,
       remoteAppVersion,
       systemState.config.appVersion
     );
+    applyTeacherSyncCredentialsToState();
     try {
       localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
     } catch (e) {}
@@ -7171,6 +7277,7 @@ function loadTeacherDashboardData() {
   normalizeTeacherAccount(systemState.activeTeacher);
   updateTeacherDashboardAccessUI();
   applyUnifiedCloudSyncModel();
+  applyTeacherSyncCredentialsToState();
 
   document.getElementById("teacher-profile-name").value = systemState.activeTeacher.name;
   document.getElementById("teacher-profile-subject").value = systemState.activeTeacher.subject;
@@ -7212,6 +7319,21 @@ function loadTeacherDashboardData() {
   restoreTeacherActiveTab();
 
   syncDatabaseFromCloud({ silent: true }).then(synced => {
+    applyTeacherSyncCredentialsToState();
+    if (systemState.activeTeacher) {
+      const urlInput = document.getElementById("teacher-config-url");
+      const secretInput = document.getElementById("teacher-config-api-secret");
+      if (urlInput) {
+        urlInput.value = systemState.activeTeacher.integrationConfig?.googleFormUrl
+          || systemState.config?.googleFormUrl
+          || "";
+      }
+      if (secretInput) {
+        secretInput.value = systemState.activeTeacher.integrationConfig?.apiSecret
+          || systemState.config?.apiSecret
+          || "";
+      }
+    }
     if (synced && synced.ok) {
       refreshTeacherDashboardViews({ all: true });
     }
@@ -7365,12 +7487,39 @@ async function saveTeacherIntegrationConfig() {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_profile", JSON.stringify(systemState.teacherProfile));
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+  saveTeacherSyncCredentials(url, apiSecret);
+  if (isValidCloudSyncUrl(url)) persistCloudSyncUrlForTeacher(url);
   saveSystemState(false);
 
   updateTeacherCredentialSyncIndicator(null, true);
-  const syncResult = await syncTeacherCredentialsToCloud();
+  let syncResult = { ok: false, reason: "no_url" };
+  if (isValidCloudSyncUrl(url)) {
+    syncResult = await syncTeacherCredentialsToCloud();
+    try {
+      await pushCloudBackupNow("integration_config_save");
+    } catch (e) {
+      console.warn("[ARABYA] integration_config_save push failed:", e);
+    }
+  } else {
+    syncResult = { ok: false, reason: "invalid_url" };
+  }
   updateTeacherCredentialSyncIndicator(syncResult, false);
-  alert(formatTeacherCredentialSyncMessage(syncResult));
+
+  const urlInput = document.getElementById("teacher-config-url");
+  const secretInput = document.getElementById("teacher-config-api-secret");
+  if (urlInput) urlInput.value = url;
+  if (secretInput) secretInput.value = apiSecret;
+
+  if (!isValidCloudSyncUrl(url)) {
+    alert("صيغة رابط المزامنة غير صالحة. يجب أن ينتهي الرابط بـ /exec");
+    return;
+  }
+  alert(
+    (syncResult.ok
+      ? "تم حفظ إعدادات الربط والمزامنة بنجاح."
+      : "تم الحفظ محلياً. تحقق من الاتصال بالسحابة إن لم تُرفع الإعدادات.") +
+    "\n\nلن يُستبدَل الرابط أو سر API بقيم قديمة من السحابة."
+  );
 }
 
 // عرض الامتحانات
