@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.9";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.11";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3340,14 +3340,8 @@ function shouldBypassExamDeviceLock(exam, profile, conflictResult) {
   return false;
 }
 
-const STUDENT_DEVICE_USED_BY_OTHER_MESSAGE =
-  "تم حظر الدخول إلى الامتحان.\n\n" +
-  "سبق استخدام هذا الجهاز أو المتصفح لمحاولة أخرى على نفس الامتحان.\n\n" +
-  "يرجى التواصل مع المعلم أو مدير المنصة.";
-
-const STUDENT_SHARED_IP_LIMIT_MESSAGE =
-  "تم حظر الدخول إلى الامتحان.\n\n" +
-  "وصل عدد الطلاب المسموح لهم على نفس الشبكة إلى الحد الأقصى.\n\n" +
+const STUDENT_EXPLICIT_ACCESS_BLOCK_MESSAGE =
+  "تم رفض الدخول إلى هذا الامتحان من هذه الشبكة أو الجهاز.\n\n" +
   "يرجى التواصل مع المعلم أو مدير المنصة.";
 
 function formatTeacherDeviceBlockDetail(kind, exam, profile, extra = {}) {
@@ -3363,9 +3357,8 @@ function formatTeacherDeviceBlockDetail(kind, exam, profile, extra = {}) {
   return lines.join("\n");
 }
 
-function getStudentDeviceBlockMessage(kind) {
-  if (kind === "shared_ip_limit") return STUDENT_SHARED_IP_LIMIT_MESSAGE;
-  return STUDENT_DEVICE_USED_BY_OTHER_MESSAGE;
+function getStudentDeviceBlockMessage() {
+  return STUDENT_EXPLICIT_ACCESS_BLOCK_MESSAGE;
 }
 
 function countDistinctStudentsOnExamIp(examId, clientIp, excludeLookupKey) {
@@ -3404,22 +3397,21 @@ function studentAlreadyUsesExamIp(examId, clientIp, studentLookupKey, studentCon
 }
 
 function checkExamSharedIpAdmission(exam, clientIp, studentLookupKey, studentContext) {
-  if (!exam) return { ok: true };
+  if (!exam) return { ok: true, othersOnIp: 0, max: 0, sharedIp: false };
   const ip = String(clientIp || "").trim();
-  if (!ip) return { ok: true };
-  if (studentContext && canStudentBypassExamLockForExam(exam.id, studentContext)) return { ok: true };
-  if (isIpOnExamAllowlist(exam, ip)) return { ok: true };
-  if (studentAlreadyUsesExamIp(exam.id, ip, studentLookupKey, studentContext)) return { ok: true };
+  if (!ip) return { ok: true, othersOnIp: 0, max: 0, sharedIp: false };
   const max = getExamMaxStudentsPerSharedIp(exam);
   const others = countDistinctStudentsOnExamIp(exam.id, ip, studentLookupKey);
-  if (others >= max) {
-    return {
-      ok: false,
-      message: getStudentDeviceBlockMessage("shared_ip_limit"),
-      teacherDetail: `حد IP مشترك — العنوان: ${ip} — الحد: ${max} — المستخدمون: ${others}`
-    };
-  }
-  return { ok: true, othersOnIp: others, max };
+  const sharedIp = others > 0;
+  return {
+    ok: true,
+    othersOnIp: others,
+    max,
+    sharedIp,
+    teacherDetail: sharedIp
+      ? `IP مشترك — العنوان: ${ip} — طلاب آخرون على نفس IP: ${others} (الحد المرجعي: ${max})`
+      : ""
+  };
 }
 
 function buildExamSharedIpStudentMap() {
@@ -3469,16 +3461,35 @@ function buildExamSharedDeviceStudentMap() {
 }
 
 function formatResultSharedIpBadgeHtml(res, sharedMap) {
-  const ip = normalizeDeviceIp(res?.clientIp);
+  const ip = String(res?.clientIp || "").trim();
   const examId = res?.examId || "";
   if (!ip || !examId) return "";
-  const set = sharedMap[examId]?.[ip];
-  if (!set || set.size <= 1) return "";
+  const exam = (systemState.exams || []).find(e => e.id === examId);
+  const blocked = isIpBlockedForExam(exam, ip);
+  const set = sharedMap[examId]?.[normalizeDeviceIp(ip)];
+  const count = set?.size || 0;
+  if (!blocked && count <= 1) return "";
+  const canManage = typeof canManageResultDeviceIp === "function" && canManageResultDeviceIp();
+  const baseStyle =
+    "display:inline-block;margin-inline-start:0.35rem;padding:0.12rem 0.45rem;border-radius:999px;" +
+    "font-size:0.68rem;font-weight:800;vertical-align:middle;cursor:pointer;";
+  if (blocked) {
+    const unblockAttrs = canManage
+      ? ` role="button" tabindex="0" onclick="window.arabyaTeacherUnblockExamIp(${JSON.stringify(examId)},${JSON.stringify(ip)})" `
+      : "";
+    return (
+      `<span class="blocked-ip-badge"${unblockAttrs}title="IP محظور من هذا الامتحان — انقر لإلغاء الحظر (معلم)" ` +
+      `style="${baseStyle}background:rgba(239,68,68,0.18);color:#fca5a5;border:1px solid rgba(239,68,68,0.45);">` +
+      `IP محظور</span>`
+    );
+  }
+  const blockAttrs = canManage
+    ? ` role="button" tabindex="0" onclick="window.arabyaTeacherBlockExamIp(${JSON.stringify(examId)},${JSON.stringify(ip)})" `
+    : "";
   return (
-    `<span class="shared-ip-badge" title="عنوان IP مشترك مع ${set.size} حساب/طالب على هذا الامتحان" ` +
-    `style="display:inline-block;margin-inline-start:0.35rem;padding:0.12rem 0.45rem;border-radius:999px;` +
-    `font-size:0.68rem;font-weight:800;background:rgba(245,158,11,0.18);color:var(--accent);` +
-    `border:1px solid rgba(245,158,11,0.4);vertical-align:middle;">IP مشترك · ${set.size}</span>`
+    `<span class="shared-ip-badge"${blockAttrs}title="IP مشترك مع ${count} حساب — انقر لمنع هذا IP من الامتحان" ` +
+    `style="${baseStyle}background:rgba(245,158,11,0.18);color:var(--accent);border:1px solid rgba(245,158,11,0.4);">` +
+    `IP مشترك · ${count}</span>`
   );
 }
 
@@ -3486,13 +3497,32 @@ function formatResultSharedDeviceBadgeHtml(res, sharedMap) {
   const fp = String(res?.deviceFingerprint || "").trim();
   const examId = res?.examId || "";
   if (!fp || !examId) return "";
+  const exam = (systemState.exams || []).find(e => e.id === examId);
+  const blocked = isDeviceBlockedForExam(exam, fp);
   const set = sharedMap[examId]?.[fp];
-  if (!set || set.size <= 1) return "";
+  const count = set?.size || 0;
+  if (!blocked && count <= 1) return "";
+  const canManage = typeof canManageResultDeviceIp === "function" && canManageResultDeviceIp();
+  const baseStyle =
+    "display:inline-block;margin-inline-start:0.35rem;padding:0.12rem 0.45rem;border-radius:999px;" +
+    "font-size:0.68rem;font-weight:800;vertical-align:middle;cursor:pointer;";
+  if (blocked) {
+    const unblockAttrs = canManage
+      ? ` role="button" tabindex="0" onclick="window.arabyaTeacherUnblockExamDevice(${JSON.stringify(examId)},${JSON.stringify(fp)})" `
+      : "";
+    return (
+      `<span class="blocked-device-badge"${unblockAttrs}title="جهاز محظور — انقر لإلغاء الحظر (معلم)" ` +
+      `style="${baseStyle}background:rgba(239,68,68,0.18);color:#fca5a5;border:1px solid rgba(239,68,68,0.45);">` +
+      `جهاز محظور</span>`
+    );
+  }
+  const blockAttrs = canManage
+    ? ` role="button" tabindex="0" onclick="window.arabyaTeacherBlockExamDevice(${JSON.stringify(examId)},${JSON.stringify(fp)})" `
+    : "";
   return (
-    `<span class="shared-device-badge" title="جهاز/متصفح مشترك مع ${set.size} حساب/طالب على هذا الامتحان" ` +
-    `style="display:inline-block;margin-inline-start:0.35rem;padding:0.12rem 0.45rem;border-radius:999px;` +
-    `font-size:0.68rem;font-weight:800;background:rgba(59,130,246,0.16);color:#93c5fd;` +
-    `border:1px solid rgba(59,130,246,0.35);vertical-align:middle;">جهاز مشترك · ${set.size}</span>`
+    `<span class="shared-device-badge"${blockAttrs}title="جهاز مشترك مع ${count} حساب — انقر لمنع هذا الجهاز من الامتحان" ` +
+    `style="${baseStyle}background:rgba(59,130,246,0.16);color:#93c5fd;border:1px solid rgba(59,130,246,0.35);">` +
+    `جهاز مشترك · ${count}</span>`
   );
 }
 
@@ -7562,6 +7592,7 @@ window.editExamQuestions = function(examId) {
   document.getElementById("edit-meta-entry-details").value = exam.entryDetails || "";
   if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.applyHallModeToEditor(exam);
   renderExamAllowedIpsList(exam);
+  renderExamBlockedAccessList(exam);
 
   // توليد وعرض الرابط المباشر للاختبار المرتبط بالمعلم
   const examUrl = getExamDirectLink(exam);
@@ -7822,6 +7853,7 @@ window.saveExamMetaSettingsOnly = async function() {
   const cloudOk = await pushLocalStateToCloudNow("save_exam_meta");
   document.getElementById("editor-exam-title").innerText = exam.title;
   renderExamAllowedIpsList(exam);
+  renderExamBlockedAccessList(exam);
   const pushHint = (systemState.lastCloudPushError || "").trim();
   alert(cloudOk
     ? "تم حفظ إعدادات الامتحان ورفعها إلى السحابة بنجاح."
@@ -8763,7 +8795,7 @@ function showExamSecurityNotice() {
     `وضع تأمين الامتحان مفعّل على ${deviceLabel}: لا تغادر التبويب ولا تفتح ChatGPT أو تطبيقات أخرى. ` +
     `أي تبديل تبويب أو مغادرة الصفحة يُسجَّل كمحاولة غش (حسب حد المعلم) بعد ${graceSec} ثانية. ` +
     `لن يظهر لك عدد المحاولات — تظهر للمعلم فقط في سجل النتائج. ` +
-    `يُمنع استخدام نفس الجهاز لطالبين مختلفين.`;
+    `إذا تكرر IP أو جهاز مع طالب آخر يُسمح لك بإكمال الامتحان — ويُنبّه المعلم فقط.`;
 }
 
 function renderRunnerQuestion() {
@@ -11177,7 +11209,13 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
   };
   const response = await postToArabyaWebApp(syncUrl, payload);
   if (response?.status === "error") {
-    return { ok: false, message: response.message || "تعذر تسجيل محاولة الامتحان." };
+    const code = String(response.code || "").trim();
+    const advisoryCodes = new Set(["device_conflict", "device_registry_conflict"]);
+    if (advisoryCodes.has(code)) {
+      console.warn("[ARABYA] register_exam_attempt advisory:", response.message || code);
+      return { ok: true, attemptToken: "", advisory: code };
+    }
+    return { ok: false, message: response.message || "تعذر تسجيل محاولة الامتحان.", code };
   }
   return { ok: true, attemptToken: response?.attemptToken || "" };
 }
@@ -11222,6 +11260,30 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
     return fail;
   }
   const exam = (systemState.exams || []).find(e => e.id === examId) || systemState.currentExam;
+
+  if (isIpBlockedForExam(exam, profile.clientIp)) {
+    void logExamDeviceReject_({
+      studentLookupKey,
+      studentName,
+      examId,
+      message: formatTeacherDeviceBlockDetail("IP محظور يدوياً", exam, profile),
+      deviceFingerprint: profile.deviceFingerprint,
+      clientIp: profile.clientIp
+    });
+    return { ok: false, message: getStudentDeviceBlockMessage(), profile };
+  }
+  if (isDeviceBlockedForExam(exam, profile.deviceFingerprint)) {
+    void logExamDeviceReject_({
+      studentLookupKey,
+      studentName,
+      examId,
+      message: formatTeacherDeviceBlockDetail("جهاز محظور يدوياً", exam, profile, { fingerprint: profile.deviceFingerprint }),
+      deviceFingerprint: profile.deviceFingerprint,
+      clientIp: profile.clientIp
+    });
+    return { ok: false, message: getStudentDeviceBlockMessage(), profile };
+  }
+
   if (window.ArabyaPlatformSync) {
     const hallCheck = window.ArabyaPlatformSync.checkExamHallIp(exam, profile.clientIp);
     if (!hallCheck.ok) {
@@ -11232,7 +11294,6 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
     const maxDev = window.ArabyaPlatformSync.checkMaxStudentDevices(studentLookupKey);
     if (!maxDev.ok) {
       void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: maxDev.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-      return { ok: false, message: maxDev.message, profile };
     }
   }
   const ctx = studentContext || buildStudentMatchContext({
@@ -11240,47 +11301,42 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
     name: studentName || ""
   });
   const ipSlot = checkExamSharedIpAdmission(exam, profile.clientIp, studentLookupKey, ctx);
-  if (!ipSlot.ok) {
+  if (ipSlot.sharedIp && ipSlot.teacherDetail) {
     void logExamDeviceReject_({
       studentLookupKey,
       studentName,
       examId,
-      message: ipSlot.teacherDetail || formatTeacherDeviceBlockDetail("حد IP مشترك", exam, profile),
+      message: ipSlot.teacherDetail,
       deviceFingerprint: profile.deviceFingerprint,
       clientIp: profile.clientIp
     });
-    return { ok: false, message: ipSlot.message, profile };
   }
   const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
-  if (attemptConflict?.kind === "same_student" && !shouldBypassExamDeviceLock(exam, profile, attemptConflict.result)) {
+  if (attemptConflict?.kind === "same_student") {
     const msg = getExamBlockingMessage(attemptConflict.result);
     void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
     return { ok: false, message: msg, profile };
   }
-  if (attemptConflict?.kind === "other_student" && !shouldBypassExamDeviceLock(exam, profile, attemptConflict.result)) {
+  if (attemptConflict?.kind === "other_student") {
     const other = attemptConflict.result || {};
-    const studentMsg = getStudentDeviceBlockMessage("other_student");
-    const teacherDetail = formatTeacherDeviceBlockDetail("جهاز مستخدم لطالب آخر", exam, profile, {
+    const teacherDetail = formatTeacherDeviceBlockDetail("جهاز/متصفح مشترك — دخول مسموح للطالب", exam, profile, {
       otherName: other.name || other.studentName || "",
       otherKey: other.studentLookupKey || "",
       fingerprint: profile.deviceFingerprint
     });
     void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: teacherDetail, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: studentMsg, profile };
   }
   const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
-  if (conflict && !shouldBypassExamDeviceLock(exam, profile, conflict)) {
-    const studentMsg = getStudentDeviceBlockMessage("registry_conflict");
-    const teacherDetail = formatTeacherDeviceBlockDetail("سجل جهاز مرتبط بطالب آخر", exam, profile, {
+  if (conflict) {
+    const teacherDetail = formatTeacherDeviceBlockDetail("سجل جهاز مشترك — دخول مسموح للطالب", exam, profile, {
       otherName: conflict.studentName || "",
       otherKey: conflict.studentLookupKey || "",
       fingerprint: profile.deviceFingerprint
     });
     void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: teacherDetail, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-    return { ok: false, message: studentMsg, profile };
   }
   registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
-  return { ok: true, profile };
+  return { ok: true, profile, sharedIp: !!ipSlot.sharedIp, sharedDevice: !!(attemptConflict?.kind === "other_student" || conflict) };
 }
 
 function buildResultDeviceFields(profile) {
@@ -12275,6 +12331,90 @@ function normalizeExamIpLists(exam) {
   if (!Array.isArray(exam.allowedRetakeIps)) exam.allowedRetakeIps = [];
 }
 
+function normalizeExamBlockLists(exam) {
+  if (!exam) return;
+  normalizeExamIpLists(exam);
+  if (!Array.isArray(exam.blockedIps)) exam.blockedIps = [];
+  if (!Array.isArray(exam.blockedDeviceFingerprints)) exam.blockedDeviceFingerprints = [];
+}
+
+function isIpBlockedForExam(exam, clientIp) {
+  if (!exam || !clientIp) return false;
+  normalizeExamBlockLists(exam);
+  const ip = normalizeDeviceIp(clientIp);
+  return (exam.blockedIps || []).some(entry => normalizeDeviceIp(entry) === ip);
+}
+
+function isDeviceBlockedForExam(exam, fingerprint) {
+  if (!exam || !fingerprint) return false;
+  normalizeExamBlockLists(exam);
+  const fp = String(fingerprint).trim();
+  return (exam.blockedDeviceFingerprints || []).some(entry => String(entry).trim() === fp);
+}
+
+function addBlockedIpToExam(examId, ip) {
+  const clean = String(ip || "").trim();
+  if (!clean || !examId) return false;
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return false;
+  normalizeExamBlockLists(exam);
+  if (exam.blockedIps.some(entry => normalizeDeviceIp(entry) === normalizeDeviceIp(clean))) return false;
+  exam.blockedIps.push(clean);
+  saveSystemState(true);
+  return true;
+}
+
+function removeBlockedIpFromExam(examId, ip) {
+  const clean = normalizeDeviceIp(ip);
+  if (!clean || !examId) return false;
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return false;
+  normalizeExamBlockLists(exam);
+  const before = exam.blockedIps.length;
+  exam.blockedIps = exam.blockedIps.filter(entry => normalizeDeviceIp(entry) !== clean);
+  if (exam.blockedIps.length === before) return false;
+  saveSystemState(true);
+  return true;
+}
+
+function addBlockedDeviceToExam(examId, fingerprint) {
+  const fp = String(fingerprint || "").trim();
+  if (!fp || !examId) return false;
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return false;
+  normalizeExamBlockLists(exam);
+  if (exam.blockedDeviceFingerprints.includes(fp)) return false;
+  exam.blockedDeviceFingerprints.push(fp);
+  saveSystemState(true);
+  return true;
+}
+
+function removeBlockedDeviceFromExam(examId, fingerprint) {
+  const fp = String(fingerprint || "").trim();
+  if (!fp || !examId) return false;
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (!exam) return false;
+  normalizeExamBlockLists(exam);
+  const before = exam.blockedDeviceFingerprints.length;
+  exam.blockedDeviceFingerprints = exam.blockedDeviceFingerprints.filter(entry => String(entry).trim() !== fp);
+  if (exam.blockedDeviceFingerprints.length === before) return false;
+  saveSystemState(true);
+  return true;
+}
+
+async function persistExamAccessPolicyChange(examId) {
+  saveSystemState(true);
+  try {
+    await pushCloudBackupNow("exam_access_policy");
+  } catch (e) {
+    console.warn("[ARABYA] persistExamAccessPolicyChange:", e);
+  }
+  const exam = systemState.exams.find(e => e.id === examId);
+  if (exam && currentEditingExamId === examId) {
+    renderExamBlockedAccessList(exam);
+  }
+}
+
 function collectExamAllowedIps(exam) {
   if (!exam) return [];
   normalizeExamIpLists(exam);
@@ -12339,6 +12479,69 @@ function addAllowedRetakeIpToExam(examId, ip) {
     saveSystemState(true);
   }
 }
+
+function renderExamBlockedAccessList(exam) {
+  const el = document.getElementById("exam-blocked-access-list");
+  if (!el || !exam) return;
+  normalizeExamBlockLists(exam);
+  const ips = exam.blockedIps || [];
+  const devices = (exam.blockedDeviceFingerprints || []).map(fp => `${String(fp).slice(0, 16)}…`);
+  if (!ips.length && !devices.length) {
+    el.innerHTML = '<span style="color:var(--text-muted);">لا توجد عناوين IP أو أجهزة محظورة يدوياً. انقر شارات «IP مشترك» أو «جهاز مشترك» في جدول النتائج للحظر.</span>';
+    return;
+  }
+  const parts = [];
+  if (ips.length) {
+    parts.push(`<div style="margin-bottom:0.5rem;"><strong>IPs محظورة:</strong><ul style="margin:0.35rem 0 0; padding-right:1.2rem;">${ips.map(ip => `<li><code dir="ltr">${escapeHtml(ip)}</code></li>`).join("")}</ul></div>`);
+  }
+  if (devices.length) {
+    parts.push(`<div><strong>أجهزة محظورة:</strong><ul style="margin:0.35rem 0 0; padding-right:1.2rem;">${devices.map(fp => `<li><code dir="ltr">${escapeHtml(fp)}</code></li>`).join("")}</ul></div>`);
+  }
+  el.innerHTML = parts.join("");
+}
+
+window.arabyaTeacherBlockExamIp = async function(examId, ip) {
+  if (!canManageResultDeviceIp()) {
+    alert("صلاحية منع IP متاحة للمعلم ومدير المنصة فقط.");
+    return;
+  }
+  if (!confirm(`منع عنوان IP التالي من دخول هذا الامتحان؟\n\n${ip}`)) return;
+  if (!addBlockedIpToExam(examId, ip)) return;
+  await persistExamAccessPolicyChange(examId);
+  renderStudentResultsTable();
+  alert("تم منع هذا IP من دخول الامتحان. الطلاب من هذه الشبكة لن يدخلوا حتى تلغي الحظر.");
+};
+
+window.arabyaTeacherUnblockExamIp = async function(examId, ip) {
+  if (!canManageResultDeviceIp()) return;
+  if (!confirm(`إلغاء منع IP التالي والسماح بالدخول؟\n\n${ip}`)) return;
+  if (!removeBlockedIpFromExam(examId, ip)) return;
+  await persistExamAccessPolicyChange(examId);
+  renderStudentResultsTable();
+  alert("تم إلغاء منع IP — يمكن الدخول من هذه الشبكة.");
+};
+
+window.arabyaTeacherBlockExamDevice = async function(examId, fingerprint) {
+  if (!canManageResultDeviceIp()) {
+    alert("صلاحية منع الجهاز متاحة للمعلم ومدير المنصة فقط.");
+    return;
+  }
+  const shortFp = `${String(fingerprint).slice(0, 16)}…`;
+  if (!confirm(`منع هذا الجهاز/المتصفح من دخول الامتحان؟\n\nبصمة: ${shortFp}`)) return;
+  if (!addBlockedDeviceToExam(examId, fingerprint)) return;
+  await persistExamAccessPolicyChange(examId);
+  renderStudentResultsTable();
+  alert("تم منع هذا الجهاز من الامتحان.");
+};
+
+window.arabyaTeacherUnblockExamDevice = async function(examId, fingerprint) {
+  if (!canManageResultDeviceIp()) return;
+  if (!confirm("إلغاء منع هذا الجهاز والسماح بالدخول؟")) return;
+  if (!removeBlockedDeviceFromExam(examId, fingerprint)) return;
+  await persistExamAccessPolicyChange(examId);
+  renderStudentResultsTable();
+  alert("تم إلغاء منع الجهاز.");
+};
 
 window.pullTeacherStudentsFromCloud = async function() {
   const el = document.getElementById("teacher-students-sync-status");

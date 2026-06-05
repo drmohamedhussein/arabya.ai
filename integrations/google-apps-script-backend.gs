@@ -511,6 +511,28 @@ function shouldBypassArabyaDeviceLock_(exam, clientIp, conflictResult) {
   return false;
 }
 
+function isIpBlockedOnArabyaExam_(exam, clientIp) {
+  if (!exam) return false;
+  var list = Array.isArray(exam.blockedIps) ? exam.blockedIps : [];
+  var ip = normalizeArabyaIpForMatch_(clientIp);
+  if (!ip || !list.length) return false;
+  for (var i = 0; i < list.length; i++) {
+    if (normalizeArabyaIpForMatch_(list[i]) === ip) return true;
+  }
+  return false;
+}
+
+function isDeviceBlockedOnArabyaExam_(exam, deviceFingerprint) {
+  if (!exam) return false;
+  var list = Array.isArray(exam.blockedDeviceFingerprints) ? exam.blockedDeviceFingerprints : [];
+  var fp = String(deviceFingerprint || "").trim();
+  if (!fp || !list.length) return false;
+  for (var i = 0; i < list.length; i++) {
+    if (String(list[i] || "").trim() === fp) return true;
+  }
+  return false;
+}
+
 function findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp) {
   var fp = String(deviceFingerprint || "").trim();
   if (!fp) return null;
@@ -568,18 +590,16 @@ function registerArabyaExamAttempt_(data) {
     return { error: "تم رفض بدء الامتحان: يوجد محاولة سابقة مسجّلة لهذا الطالب.", code: "blocked_attempt" };
   }
   var clientIp = String(data.clientIp || "").trim();
-  var attemptConflict = findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
-  if (attemptConflict && attemptConflict.kind === "other_student") {
+  if (isIpBlockedOnArabyaExam_(exam, clientIp)) {
     return {
-      error: "تم حظر الدخول إلى الامتحان. سبق استخدام هذا الجهاز لمحاولة أخرى. يرجى التواصل مع المعلم أو مدير المنصة.",
-      code: "device_conflict"
+      error: "تم رفض الدخول إلى هذا الامتحان من هذه الشبكة. يرجى التواصل مع المعلم أو مدير المنصة.",
+      code: "blocked_ip"
     };
   }
-  var registryConflict = findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
-  if (registryConflict) {
+  if (isDeviceBlockedOnArabyaExam_(exam, deviceFingerprint)) {
     return {
-      error: "تم حظر الدخول إلى الامتحان. سبق استخدام هذا الجهاز لمحاولة أخرى. يرجى التواصل مع المعلم أو مدير المنصة.",
-      code: "device_registry_conflict"
+      error: "تم رفض الدخول إلى هذا الامتحان من هذا الجهاز. يرجى التواصل مع المعلم أو مدير المنصة.",
+      code: "blocked_device"
     };
   }
   var token = Utilities.getUuid();

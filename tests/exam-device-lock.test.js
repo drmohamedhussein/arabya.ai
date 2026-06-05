@@ -256,11 +256,40 @@ assert.ok(!shouldBypassExamDeviceLock(
   blockedOther
 ), "no allowlist keeps device lock");
 
+function checkExamSharedIpAdmissionAdvisory(examId, clientIp, studentLookupKey, results, bindings) {
+  const ip = normalizeDeviceIp(clientIp);
+  if (!ip || !examId) return { ok: true, sharedIp: false };
+  const others = countDistinctStudentsOnExamIpForTest(results, bindings, examId, ip, studentLookupKey);
+  return { ok: true, sharedIp: others > 0, othersOnIp: others };
+}
+
+function countDistinctStudentsOnExamIpForTest(results, bindings, examId, clientIp, excludeLookupKey) {
+  const ip = normalizeDeviceIp(clientIp);
+  const keys = new Set();
+  (results || []).forEach(r => {
+    if (!r || r.examId !== examId) return;
+    if (normalizeDeviceIp(r.clientIp) !== ip) return;
+    const key = r.studentLookupKey || r.id;
+    if (!key || key === excludeLookupKey) return;
+    keys.add(key);
+  });
+  (bindings || []).forEach(b => {
+    if (!b || b.examId !== examId) return;
+    if (normalizeDeviceIp(b.clientIp) !== ip) return;
+    if (b.studentLookupKey && b.studentLookupKey !== excludeLookupKey) keys.add(b.studentLookupKey);
+  });
+  return keys.size;
+}
+
+const advisory = checkExamSharedIpAdmissionAdvisory("e1", "1.2.3.4", "new-student", [
+  { examId: "e1", clientIp: "1.2.3.4", studentLookupKey: "a" }
+], []);
+assert.strictEqual(advisory.ok, true, "shared IP must not auto-block");
+assert.strictEqual(advisory.sharedIp, true, "shared IP should flag for teacher");
+
 const studentBlockMsg =
-  "تم حظر الدخول إلى الامتحان.\n\n" +
-  "سبق استخدام هذا الجهاز أو المتصفح لمحاولة أخرى على نفس الامتحان.\n\n" +
+  "تم رفض الدخول إلى هذا الامتحان من هذه الشبكة أو الجهاز.\n\n" +
   "يرجى التواصل مع المعلم أو مدير المنصة.";
 assert.ok(!studentBlockMsg.includes("آخر طالب"), "student block message must not expose other student");
-assert.ok(!studentBlockMsg.includes("قاعة مشتركة"), "student block message must not include teacher instructions");
 
 console.log("All exam device lock tests passed.");

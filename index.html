@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" data-arabya-build="2026.06.06.9">
+<html lang="ar" dir="rtl" data-arabya-build="2026.06.06.11">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,14 +11,14 @@
   <!-- تحسينات SEO ومحركات البحث -->
   <meta name="description" content="المنصة العربية الأولى المدعومة بالذكاء الاصطناعي لتعليم فروع اللغة العربية (نحو، بلاغة، أدب)، التدقيق اللغوي والنحوي، والامتحانات الأكاديمية المؤمنة بالكامل ضد الغش.">
   <meta name="keywords" content="اللغة العربية, ذكاء اصطناعي, امتحانات اونلاين, معلم اللغة العربية, تدقيق لغوي, كتب عربية">
-  <meta name="arabya-app-version" content="2026.06.06.9">
+  <meta name="arabya-app-version" content="2026.06.06.11">
   <link rel="canonical" href="https://arabya.net/">
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2026.06.06.9">
+  <link rel="stylesheet" href="style.css?v=2026.06.06.11">
   <link rel="stylesheet" href="style.responsive-dashboard.css">
-  <script src="js/arabya-version-boot.js?v=2026.06.06.9"></script>
+  <script src="js/arabya-version-boot.js?v=2026.06.06.11"></script>
 </head>
 <body>
 
@@ -603,7 +603,7 @@
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
             </li>
           </ul>
-          <div id="teacher-app-version-label" class="teacher-app-version-label" aria-live="polite" aria-label="إصدار التطبيق الحالي">إصدار التطبيق: 2026.06.06.9</div>
+          <div id="teacher-app-version-label" class="teacher-app-version-label" aria-live="polite" aria-label="إصدار التطبيق الحالي">إصدار التطبيق: 2026.06.06.11</div>
         </aside>
 
         <!-- اللوحة الرئيسية المتغيرة -->
@@ -885,7 +885,10 @@
                   <div class="form-group" style="margin-bottom:0.75rem; max-width:220px;">
                     <label class="form-label" for="edit-meta-max-shared-ip">حد الطلاب على نفس IP (للقاعة/التجربة)</label>
                     <input type="number" id="edit-meta-max-shared-ip" class="form-control" min="1" max="99" value="15">
-                    <small style="display:block;margin-top:0.35rem;color:var(--text-muted);font-size:0.78rem;">يسمح بعدة حسابات من نفس الشبكة حتى هذا العدد. أضف IP في «إعادة الدخول» للاستثناء الكامل.</small>
+                    <small style="display:block;margin-top:0.35rem;color:var(--text-muted);font-size:0.78rem;">رقم مرجعي للتنبيه فقط — لا يُحظر الطالب تلقائياً. انقر شارة «IP مشترك» في النتائج لمنع IP يدوياً.</small>
+                  </div>
+                  <div id="exam-blocked-access-list" style="margin-top:0.5rem; padding:0.65rem; background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.2); border-radius:8px; min-height:2rem; font-size:0.85rem;" aria-live="polite">
+                    <span style="color:var(--text-muted);">لا توجد عناوين IP أو أجهزة محظورة يدوياً.</span>
                   </div>
                   <div style="font-size:0.85rem;">
                     <strong style="color:var(--secondary);">قائمة IP الفعّالة لهذا الامتحان:</strong>
@@ -1837,18 +1840,18 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-student-codes.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-security.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-toast.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-offline-queue.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-platform-sync.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-realtime-bridge.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.06.9"></script>
-  <script src="app.js?v=2026.06.06.9"></script>
-  <script src="js/arabya-version-boot.js?v=2026.06.06.9"></script>
+  <script src="questions.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-student-codes.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-security.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-toast.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.06.11"></script>
+  <script src="app.js?v=2026.06.06.11"></script>
+  <script src="js/arabya-version-boot.js?v=2026.06.06.11"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");
