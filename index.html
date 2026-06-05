@@ -484,11 +484,12 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="teacher-login-api-secret">سر API السحابي (إن وُجد):</label>
+          <label class="form-label" for="teacher-login-api-secret">سر API السحابي (مطلوب للدخول من متصفح جديد):</label>
           <div class="input-wrapper">
             <input type="password" id="teacher-login-api-secret" class="form-control" placeholder="ARABYA_API_SECRET من Script Properties" autocomplete="off" dir="ltr" style="text-align:left;">
             <span class="material-icons input-icon" aria-hidden="true">key</span>
           </div>
+          <small style="color:var(--text-muted); font-size:0.8rem; margin-top:0.25rem; display:block;">لن تُرسل السحابة بيانات دخول المعلمين إلا إذا كان <code>ARABYA_API_SECRET</code> مضبوطاً في Apps Script ومطابقاً لهذه القيمة.</small>
         </div>
 
         <div style="text-align: center; margin-top: 1.5rem;">
