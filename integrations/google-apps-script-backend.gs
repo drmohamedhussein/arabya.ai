@@ -79,10 +79,53 @@ function doPost(e) {
       return rateLimitedArabya_();
     }
 
+    if (action === "register_exam_attempt") {
+      var attemptResult = registerArabyaExamAttempt_(data);
+      if (attemptResult.error) {
+        return jsonArabya_({ status: "error", code: attemptResult.code || "rejected", message: attemptResult.error });
+      }
+      return jsonArabya_({
+        status: "success",
+        action: action,
+        attemptToken: attemptResult.attemptToken,
+        expiresIn: attemptResult.expiresIn
+      });
+    }
+
+    if (action === "log_cheat_event") {
+      var cheatResult = logArabyaCheatEvent_(data);
+      if (cheatResult.error) {
+        return jsonArabya_({ status: "error", code: cheatResult.code || "rejected", message: cheatResult.error });
+      }
+      return jsonArabya_({
+        status: "success",
+        action: action,
+        cheatViolations: cheatResult.cheatViolations,
+        maxCheatAttemptsAllowed: cheatResult.maxCheatAttemptsAllowed
+      });
+    }
+
     if (action === "add_result") {
-      upsertArabyaResult_(data);
-      mergeArabyaDatabase_({ results: [normaliseArabyaResult_(data)] }, "add_result");
-      return jsonArabya_({ status: "success", action: action, recordId: data.recordId || "" });
+      var dbForResult = readArabyaDatabase_();
+      var processed = processArabyaAddResult_(data, dbForResult);
+      if (processed.error) {
+        return jsonArabya_({ status: "error", code: processed.code || "rejected", message: processed.error });
+      }
+      upsertArabyaResult_(processed.result);
+      mergeArabyaDatabase_({ results: [processed.result] }, "add_result");
+      return jsonArabya_({
+        status: "success",
+        action: action,
+        recordId: processed.result.recordId || "",
+        graded: {
+          score: processed.result.score,
+          details: processed.result.details,
+          questionScores: processed.result.questionScores,
+          maxScore: processed.result.maxScore,
+          cheatViolations: processed.result.cheatViolations,
+          maxCheatAttemptsAllowed: processed.result.maxCheatAttemptsAllowed
+        }
+      });
     }
 
     if (action === "delete_result") {
@@ -296,6 +339,7 @@ function buildArabyaExamStartBackup_(db, examId) {
       return binding && String(binding.examId || "") === targetExamId;
     });
   }
+  exams = stripCorrectAnswersFromExams_(exams);
   return {
     schemaVersion: db.schemaVersion || ARABYA_DEFAULT_DB.schemaVersion,
     appVersion: db.appVersion || "",
@@ -311,6 +355,393 @@ function buildArabyaExamStartBackup_(db, examId) {
     questionBanks: {},
     auditLog: []
   };
+}
+
+function stripCorrectAnswersFromQuestion_(question) {
+  if (!question || typeof question !== "object") return question;
+  var safe = Object.assign({}, question);
+  delete safe.correctAnswer;
+  return safe;
+}
+
+function stripCorrectAnswersFromExams_(exams) {
+  return (exams || []).map(function(exam) {
+    if (!exam) return exam;
+    var copy = Object.assign({}, exam);
+    copy.questions = (exam.questions || []).map(stripCorrectAnswersFromQuestion_);
+    return copy;
+  });
+}
+
+function findArabyaExamInDb_(db, examId) {
+  var target = String(examId || "").trim();
+  if (!target) return null;
+  var exams = db && Array.isArray(db.exams) ? db.exams : [];
+  for (var i = 0; i < exams.length; i++) {
+    if (exams[i] && String(exams[i].id || "") === target) return exams[i];
+  }
+  return null;
+}
+
+function getExamMaxCheatAttempts_(exam) {
+  if (!exam) return 5;
+  var parsed = parseInt(exam.maxCheatAttempts, 10);
+  if (!isFinite(parsed) || parsed < 0) return 5;
+  return parsed;
+}
+
+function shouldCancelExamForCheating_(exam, violations) {
+  var maxAttempts = getExamMaxCheatAttempts_(exam);
+  if (maxAttempts === 0) return false;
+  return Number(violations || 0) >= maxAttempts;
+}
+
+function isArabyaResultSuperseded_(result) {
+  return !!(result && result.superseded);
+}
+
+function isArabyaResultIpReleased_(result) {
+  return !!(result && (result.ipReleasedByTeacher || result.staffIpReleased));
+}
+
+function resultMatchesStudentLookup_(result, studentLookupKey) {
+  if (!result || !studentLookupKey) return false;
+  if (String(result.studentLookupKey || "") === String(studentLookupKey)) return true;
+  return getArabyaStudentLookupKey_({
+    id: result.id || "",
+    name: result.name || "",
+    code: result.accessCode || result.code || ""
+  }) === String(studentLookupKey);
+}
+
+function findBlockingArabyaResult_(db, studentLookupKey, examId) {
+  var targetExamId = String(examId || "").trim();
+  if (!targetExamId || !studentLookupKey) return null;
+  var results = db && Array.isArray(db.results) ? db.results : [];
+  for (var i = 0; i < results.length; i++) {
+    var row = results[i];
+    if (!row || String(row.examId || "") !== targetExamId) continue;
+    if (isArabyaResultSuperseded_(row)) continue;
+    if (row.status === "incomplete") continue;
+    if (row.allowRetake === true) continue;
+    if (isArabyaResultIpReleased_(row)) continue;
+    if (row.status !== "completed" && row.status !== "canceled") continue;
+    if (!resultMatchesStudentLookup_(row, studentLookupKey)) continue;
+    return row;
+  }
+  return null;
+}
+
+function findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey) {
+  var fp = String(deviceFingerprint || "").trim();
+  if (!fp) return null;
+  var bindings = db.examDeviceRegistry && Array.isArray(db.examDeviceRegistry.bindings)
+    ? db.examDeviceRegistry.bindings
+    : [];
+  for (var i = 0; i < bindings.length; i++) {
+    var entry = bindings[i];
+    if (!entry || String(entry.examId || "") !== String(examId || "")) continue;
+    if (String(entry.deviceFingerprint || "") !== fp) continue;
+    if (String(entry.studentLookupKey || "") !== String(studentLookupKey || "")) return entry;
+  }
+  return null;
+}
+
+function findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey) {
+  var fp = String(deviceFingerprint || "").trim();
+  if (!fp) return null;
+  var results = db && Array.isArray(db.results) ? db.results : [];
+  for (var i = 0; i < results.length; i++) {
+    var row = results[i];
+    if (!row || String(row.examId || "") !== String(examId || "")) continue;
+    if (isArabyaResultSuperseded_(row)) continue;
+    if (row.status === "incomplete") continue;
+    if (String(row.deviceFingerprint || "") !== fp) continue;
+    if (resultMatchesStudentLookup_(row, studentLookupKey)) {
+      return { kind: "same_student", result: row };
+    }
+    return { kind: "other_student", result: row };
+  }
+  return null;
+}
+
+function getExamAttemptCacheKey_(token) {
+  return "eat_" + String(token || "").trim();
+}
+
+function saveExamAttempt_(token, attempt, ttlSeconds) {
+  if (!token || !attempt) return;
+  CacheService.getScriptCache().put(getExamAttemptCacheKey_(token), JSON.stringify(attempt), ttlSeconds || 14400);
+}
+
+function loadExamAttempt_(token) {
+  if (!token) return null;
+  var raw = CacheService.getScriptCache().get(getExamAttemptCacheKey_(token));
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    return null;
+  }
+}
+
+function registerArabyaExamAttempt_(data) {
+  var examId = String(data.examId || "").trim();
+  var studentLookupKey = String(data.studentLookupKey || "").trim();
+  var deviceFingerprint = String(data.deviceFingerprint || "").trim();
+  var deviceId = String(data.deviceId || "").trim();
+  if (!examId || !studentLookupKey || !deviceFingerprint) {
+    return { error: "بيانات محاولة الامتحان غير مكتملة.", code: "invalid_attempt" };
+  }
+  var db = readArabyaDatabase_();
+  db.results = buildArabyaResultsForClient_(db);
+  var exam = findArabyaExamInDb_(db, examId);
+  if (!exam) {
+    return { error: "الامتحان غير موجود على الخادم.", code: "exam_not_found" };
+  }
+  if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
+    return { error: "تم رفض بدء الامتحان: يوجد محاولة سابقة مسجّلة لهذا الطالب.", code: "blocked_attempt" };
+  }
+  var attemptConflict = findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey);
+  if (attemptConflict && attemptConflict.kind === "other_student") {
+    return { error: "تم رفض الدخول: هذا الجهاز استُخدم لطالب آخر.", code: "device_conflict" };
+  }
+  var registryConflict = findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey);
+  if (registryConflict) {
+    return { error: "تم رفض الدخول: الجهاز مرتبط بطالب آخر.", code: "device_registry_conflict" };
+  }
+  var token = Utilities.getUuid();
+  var attempt = {
+    examId: examId,
+    studentLookupKey: studentLookupKey,
+    studentName: String(data.studentName || "").trim(),
+    deviceFingerprint: deviceFingerprint,
+    deviceId: deviceId,
+    clientIp: String(data.clientIp || "").trim(),
+    cheatViolations: 0,
+    cheatAttemptLog: [],
+    maxCheatAttemptsAllowed: getExamMaxCheatAttempts_(exam),
+    startedAt: new Date().toISOString()
+  };
+  saveExamAttempt_(token, attempt, 14400);
+  var binding = {
+    examId: examId,
+    studentLookupKey: studentLookupKey,
+    studentName: attempt.studentName,
+    deviceFingerprint: deviceFingerprint,
+    deviceId: deviceId,
+    clientIp: attempt.clientIp,
+    boundAt: attempt.startedAt
+  };
+  db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, { bindings: [binding] });
+  mergeArabyaDatabase_({ examDeviceRegistry: db.examDeviceRegistry }, "register_exam_attempt");
+  return { attemptToken: token, expiresIn: 14400 };
+}
+
+function logArabyaCheatEvent_(data) {
+  var token = String(data.attemptToken || "").trim();
+  var attempt = loadExamAttempt_(token);
+  if (!attempt) {
+    return { error: "جلسة الامتحان غير صالحة أو منتهية.", code: "invalid_attempt_token" };
+  }
+  if (String(data.examId || "") !== String(attempt.examId || "")) {
+    return { error: "معرّف الامتحان لا يطابق جلسة المحاولة.", code: "exam_mismatch" };
+  }
+  if (String(data.studentLookupKey || "") !== String(attempt.studentLookupKey || "")) {
+    return { error: "مفتاح الطالب لا يطابق جلسة المحاولة.", code: "student_mismatch" };
+  }
+  if (String(data.deviceFingerprint || "") !== String(attempt.deviceFingerprint || "")) {
+    return { error: "بصمة الجهاز لا تطابق جلسة المحاولة.", code: "device_mismatch" };
+  }
+  attempt.cheatAttemptLog = Array.isArray(attempt.cheatAttemptLog) ? attempt.cheatAttemptLog : [];
+  attempt.cheatAttemptLog.push({
+    reason: String(data.reason || "unknown"),
+    label: String(data.label || data.reason || "unknown"),
+    at: new Date().toISOString()
+  });
+  attempt.cheatViolations = attempt.cheatAttemptLog.length;
+  saveExamAttempt_(token, attempt, 14400);
+  return {
+    cheatViolations: attempt.cheatViolations,
+    maxCheatAttemptsAllowed: attempt.maxCheatAttemptsAllowed
+  };
+}
+
+function resolveCanonicalQuestionsForGrading_(exam, presentedQuestions) {
+  var bank = exam && Array.isArray(exam.questions) ? exam.questions : [];
+  var byId = {};
+  bank.forEach(function(q) {
+    if (q && q.id !== undefined && q.id !== null) byId[String(q.id)] = q;
+  });
+  var ordered = [];
+  (presentedQuestions || []).forEach(function(pq) {
+    if (!pq) return;
+    var canonical = byId[String(pq.id)];
+    ordered.push(canonical || pq);
+  });
+  if (!ordered.length) ordered = bank.slice();
+  return ordered;
+}
+
+function gradeArabyaExamResult_(exam, presentedQuestions, studentAnswers, options) {
+  options = options || {};
+  var status = String(options.status || "completed");
+  var isCanceled = status === "canceled";
+  var examTotalScore = parseFloat(exam && exam.totalScore);
+  if (!isFinite(examTotalScore) || examTotalScore <= 0) examTotalScore = 100;
+  var questions = resolveCanonicalQuestionsForGrading_(exam, presentedQuestions);
+  var totalEarnedPoints = 0;
+  var totalObjectivePoints = 0;
+  var totalEssayPoints = 0;
+  var objectiveQuestionsCount = 0;
+  var correctObjectiveCount = 0;
+  var hasEssay = false;
+  var detailsLog = [];
+  var questionScoresMap = {};
+  var answers = studentAnswers && typeof studentAnswers === "object" ? studentAnswers : {};
+
+  questions.forEach(function(q) {
+    if (!q) return;
+    var qId = q.id;
+    var studentAns = answers[qId];
+    if (studentAns === undefined) studentAns = answers[String(qId)];
+    var qPoints = q.points !== undefined && q.points !== null ? Number(q.points) : 10;
+    if (!isFinite(qPoints) || qPoints < 0) qPoints = 10;
+
+    if (q.type === "essay") {
+      hasEssay = true;
+      totalEssayPoints += qPoints;
+      var ansText = studentAns || "(لم يكتب الطالب إجابة)";
+      if (isCanceled) ansText = studentAns || "(ملغي - غش)";
+      detailsLog.push("س مقالي (وزنها " + qPoints + " نقاط): " + (q.question || "") + " \n إجابة الطالب: " + ansText + "\n-----------------");
+      questionScoresMap[qId] = 0;
+      return;
+    }
+
+    objectiveQuestionsCount++;
+    totalObjectivePoints += qPoints;
+    var isCorrect = false;
+    if (!isCanceled && studentAns !== undefined && studentAns !== -1 && studentAns !== -2) {
+      isCorrect = Number(studentAns) === Number(q.correctAnswer);
+    }
+    if (isCorrect) {
+      correctObjectiveCount++;
+      totalEarnedPoints += qPoints;
+      questionScoresMap[qId] = qPoints;
+    } else {
+      questionScoresMap[qId] = 0;
+    }
+    var studentAnsText = "لم تتم الإجابة";
+    if (studentAns === -1) studentAnsText = "انتهى الوقت";
+    else if (studentAns === -2) studentAnsText = "ملغي (غش)";
+    else if (studentAns !== undefined && Array.isArray(q.options)) studentAnsText = String(q.options[studentAns] || "");
+    var correctText = Array.isArray(q.options) ? String(q.options[q.correctAnswer] || "") : "";
+    detailsLog.push(
+      "س (وزنها " + qPoints + " نقاط): " + (q.question || "") +
+      " | إجابة الطالب: " + studentAnsText +
+      " | الصحيحة: " + correctText +
+      " [" + (isCorrect ? "✓" : "✗") + "]"
+    );
+  });
+
+  var scaledScore = 0;
+  if (totalObjectivePoints > 0) {
+    scaledScore = (totalEarnedPoints / totalObjectivePoints) * examTotalScore;
+    scaledScore = Math.round(scaledScore * 100) / 100;
+  }
+  var scoreString = "";
+  if (isCanceled) {
+    scoreString = "0 / " + examTotalScore + " (ملغي - غش متكرر)";
+  } else {
+    scoreString = correctObjectiveCount + "/" + objectiveQuestionsCount + " أسئلة موضوعية (تعادل " + scaledScore + " من " + examTotalScore + " كحد أقصى)";
+    if (hasEssay) {
+      scoreString += " + أسئلة مقالية بقيمة " + totalEssayPoints + " نقاط بانتظار تصحيح المعلم";
+    }
+  }
+
+  return {
+    score: scoreString,
+    details: detailsLog.join("\n"),
+    questionScores: questionScoresMap,
+    maxScore: examTotalScore,
+    presentedQuestions: questions.map(function(q) {
+      return {
+        id: q.id,
+        type: q.type,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        points: q.points
+      };
+    })
+  };
+}
+
+function processArabyaAddResult_(data, db) {
+  if (data && data.isManualGradeUpdate) {
+    return { result: normaliseArabyaResult_(data) };
+  }
+  var examId = String(data.examId || "").trim();
+  var studentLookupKey = String(data.studentLookupKey || "").trim();
+  var exam = findArabyaExamInDb_(db, examId);
+  if (!exam) {
+    return { result: normaliseArabyaResult_(data) };
+  }
+
+  var attempt = null;
+  var attemptToken = String(data.attemptToken || "").trim();
+  if (attemptToken) {
+    attempt = loadExamAttempt_(attemptToken);
+    if (!attempt) {
+      return { error: "جلسة الامتحان غير صالحة أو منتهية. أعد بدء الامتحان من جديد.", code: "invalid_attempt_token" };
+    }
+    if (String(attempt.examId || "") !== examId) {
+      return { error: "معرّف الامتحان لا يطابق جلسة المحاولة.", code: "exam_mismatch" };
+    }
+    if (String(attempt.studentLookupKey || "") !== studentLookupKey) {
+      return { error: "مفتاح الطالب لا يطابق جلسة المحاولة.", code: "student_mismatch" };
+    }
+    if (String(data.deviceFingerprint || "") && String(data.deviceFingerprint || "") !== String(attempt.deviceFingerprint || "")) {
+      return { error: "بصمة الجهاز لا تطابق جلسة المحاولة.", code: "device_mismatch" };
+    }
+    if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
+      return { error: "تم رفض التسليم: يوجد محاولة سابقة مسجّلة.", code: "blocked_attempt" };
+    }
+  }
+
+  var status = String(data.status || "completed");
+  var cheatViolations = Number(data.cheatViolations);
+  var cheatAttemptLog = parseArabyaJsonField_(data.cheatAttemptLog, []);
+  var maxCheatAttemptsAllowed = data.maxCheatAttemptsAllowed;
+  if (attempt) {
+    cheatViolations = Number(attempt.cheatViolations);
+    cheatAttemptLog = Array.isArray(attempt.cheatAttemptLog) ? attempt.cheatAttemptLog : [];
+    maxCheatAttemptsAllowed = attempt.maxCheatAttemptsAllowed;
+    if (status === "canceled" && !shouldCancelExamForCheating_(exam, cheatViolations)) {
+      return { error: "لا يمكن إلغاء الامتحان بسبب الغش دون تجاوز الحد المسموح.", code: "cheat_threshold" };
+    }
+  }
+
+  var studentAnswers = parseArabyaJsonField_(data.studentAnswers, {});
+  var presentedQuestions = parseArabyaJsonField_(data.presentedQuestions, []);
+  var graded = gradeArabyaExamResult_(exam, presentedQuestions, studentAnswers, { status: status });
+  var merged = normaliseArabyaResult_(data);
+  merged.score = graded.score;
+  merged.details = graded.details;
+  merged.questionScores = graded.questionScores;
+  merged.maxScore = graded.maxScore;
+  merged.presentedQuestions = graded.presentedQuestions;
+  merged.cheatViolations = isFinite(cheatViolations) ? cheatViolations : 0;
+  merged.cheatAttemptLog = cheatAttemptLog;
+  merged.maxCheatAttemptsAllowed = maxCheatAttemptsAllowed !== undefined && maxCheatAttemptsAllowed !== null
+    ? maxCheatAttemptsAllowed
+    : getExamMaxCheatAttempts_(exam);
+  if (attempt && attempt.deviceFingerprint) {
+    merged.deviceFingerprint = attempt.deviceFingerprint;
+    merged.deviceId = attempt.deviceId || merged.deviceId;
+    merged.clientIp = attempt.clientIp || merged.clientIp;
+  }
+  return { result: merged };
 }
 
 function checkArabyaRateLimit_(e, data, action, scope) {

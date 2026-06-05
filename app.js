@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.1";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.2";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1422,15 +1422,7 @@ function initDatabase() {
   
   // 2. تهيئة قاعدة بيانات الامتحانات
   const savedExams = localStorage.getItem("arabya_exams_db");
-  if (savedExams) {
-    try {
-      systemState.exams = JSON.parse(savedExams);
-    } catch (e) {
-      systemState.exams = []; // نبدأ بقائمة فارغة عند تلف البيانات
-    }
-  } else {
-    systemState.exams = [];
-  }
+  loadExamsForCurrentSession(savedExams);
 
   // تحميل بنك الأسئلة الافتراضي مرة واحدة فقط حتى لا تظهر بوابة الطالب فارغة في أول تشغيل.
   const defaultsSeeded = localStorage.getItem("arabya_default_exams_seeded") === "yes";
@@ -1446,8 +1438,11 @@ function initDatabase() {
     localStorage.setItem("arabya_default_exams_seeded", "yes");
   }
   ensureExamsDataShape();
-
-  localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+  if (isTeacherSessionActive()) {
+    syncTeacherExamsVaultFromState();
+  } else if (systemState.exams.length > 0 && !savedExams) {
+    localStorage.setItem("arabya_exams_db", JSON.stringify(systemState._teacherExamsVault || systemState.exams));
+  }
   
   // 3. تهيئة نتائج الطلاب
   const savedResults = localStorage.getItem("arabya_results_db");
@@ -1633,8 +1628,8 @@ function saveSystemState(syncToCloud = true) {
     if (Array.isArray(systemState.teachers)) {
       saveTeachersToLocalStorage();
     }
-    if (Array.isArray(systemState.exams)) {
-      localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+    if (Array.isArray(systemState.exams) && isTeacherSessionActive()) {
+      syncTeacherExamsVaultFromState();
     }
     if (Array.isArray(systemState.students)) {
       localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
@@ -2487,16 +2482,175 @@ function getConfiguredQuestionCount(exam) {
   return Math.min(parsed, Array.isArray(exam.questions) ? exam.questions.length : 0);
 }
 
-function buildRuntimeQuestionsForExam(exam) {
+function stripAnswerKeysFromQuestion(q) {
+  if (!q || typeof q !== "object") return q;
+  const safe = { ...q };
+  delete safe.correctAnswer;
+  return safe;
+}
+
+function stripAnswerKeysFromExam(exam) {
+  if (!exam) return exam;
+  return {
+    ...exam,
+    questions: (Array.isArray(exam.questions) ? exam.questions : []).map(stripAnswerKeysFromQuestion)
+  };
+}
+
+function isTeacherSessionActive() {
+  return !!(systemState.activeTeacher && systemState.activeView === "teacher-dashboard-view");
+}
+
+function getFullExamById(examId) {
+  const target = String(examId || "").trim();
+  if (!target) return null;
+  if (Array.isArray(systemState._teacherExamsVault)) {
+    const fromVault = systemState._teacherExamsVault.find(e => String(e.id) === target);
+    if (fromVault) return fromVault;
+  }
+  return (systemState.exams || []).find(e => String(e.id) === target) || null;
+}
+
+function captureExamAnswerKeyVault(exam) {
+  if (!exam?.id) return;
+  const fullExam = getFullExamById(exam.id) || exam;
+  systemState._examAnswerKeyVault = systemState._examAnswerKeyVault || {};
+  const keyMap = {};
+  (fullExam.questions || []).forEach(q => {
+    if (q && q.id != null && q.correctAnswer !== undefined) {
+      keyMap[q.id] = q.correctAnswer;
+    }
+  });
+  systemState._examAnswerKeyVault[exam.id] = keyMap;
+}
+
+function getQuestionCorrectAnswer(examId, questionId) {
+  const vault = systemState._examAnswerKeyVault?.[examId];
+  if (vault && vault[questionId] !== undefined) return vault[questionId];
+  const exam = getFullExamById(examId);
+  const question = exam?.questions?.find(q => String(q.id) === String(questionId));
+  return question?.correctAnswer;
+}
+
+function loadExamsForCurrentSession(savedExamsJson) {
+  let fullExams = [];
+  if (savedExamsJson) {
+    try {
+      fullExams = JSON.parse(savedExamsJson);
+    } catch (e) {
+      fullExams = [];
+    }
+  }
+  if (isTeacherSessionActive()) {
+    systemState.exams = fullExams;
+    systemState._teacherExamsVault = null;
+    return;
+  }
+  systemState._teacherExamsVault = fullExams;
+  systemState.exams = fullExams.map(stripAnswerKeysFromExam);
+}
+
+function persistExamsToLocalStorage() {
+  if (!isTeacherSessionActive()) return;
+  const fullExams = systemState._teacherExamsVault || systemState.exams;
+  localStorage.setItem("arabya_exams_db", JSON.stringify(fullExams));
+}
+
+function syncTeacherExamsVaultFromState() {
+  if (!isTeacherSessionActive()) return;
+  systemState._teacherExamsVault = JSON.parse(JSON.stringify(systemState.exams || []));
+  persistExamsToLocalStorage();
+}
+
+function buildRuntimeQuestionsForExam(exam, options = {}) {
   const sourceQuestions = Array.isArray(exam?.questions) ? [...exam.questions] : [];
   if (!sourceQuestions.length) return [];
   const shouldShuffle = exam.shuffleQuestions !== false;
   const questionCount = getConfiguredQuestionCount(exam);
-  const runtime = shouldShuffle ? shuffle([...sourceQuestions]) : sourceQuestions;
+  let runtime = shouldShuffle ? shuffle([...sourceQuestions]) : sourceQuestions;
   if (questionCount) {
-    return runtime.slice(0, questionCount);
+    runtime = runtime.slice(0, questionCount);
   }
-  return runtime;
+  const stripKeys = options.stripAnswerKeys !== false && !isTeacherSessionActive();
+  return stripKeys ? runtime.map(stripAnswerKeysFromQuestion) : runtime;
+}
+
+function gradeStudentExamAnswers(exam, presentedQuestions, studentAnswers, options = {}) {
+  const status = options.status || "completed";
+  const isCanceled = status === "canceled";
+  const examId = exam?.id || systemState.currentExam?.id || "";
+  const examTotalScore = getCurrentExamTotalScore();
+  let totalEarnedPoints = 0;
+  let totalObjectivePoints = 0;
+  let totalEssayPoints = 0;
+  let objectiveQuestionsCount = 0;
+  let correctObjectiveCount = 0;
+  let hasEssay = false;
+  const detailsLog = [];
+  const questionScoresMap = {};
+  const answers = studentAnswers && typeof studentAnswers === "object" ? studentAnswers : {};
+
+  (presentedQuestions || []).forEach(q => {
+    if (!q) return;
+    const studentAns = answers[q.id];
+    const qPoints = q.points !== undefined ? q.points : 10;
+    if (q.type === "essay") {
+      hasEssay = true;
+      totalEssayPoints += qPoints;
+      const ansText = studentAns || (isCanceled ? "(ملغي - غش)" : "(لم يكتب الطالب إجابة)");
+      detailsLog.push(`س مقالي (وزنها ${qPoints} نقاط): ${q.question} \n إجابة الطالب: ${ansText}\n-----------------`);
+      questionScoresMap[q.id] = 0;
+      return;
+    }
+    objectiveQuestionsCount++;
+    totalObjectivePoints += qPoints;
+    const correctAnswer = getQuestionCorrectAnswer(examId, q.id);
+    const isCorrect = !isCanceled && studentAns !== undefined && studentAns !== -1 && studentAns !== -2 && studentAns === correctAnswer;
+    if (isCorrect) {
+      correctObjectiveCount++;
+      totalEarnedPoints += qPoints;
+      questionScoresMap[q.id] = qPoints;
+    } else {
+      questionScoresMap[q.id] = 0;
+    }
+    let studentAnsText = "لم تتم الإجابة";
+    if (studentAns === -1) studentAnsText = "انتهى الوقت";
+    else if (studentAns === -2) studentAnsText = "ملغي (غش)";
+    else if (studentAns !== undefined) studentAnsText = q.options?.[studentAns] || "";
+    const correctText = correctAnswer !== undefined ? (q.options?.[correctAnswer] || "") : "—";
+    detailsLog.push(`س (وزنها ${qPoints} نقاط): ${q.question} | إجابة الطالب: ${studentAnsText} | الصحيحة: ${correctText} [${isCorrect ? "✓" : "✗"}]`);
+  });
+
+  let scaledScore = 0;
+  if (totalObjectivePoints > 0) {
+    scaledScore = (totalEarnedPoints / totalObjectivePoints) * examTotalScore;
+    scaledScore = Math.round(scaledScore * 100) / 100;
+  }
+  let scoreString = isCanceled
+    ? `0 / ${examTotalScore} (ملغي - غش متكرر)`
+    : `${correctObjectiveCount}/${objectiveQuestionsCount} أسئلة موضوعية (تعادل ${scaledScore} من ${examTotalScore} كحد أقصى)`;
+  if (!isCanceled && hasEssay) {
+    scoreString += ` + أسئلة مقالية بقيمة ${totalEssayPoints} نقاط بانتظار تصحيح المعلم`;
+  }
+  return {
+    scoreString,
+    detailsFormatted: detailsLog.join("\n"),
+    questionScoresMap,
+    scaledScore,
+    hasEssay,
+    correctObjectiveCount,
+    objectiveQuestionsCount
+  };
+}
+
+function applyServerGradedResult(resultObj, graded) {
+  if (!resultObj || !graded) return;
+  if (graded.score) resultObj.score = graded.score;
+  if (graded.details) resultObj.details = graded.details;
+  if (graded.questionScores) resultObj.questionScores = graded.questionScores;
+  if (graded.maxScore !== undefined && graded.maxScore !== null) resultObj.maxScore = graded.maxScore;
+  if (graded.cheatViolations !== undefined) resultObj.cheatViolations = graded.cheatViolations;
+  if (graded.maxCheatAttemptsAllowed !== undefined) resultObj.maxCheatAttemptsAllowed = graded.maxCheatAttemptsAllowed;
 }
 
 
@@ -2711,15 +2865,21 @@ function hydrateResultAnswerDataForResults() {
   return changed;
 }
 
-function compactPresentedQuestionsForCloud(questions) {
-  return (Array.isArray(questions) ? questions : []).map(q => ({
-    id: q.id,
-    type: q.type,
-    question: q.question,
-    options: q.options,
-    correctAnswer: q.correctAnswer,
-    points: q.points
-  }));
+function compactPresentedQuestionsForCloud(questions, options = {}) {
+  const includeAnswerKeys = options.includeAnswerKeys === true || isTeacherSessionActive();
+  return (Array.isArray(questions) ? questions : []).map(q => {
+    const compact = {
+      id: q.id,
+      type: q.type,
+      question: q.question,
+      options: q.options,
+      points: q.points
+    };
+    if (includeAnswerKeys && q.correctAnswer !== undefined) {
+      compact.correctAnswer = q.correctAnswer;
+    }
+    return compact;
+  });
 }
 
 /** الأسئلة التي ظهرت للطالب فعلاً (وليس بنك الأسئلة كاملاً) */
@@ -3585,7 +3745,7 @@ function renderSortableTableHeaders(tableSelector, columns, columnSort, toggleFn
     const active = columnSort && columnSort.key === col.key;
     const dir = active ? normalizeColumnSortDirection(columnSort.dir) : "";
     const indicator = active ? (dir === "asc" ? " ▲" : " ▼") : "";
-    return `<th scope="col" class="teacher-sortable-th${active ? " is-sorted" : ""}" data-column-sort="${col.key}" tabindex="0" role="columnheader" aria-sort="${active ? (dir === "asc" ? "ascending" : "descending") : "none"}">${col.label}${indicator}</th>`;
+    return `<th scope="col" class="teacher-sortable-th${active ? " is-sorted" : ""}" data-column-sort="${col.key}" tabindex="0" role="columnheader" aria-sort="${active ? (dir === "asc" ? "ascending" : "descending") : "none"}">${escapeHtml(col.label)}${indicator}</th>`;
   }).join("") + `<th scope="col">الإجراء</th>`;
   theadRow.querySelectorAll("[data-column-sort]").forEach(th => {
     const activate = () => toggleFn(th.dataset.columnSort);
@@ -4337,7 +4497,14 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     systemState.students = filterOutDeletedStudents(systemState.students);
   }
   if (Array.isArray(remoteData.exams)) {
-    systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, item => String(item.id || item.title || ""), "امتحان");
+    const mergeExamKey = item => String(item.id || item.title || "");
+    if (isTeacherSessionActive()) {
+      systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, mergeExamKey, "امتحان");
+    } else {
+      const vaultBase = systemState._teacherExamsVault || systemState.exams || [];
+      systemState._teacherExamsVault = mergeRemoteCollection_(vaultBase, remoteData.exams, mergeExamKey, "امتحان");
+      systemState.exams = (systemState._teacherExamsVault || []).map(stripAnswerKeysFromExam);
+    }
   }
   if (Array.isArray(remoteData.results)) {
     const remoteResults = remoteData.results.filter(
@@ -4371,6 +4538,11 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   ensureStudentsDataShape();
   ensureExamsDataShape();
+  if (examStartOnly) {
+    systemState.exams = (systemState.exams || []).map(stripAnswerKeysFromExam);
+  } else if (isTeacherSessionActive()) {
+    syncTeacherExamsVaultFromState();
+  }
   if (!examStartOnly && remoteData.config && typeof remoteData.config === "object") {
     const remoteAppVersion = remoteData.config.appVersion;
     systemState.config = { ...(systemState.config || {}), ...remoteData.config };
@@ -5864,16 +6036,26 @@ async function loginTeacherObject(teacher, loginCredential, options = {}) {
   const normalized = normalizeTeacherAccount(teacher);
   const credential = String(loginCredential || "").trim();
   if (credential && window.ArabyaSecurity) {
-    await window.ArabyaSecurity.ensureTeacherPasswordHashed(normalized, credential);
+    if (typeof window.ArabyaSecurity.upgradeTeacherPasswordHashIfNeeded === "function") {
+      await window.ArabyaSecurity.upgradeTeacherPasswordHashIfNeeded(normalized, credential);
+    } else {
+      await window.ArabyaSecurity.ensureTeacherPasswordHashed(normalized, credential);
+    }
     const idx = systemState.teachers.findIndex(t => t.username === normalized.username);
     if (idx !== -1) {
-      systemState.teachers[idx] = { ...systemState.teachers[idx], passwordHash: normalized.passwordHash, passwordSalt: normalized.passwordSalt };
+      systemState.teachers[idx] = {
+        ...systemState.teachers[idx],
+        passwordHash: normalized.passwordHash,
+        passwordSalt: normalized.passwordSalt,
+        passwordHashVersion: normalized.passwordHashVersion
+      };
       saveTeachersToLocalStorage();
     }
   }
   if (window.ArabyaSecurity) window.ArabyaSecurity.touchTeacherActivity();
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
+  loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
   localStorage.setItem("arabya_active_teacher_username", normalized.username || teacher.username);
   if (!options.restoreSession) {
     persistTeacherSessionToken(normalized.username || teacher.username);
@@ -6370,7 +6552,15 @@ function updateTeacherStatsSyncStatus(message, tone = "muted") {
     warning: "var(--warning)"
   };
   el.style.color = colors[tone] || colors.muted;
-  el.innerHTML = message || "";
+  if (!message) {
+    el.textContent = "";
+    return;
+  }
+  if (/<[a-z][\s\S]*>/i.test(message)) {
+    el.innerHTML = message;
+  } else {
+    el.textContent = message;
+  }
 }
 
 async function refreshTeacherStatsDashboard(options = {}) {
@@ -7107,11 +7297,11 @@ function renderQuestionsForEdit(exam) {
         </div>
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">درجة السؤال:</label>
-          <input type="number" class="form-control edit-q-points" value="${q.points !== undefined ? q.points : 10}" min="1" data-index="${index}">
+          <input type="number" class="form-control edit-q-points" value="${escapeAttr(q.points !== undefined ? q.points : 10)}" min="1" data-index="${index}">
         </div>
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">مدة الإجابة (ثانية):</label>
-          <input type="number" class="form-control edit-q-time" value="${q.timeSeconds !== undefined ? q.timeSeconds : 60}" min="5" data-index="${index}">
+          <input type="number" class="form-control edit-q-time" value="${escapeAttr(q.timeSeconds !== undefined ? q.timeSeconds : 60)}" min="5" data-index="${index}">
         </div>
       </div>
     `;
@@ -8189,6 +8379,21 @@ async function validateStudentAndStart() {
     systemState.currentStudent.deviceId = deviceProfile.deviceId;
     systemState.currentStudent.lastKnownIp = deviceProfile.clientIp || "";
     systemState.examDeviceProfile = deviceProfile;
+    try {
+      const attemptRegistration = await registerExamAttemptWithCloud(examId, studentLookupKey, deviceProfile);
+      systemState.examAttemptToken = attemptRegistration.attemptToken || "";
+      if (!attemptRegistration.ok && attemptRegistration.message) {
+        alert(attemptRegistration.message);
+        return;
+      }
+    } catch (attemptErr) {
+      console.warn("[ARABYA] register_exam_attempt failed:", attemptErr);
+      if (getExamResultSyncUrl(selectedExam) || getUnifiedTeacherSyncUrl(selectedExam)) {
+        alert(attemptErr.message || "تعذر تسجيل محاولة الامتحان على الخادم. تحقق من الاتصال ثم أعد المحاولة.");
+        return;
+      }
+      systemState.examAttemptToken = "";
+    }
     saveStudentsToLocalStorage();
     saveSystemState(false);
   } catch (deviceErr) {
@@ -8203,6 +8408,7 @@ async function validateStudentAndStart() {
   }
 
   systemState.currentExam = selectedExam;
+  captureExamAnswerKeyVault(selectedExam);
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
   systemState.currentExamRuntime = calculateRuntimeExamMeta(systemState.shuffledQuestions);
@@ -8520,59 +8726,24 @@ function submitFinishedExam() {
   systemState.results = systemState.results.filter(r => !(r.studentLookupKey === studentLookupKey && r.examId === systemState.currentExam.id && r.status === "incomplete"));
   localStorage.removeItem("arabya_active_student_session");
 
-  let totalEarnedPoints = 0;
-  let totalObjectivePoints = 0;
-  let totalEssayPoints = 0;
-  let objectiveQuestionsCount = 0;
-  let correctObjectiveCount = 0;
-  let hasEssay = false;
-  let detailsLog = [];
-
   const studentAnswersMap = { ...systemState.studentAnswers };
-  const questionScoresMap = {};
-
-  systemState.shuffledQuestions.forEach(q => {
-    const studentAns = studentAnswersMap[q.id];
-    const qPoints = q.points !== undefined ? q.points : 10;
-
-    if (q.type === "essay") {
-      hasEssay = true;
-      totalEssayPoints += qPoints;
-      const ansText = studentAns || "(لم يكتب الطالب إجابة)";
-      detailsLog.push(`س مقالي (وزنها ${qPoints} نقاط): ${q.question} \n إجابة الطالب: ${ansText}\n-----------------`);
-      questionScoresMap[q.id] = 0;
-    } else {
-      objectiveQuestionsCount++;
-      totalObjectivePoints += qPoints;
-      const isCorrect = studentAns === q.correctAnswer;
-      if (isCorrect) {
-        correctObjectiveCount++;
-        totalEarnedPoints += qPoints;
-        questionScoresMap[q.id] = qPoints;
-      } else {
-        questionScoresMap[q.id] = 0;
-      }
-      let studentAnsText = "لم تتم الإجابة";
-      if (studentAns === -1) studentAnsText = "انتهى الوقت";
-      else if (studentAns === -2) studentAnsText = "ملغي (غش)";
-      else if (studentAns !== undefined) studentAnsText = q.options[studentAns];
-      detailsLog.push(`س (وزنها ${qPoints} نقاط): ${q.question} | إجابة الطالب: ${studentAnsText} | الصحيحة: ${q.options[q.correctAnswer]} [${isCorrect ? '✓' : '✗'}]`);
-    }
+  const gradedLocal = gradeStudentExamAnswers(systemState.currentExam, systemState.shuffledQuestions, studentAnswersMap, {
+    status: "completed"
   });
-
+  const {
+    scoreString,
+    detailsFormatted,
+    questionScoresMap,
+    scaledScore,
+    hasEssay
+  } = {
+    scoreString: gradedLocal.scoreString,
+    detailsFormatted: gradedLocal.detailsFormatted,
+    questionScoresMap: gradedLocal.questionScoresMap,
+    scaledScore: gradedLocal.scaledScore,
+    hasEssay: gradedLocal.hasEssay
+  };
   const examTotalScore = getCurrentExamTotalScore();
-  let scaledScore = 0;
-  if (totalObjectivePoints > 0) {
-    scaledScore = (totalEarnedPoints / totalObjectivePoints) * examTotalScore;
-    scaledScore = Math.round(scaledScore * 100) / 100;
-  }
-
-  let scoreString = `${correctObjectiveCount}/${objectiveQuestionsCount} أسئلة موضوعية (تعادل ${scaledScore} من ${examTotalScore} كحد أقصى)`;
-  if (hasEssay) {
-    scoreString += ` + أسئلة مقالية بقيمة ${totalEssayPoints} نقاط بانتظار تصحيح المعلم`;
-  }
-
-  const detailsFormatted = detailsLog.join("\n");
   const resultObj = {
     recordId: createRecordId("result"),
     savedAt: Date.now(),
@@ -8613,6 +8784,10 @@ function submitFinishedExam() {
     );
   }
   systemState.lastCompletedExamId = systemState.currentExam.id;
+  systemState.examAttemptToken = "";
+  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
+    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
+  }
   // إظهار رابط الملف الشخصي في شريط التنقل
   const navProfileLi = document.getElementById("nav-student-profile-link");
   if (navProfileLi) navProfileLi.classList.remove("hidden");
@@ -8689,6 +8864,7 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
     presentedQuestions: compactPresentedQuestionsForCloud(
       resultObj?.presentedQuestions || systemState.shuffledQuestions || []
     ),
+    attemptToken: systemState.examAttemptToken || resultObj?.attemptToken || "",
     ...buildResultCloudRetakeFields(resultObj),
     ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
     ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),
@@ -8699,22 +8875,24 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
 
 async function postAddResultToCloudUrls(urlList, slimPayload) {
   const targets = [...new Set((urlList || []).map(normalizeArabyaWebAppUrl).filter(Boolean))];
-  if (!targets.length) return { ok: false, successCount: 0, total: 0 };
+  if (!targets.length) return { ok: false, successCount: 0, total: 0, graded: null };
   const outcomes = await Promise.all(targets.map(async url => {
     try {
-      await postToArabyaWebApp(url, slimPayload);
-      return true;
+      const response = await postToArabyaWebApp(url, slimPayload);
+      return { ok: true, graded: response?.graded || null };
     } catch (err) {
       console.warn("[ARABYA] add_result failed, retry no-cors:", url, err);
       try {
-        return await postToArabyaWebAppNoCors(url, slimPayload);
+        const sent = await postToArabyaWebAppNoCors(url, slimPayload);
+        return { ok: !!sent, graded: null };
       } catch (e2) {
-        return false;
+        return { ok: false, graded: null };
       }
     }
   }));
-  const successCount = outcomes.filter(Boolean).length;
-  return { ok: successCount > 0, successCount, total: targets.length };
+  const successCount = outcomes.filter(item => item.ok).length;
+  const graded = outcomes.find(item => item.graded)?.graded || null;
+  return { ok: successCount > 0, successCount, total: targets.length, graded };
 }
 
 // المزامنة مع جوجل شيتس - ترسل نتيجة الطالب فور الانتهاء من الامتحان
@@ -8760,6 +8938,18 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
       postAddResultToCloudUrls(urlList, slimPayload),
       pushCloudBackupNow("exam_submit")
     ]);
+    if (postResult.graded && resultObj) {
+      applyServerGradedResult(resultObj, postResult.graded);
+      saveSystemState(false);
+      const parsedScaled = parseGradeFromScoreText_(resultObj.score, resultObj.maxScore);
+      const scoreNumEl = document.getElementById("runner-res-score");
+      const totalEl = document.getElementById("runner-res-total");
+      if (scoreNumEl && parsedScaled.includes("/")) {
+        const parts = parsedScaled.split("/").map(s => s.trim());
+        scoreNumEl.innerText = parts[0] || scoreNumEl.innerText;
+        if (totalEl && parts[1]) totalEl.innerText = parts[1];
+      }
+    }
     if (!statusEl) return;
     if (postResult.ok || backupOk) {
       statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم حفظ نتيجتك ومزامنتها مع Google Sheets بنجاح ✓`;
@@ -10650,6 +10840,56 @@ async function logExamDeviceReject_(entry) {
   } catch (e) {}
 }
 
+async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
+  const exam = (systemState.exams || []).find(e => e.id === examId) || systemState.currentExam;
+  const syncUrl = getExamResultSyncUrl(exam) || getUnifiedTeacherSyncUrl(exam);
+  if (!syncUrl) {
+    return { ok: true, attemptToken: "" };
+  }
+  const payload = {
+    action: "register_exam_attempt",
+    examId,
+    studentLookupKey,
+    studentName: systemState.currentStudent?.name || "",
+    deviceFingerprint: profile?.deviceFingerprint || "",
+    deviceId: profile?.deviceId || "",
+    clientIp: profile?.clientIp || "",
+    deviceMeta: profile?.deviceMeta || buildResultDeviceFields(profile).deviceMeta || {}
+  };
+  const response = await postToArabyaWebApp(syncUrl, payload);
+  if (response?.status === "error") {
+    return { ok: false, message: response.message || "تعذر تسجيل محاولة الامتحان." };
+  }
+  return { ok: true, attemptToken: response?.attemptToken || "" };
+}
+
+async function logCheatEventToCloud(reason) {
+  const token = systemState.examAttemptToken;
+  const exam = systemState.currentExam;
+  const profile = systemState.examDeviceProfile;
+  if (!token || !exam) return;
+  const syncUrl = getExamResultSyncUrl(exam) || getUnifiedTeacherSyncUrl(exam);
+  if (!syncUrl) return;
+  const studentLookupKey = systemState.currentStudent?.studentKey || getStudentLookupKey(systemState.currentStudent);
+  try {
+    const response = await postToArabyaWebApp(syncUrl, {
+      action: "log_cheat_event",
+      attemptToken: token,
+      examId: exam.id,
+      studentLookupKey,
+      deviceFingerprint: profile?.deviceFingerprint || "",
+      reason: reason || "unknown",
+      label: getCheatReasonLabel(reason)
+    });
+    if (response?.cheatViolations !== undefined) {
+      systemState.cheatViolations = Number(response.cheatViolations) || systemState.cheatViolations;
+      systemState.examMaxCheatAttemptsAllowed = response.maxCheatAttemptsAllowed ?? systemState.examMaxCheatAttemptsAllowed;
+    }
+  } catch (err) {
+    console.warn("[ARABYA] log_cheat_event failed:", err);
+  }
+}
+
 async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, studentContext) {
   const profile = await collectExamDeviceProfile();
   purgeStaleDeviceBindingsForProfile(profile);
@@ -11056,6 +11296,7 @@ function recordCheatAttempt(reason) {
     at: new Date().toISOString()
   });
   systemState.cheatViolations = systemState.cheatAttemptLog.length;
+  void logCheatEventToCloud(reason);
   updateLiveIncompleteResult();
   saveActiveStudentSession();
 }
@@ -11346,14 +11587,13 @@ function submitCheatedExam() {
 
   const exam = systemState.currentExam;
   const examTotalScore = getCurrentExamTotalScore();
-  const scoreString = `0 / ${examTotalScore} (ملغي - غش متكرر)`;
-  const detailsFormatted = "تم إلغاء الامتحان وتصفير النتيجة نهائياً لمخالفة تعليمات الاختبار وتكرار محاولة الغش أو الخروج من الصفحة.";
-
   const studentAnswersMap = { ...systemState.studentAnswers };
-  const questionScoresMap = {};
-  exam.questions.forEach(q => {
-    questionScoresMap[q.id] = 0;
+  const gradedLocal = gradeStudentExamAnswers(exam, systemState.shuffledQuestions, studentAnswersMap, {
+    status: "canceled"
   });
+  const scoreString = gradedLocal.scoreString;
+  const detailsFormatted = gradedLocal.detailsFormatted || "تم إلغاء الامتحان وتصفير النتيجة نهائياً لمخالفة تعليمات الاختبار وتكرار محاولة الغش أو الخروج من الصفحة.";
+  const questionScoresMap = gradedLocal.questionScoresMap;
 
   const resultObj = {
     recordId: createRecordId("result"),
@@ -11386,6 +11626,10 @@ function submitCheatedExam() {
   resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
+  systemState.examAttemptToken = "";
+  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
+    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
+  }
   systemState.currentExamRuntime = null;
   saveSystemState(false);
 
@@ -12479,8 +12723,9 @@ function updateLiveIncompleteResult() {
       questionScoresMap[q.id] = 0;
     } else {
       objectiveQuestionsCount++;
-      const isCorrect = studentAns === q.correctAnswer;
-      if (studentAns !== undefined && studentAns !== -1 && studentAns !== -2 && isCorrect) {
+      const isCorrect = studentAns !== undefined && studentAns !== -1 && studentAns !== -2
+        && studentAns === getQuestionCorrectAnswer(examId, q.id);
+      if (isCorrect) {
         correctObjectiveCount++;
         questionScoresMap[q.id] = qPoints;
       } else {

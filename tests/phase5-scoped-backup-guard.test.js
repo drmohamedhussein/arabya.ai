@@ -29,6 +29,11 @@ test("phase5: student direct-link sync uses exam_start scope", () => {
   assert.ok(block.includes('scope: "exam_start"'));
 });
 
+test("phase5: exam_start backup strips correctAnswer on server", () => {
+  const gasSource = readFileSync(new URL("../integrations/google-apps-script-backend.gs", import.meta.url), "utf8");
+  assert.ok(gasSource.includes("stripCorrectAnswersFromExams_"));
+});
+
 test("phase5: first-run admin alert hidden on student exam links", () => {
   assert.ok(appSource.includes("isLikelyStudentExamRequest"));
   assert.ok(appSource.includes("hasTeacherLoginToken || !isLikelyStudentExamRequest"));
