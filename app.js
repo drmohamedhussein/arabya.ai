@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.4";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.5";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -4605,14 +4605,26 @@ function normalizeArabyaWebAppUrl(rawUrl) {
 
 const ARABYA_API_SECRET_QUERY = "apiSecret";
 
+function getTeacherLoginFormApiSecret() {
+  try {
+    const input = document.getElementById("teacher-login-api-secret");
+    const fromInput = input ? String(input.value || "").trim() : "";
+    if (fromInput) return fromInput;
+    return String(localStorage.getItem("arabya_pending_api_secret") || "").trim();
+  } catch (e) {
+    return "";
+  }
+}
+
 function getArabyaApiSecret() {
   const fromTeacher = systemState.activeTeacher?.integrationConfig?.apiSecret;
   const fromConfig = systemState.config?.apiSecret;
   try {
     const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
-    return String(fromTeacher || fromConfig || cfg.apiSecret || "").trim();
+    const pending = localStorage.getItem("arabya_pending_api_secret") || "";
+    return String(fromTeacher || fromConfig || cfg.apiSecret || pending || "").trim();
   } catch (e) {
-    return String(fromTeacher || fromConfig || "").trim();
+    return String(fromTeacher || fromConfig || getTeacherLoginFormApiSecret() || "").trim();
   }
 }
 
@@ -4622,10 +4634,12 @@ function withArabyaApiSecret(payload) {
   return { ...payload, apiSecret: secret };
 }
 
-function appendArabyaApiSecretToUrl(rawUrl) {
+function appendArabyaApiSecretToUrl(rawUrl, secretOverride) {
   const base = normalizeArabyaWebAppUrl(rawUrl);
   if (!base) return "";
-  const secret = getArabyaApiSecret();
+  const secret = secretOverride !== undefined
+    ? String(secretOverride || "").trim()
+    : getArabyaApiSecret();
   if (!secret) return base;
   const sep = base.includes("?") ? "&" : "?";
   return base + sep + ARABYA_API_SECRET_QUERY + "=" + encodeURIComponent(secret);
@@ -4652,8 +4666,8 @@ function buildCloudBackupFetchParams(mergeOptions = {}) {
   return params;
 }
 
-function buildArabyaCloudActionUrl(rawUrl, action, extraParams = {}) {
-  const base = appendArabyaApiSecretToUrl(rawUrl);
+function buildArabyaCloudActionUrl(rawUrl, action, extraParams = {}, secretOverride) {
+  const base = appendArabyaApiSecretToUrl(rawUrl, secretOverride);
   if (!base) return "";
   const parts = ["action=" + encodeURIComponent(action)];
   Object.keys(extraParams || {}).forEach(key => {
@@ -5468,6 +5482,16 @@ function markTeacherHasCustomData() {
   } catch (e) {}
 }
 
+function persistTeacherLoginCloudSettings(syncUrl, apiSecret) {
+  if (isValidCloudSyncUrl(syncUrl)) {
+    localStorage.setItem("arabya_pending_cloud_sync_url", normalizeArabyaWebAppUrl(syncUrl.trim()));
+  }
+  const secret = String(apiSecret || "").trim();
+  if (secret) {
+    localStorage.setItem("arabya_pending_api_secret", secret);
+  }
+}
+
 function persistCloudSyncUrlForTeacher(url) {
   if (!isValidCloudSyncUrl(url) || !systemState.activeTeacher) return;
   const clean = url.trim();
@@ -5482,6 +5506,46 @@ function persistCloudSyncUrlForTeacher(url) {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   localStorage.setItem("arabya_pending_cloud_sync_url", clean);
+}
+
+async function prefetchTeacherAccountsFromCloud(syncUrl, apiSecret) {
+  const url = String(syncUrl || "").trim();
+  if (!isValidCloudSyncUrl(url)) return { ok: false, reason: "no_url" };
+  const fetchUrl = buildArabyaCloudActionUrl(url, "get_backup", { scope: "teacher_login" }, apiSecret);
+  if (!fetchUrl) return { ok: false, reason: "bad_url" };
+  try {
+    const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) return { ok: false, reason: "http_" + res.status };
+    const response = await res.json();
+    if (!response || response.status !== "success" || !response.data) {
+      return { ok: false, reason: "bad_response" };
+    }
+    const remoteTeachers = Array.isArray(response.data.teachers) ? response.data.teachers : [];
+    if (!remoteTeachers.length) return { ok: false, reason: "no_teachers" };
+    const localTeachers = systemState.teachers || [];
+    systemState.teachers = mergeTeachersPreservingLocalAuth_(localTeachers, remoteTeachers);
+    saveTeachersToLocalStorage();
+    normalizeAllTeacherAccounts();
+    pruneOrphanTeacherAccounts();
+    reconcileDuplicateSuperAdminAccounts();
+    persistTeacherLoginCloudSettings(url, apiSecret);
+    return { ok: true, count: systemState.teachers.length };
+  } catch (err) {
+    console.warn("prefetchTeacherAccountsFromCloud:", err);
+    return { ok: false, reason: "fetch_failed" };
+  }
+}
+
+async function ensureCloudTeacherAuthBackup() {
+  const urls = collectCloudSyncUrls();
+  if (!urls.length) return;
+  const hasAuth = (systemState.teachers || []).some(t => t && (t.passwordHash || t.autoEntryCode));
+  if (!hasAuth) return;
+  try {
+    await pushCloudBackupNow("teacher_auth_migration");
+  } catch (err) {
+    console.warn("ensureCloudTeacherAuthBackup:", err);
+  }
 }
 
 function applyCloudBackupData(data) {
@@ -5545,7 +5609,9 @@ function applyCloudBackupData(data) {
   markTeacherHasCustomData();
 }
 
-function fetchCloudBackupFromUrls(urlList) {
+function fetchCloudBackupFromUrls(urlList, options = {}) {
+  const secretOverride = options.apiSecret !== undefined ? options.apiSecret : undefined;
+  const extraParams = options.scope ? { scope: options.scope } : {};
   return new Promise((resolve, reject) => {
     let index = 0;
     function tryFetchNext() {
@@ -5554,7 +5620,7 @@ function fetchCloudBackupFromUrls(urlList) {
         return;
       }
       const rawUrl = urlList[index++];
-      const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup");
+      const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup", extraParams, secretOverride);
       if (!fetchUrl) {
         tryFetchNext();
         return;
@@ -5572,6 +5638,7 @@ function fetchCloudBackupFromUrls(urlList) {
 }
 
 function finishTeacherLoginNavigation(options = {}) {
+  ensureCloudTeacherAuthBackup().catch(() => {});
   if (!options.skipPasswordCheck && teacherMustChangePassword(systemState.activeTeacher)) {
     navigateToView("teacher-login-view");
     showMandatoryPasswordChangeModal();
@@ -5590,6 +5657,8 @@ function finishTeacherLoginNavigation(options = {}) {
 
 function syncTeacherDataOnLogin(options = {}) {
   const extraSyncUrl = (options.extraSyncUrl || "").trim();
+  const apiSecret = options.apiSecret !== undefined ? options.apiSecret : getTeacherLoginFormApiSecret();
+  persistTeacherLoginCloudSettings(extraSyncUrl, apiSecret);
   if (extraSyncUrl) persistCloudSyncUrlForTeacher(extraSyncUrl);
 
   const urls = collectCloudSyncUrls(extraSyncUrl);
@@ -5598,7 +5667,7 @@ function syncTeacherDataOnLogin(options = {}) {
     return Promise.resolve({ synced: false, reason: "no_url" });
   }
 
-  return fetchCloudBackupFromUrls(urls)
+  return fetchCloudBackupFromUrls(urls, { apiSecret })
     .then(data => {
       const local = countLocalTeacherData();
       const cloud = countCloudBackupData(data);
@@ -5849,6 +5918,11 @@ function navigateToView(viewId) {
     const syncInput = document.getElementById("teacher-login-sync-url");
     if (syncInput && pendingSyncUrl && !syncInput.value.trim()) {
       syncInput.value = pendingSyncUrl;
+    }
+    const pendingSecret = localStorage.getItem("arabya_pending_api_secret") || "";
+    const secretInput = document.getElementById("teacher-login-api-secret");
+    if (secretInput && pendingSecret && !secretInput.value.trim()) {
+      secretInput.value = pendingSecret;
     }
     updateTeacherAppVersionLabel();
   } else if (viewId === "teacher-register-view") {
@@ -6237,47 +6311,74 @@ function setupUIEventListeners() {
 async function handleTeacherLogin() {
   const usernameInput = document.getElementById("teacher-login-username").value.trim();
   const passwordInput = document.getElementById("teacher-password").value;
+  const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+  const apiSecret = getTeacherLoginFormApiSecret();
 
   if (!usernameInput || !passwordInput) {
     alert("يرجى إدخال اسم المعلم والرقم السري!");
     return;
   }
 
-  const passwordMatches = await findTeachersMatchingPassword(usernameInput, passwordInput);
+  persistTeacherLoginCloudSettings(extraSyncUrl, apiSecret);
+
+  let passwordMatches = await findTeachersMatchingPassword(usernameInput, passwordInput);
+  if (!passwordMatches.length && extraSyncUrl) {
+    await prefetchTeacherAccountsFromCloud(extraSyncUrl, apiSecret);
+    passwordMatches = await findTeachersMatchingPassword(usernameInput, passwordInput);
+  }
+
   const matched = pickPreferredTeacherLoginMatch(passwordMatches);
 
   if (matched) {
     await loginTeacherObject(matched, passwordInput);
-    const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
-    syncTeacherDataOnLogin({ extraSyncUrl });
+    syncTeacherDataOnLogin({ extraSyncUrl, apiSecret });
     document.getElementById("teacher-password").value = "";
   } else {
-    alert("بيانات المعلم غير صحيحة أو الحساب غير موجود!");
+    alert(
+      "بيانات المعلم غير صحيحة أو الحساب غير موجود على هذا المتصفح.\n\n" +
+      "للدخول من متصفح جديد:\n" +
+      "1) أدخل رابط Web App (ينتهي بـ /exec)\n" +
+      "2) أدخل سر API إن وُجد في Apps Script\n" +
+      "3) ارفع نسخة احتياطية سحابية من المتصفح الأصلي أولاً"
+    );
   }
 }
 
 async function handleTeacherQuickLogin() {
   const codeInput = document.getElementById("teacher-quick-code");
   const codeVal = codeInput ? codeInput.value.trim() : "";
+  const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+  const apiSecret = getTeacherLoginFormApiSecret();
 
   if (!codeVal) {
     alert("يرجى إدخال رمز الدخول السريع!");
     return;
   }
 
-  const quickMatches = await findTeachersMatchingQuickCode(codeVal);
+  persistTeacherLoginCloudSettings(extraSyncUrl, apiSecret);
+
+  let quickMatches = await findTeachersMatchingQuickCode(codeVal);
+  if (!quickMatches.length && extraSyncUrl) {
+    await prefetchTeacherAccountsFromCloud(extraSyncUrl, apiSecret);
+    quickMatches = await findTeachersMatchingQuickCode(codeVal);
+  }
+
   const matched = pickPreferredTeacherLoginMatch(quickMatches);
 
   if (matched) {
     await loginTeacherObject(matched, codeVal, { viaQuickCode: true });
-    const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
     syncTeacherDataOnLogin({
       extraSyncUrl,
+      apiSecret,
       message: `مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول بنجاح عبر رمز الدخول السريع.`
     });
     if (codeInput) codeInput.value = "";
   } else {
-    alert("رمز الدخول السريع غير صحيح أو الحساب غير موجود!");
+    alert(
+      "رمز الدخول السريع غير صحيح أو الحساب غير موجود على هذا المتصفح.\n\n" +
+      "أدخل رابط Web App وسر API (إن وُجد) ثم حاول مجدداً.\n" +
+      "تأكد من رفع نسخة احتياطية سحابية من المتصفح الأصلي."
+    );
   }
 }
 

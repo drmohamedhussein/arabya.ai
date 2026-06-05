@@ -211,12 +211,15 @@ function doGet(e) {
         db.students = filterArabyaStudentsByDeletedKeys_(db.students || [], db.deletedStudentKeys);
       }
       var payloadDb = scope === "exam_start" ? buildArabyaExamStartBackup_(db, examId) : db;
+      var clientPayload = scope === "teacher_login"
+        ? sanitizeArabyaDbForTeacherLogin_(payloadDb)
+        : sanitizeArabyaDbForClient_(payloadDb);
       var resultCount = (payloadDb.results || []).length;
       var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
         status: "success",
         scope: scope || "full",
-        data: sanitizeArabyaDbForClient_(payloadDb),
+        data: clientPayload,
         cloudRevision: cloudRevision,
         counts: countArabya_(payloadDb),
         sheetResultRows: resultCount,
@@ -280,6 +283,7 @@ function sanitizeArabyaDbForClient_(db) {
       delete safe.password;
       delete safe.passwordHash;
       delete safe.passwordSalt;
+      delete safe.passwordHashVersion;
       delete safe.autoEntryCode;
       delete safe.loginTokens;
       if (safe.integrationConfig) {
@@ -291,6 +295,26 @@ function sanitizeArabyaDbForClient_(db) {
     });
   }
   return copy;
+}
+
+/** يُعيد بيانات دخول المعلمين فقط — يتطلب ARABYA_API_SECRET عند تفعيله. */
+function sanitizeArabyaDbForTeacherLogin_(db) {
+  if (!db) return { teachers: [], schemaVersion: ARABYA_DEFAULT_DB.schemaVersion };
+  var teachers = Array.isArray(db.teachers) ? db.teachers : [];
+  return {
+    schemaVersion: db.schemaVersion || ARABYA_DEFAULT_DB.schemaVersion,
+    teachers: teachers.map(function(teacher) {
+      if (!teacher) return teacher;
+      var safe = Object.assign({}, teacher);
+      delete safe.password;
+      delete safe.loginTokens;
+      if (safe.integrationConfig) {
+        safe.integrationConfig = Object.assign({}, safe.integrationConfig);
+        delete safe.integrationConfig.apiSecret;
+      }
+      return safe;
+    })
+  };
 }
 
 function slimArabyaResultForExamStart_(result) {
@@ -754,7 +778,7 @@ function checkArabyaRateLimit_(e, data, action, scope) {
     cache.put(key, String(count), 120);
     var limit = 45;
     if (action === "get_backup") {
-      limit = scope === "exam_start" ? 60 : 35;
+      limit = scope === "exam_start" ? 60 : (scope === "teacher_login" ? 25 : 35);
     } else if (action === "get_sync_meta") {
       limit = 90;
     }

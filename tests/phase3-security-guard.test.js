@@ -40,9 +40,18 @@ test("phase3: security module strips plain password after hash", () => {
   assert.ok(securitySource.includes("function sanitizeTeacherForLocalStorage"));
   assert.ok(securitySource.includes("teacherPasswordMatches"));
   assert.ok(securitySource.includes("teacherAutoEntryCodeMatches"));
-  assert.ok(securitySource.includes("delete copy.passwordHash"));
-  assert.ok(securitySource.includes("delete copy.autoEntryCode"));
-  assert.ok(securitySource.includes("delete copy.loginTokens"));
+  const exportBlock = securitySource.slice(
+    securitySource.indexOf("function sanitizeTeacherForExport"),
+    securitySource.indexOf("function sanitizeTeacherForCloud")
+  );
+  assert.ok(exportBlock.includes("delete copy.passwordHash"));
+  assert.ok(exportBlock.includes("delete copy.loginTokens"));
+  const cloudBlock = securitySource.slice(
+    securitySource.indexOf("function sanitizeTeacherForCloud"),
+    securitySource.indexOf("global.ArabyaSecurity")
+  );
+  assert.ok(cloudBlock.includes("delete copy.password"));
+  assert.ok(cloudBlock.includes("delete copy.loginTokens"));
 });
 
 test("phase3: cloud sync delegates to security sanitizer", () => {

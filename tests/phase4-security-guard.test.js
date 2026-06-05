@@ -26,7 +26,7 @@ test("phase4: client has API secret helpers wired to cloud calls", () => {
   assert.ok(appSource.includes("function getArabyaApiSecret"));
   assert.ok(appSource.includes("function withArabyaApiSecret"));
   assert.ok(appSource.includes("function buildArabyaCloudActionUrl"));
-  assert.ok(appSource.includes('buildArabyaCloudActionUrl(rawUrl, "get_backup")'));
+  assert.ok(appSource.includes('buildArabyaCloudActionUrl(rawUrl, "get_backup"'));
   assert.ok(appSource.includes('buildArabyaCloudActionUrl(rawUrl, "get_sync_meta")'));
   assert.ok(appSource.includes("withArabyaApiSecret(payload)"));
   assert.ok(appSource.includes('parsed.code === "unauthorized"'));

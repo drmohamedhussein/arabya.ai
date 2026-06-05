@@ -90,12 +90,10 @@
     if (!teacher) return teacher;
     const copy = JSON.parse(JSON.stringify(teacher));
     delete copy.password;
-    delete copy.passwordHash;
-    delete copy.passwordSalt;
-    delete copy.autoEntryCode;
     delete copy.loginTokens;
-    if (copy.integrationConfig && copy.integrationConfig.teacherCode) {
+    if (copy.integrationConfig) {
       delete copy.integrationConfig.teacherCode;
+      delete copy.integrationConfig.apiSecret;
     }
     return copy;
   }
