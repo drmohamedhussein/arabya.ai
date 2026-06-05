@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.9";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.10";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3666,7 +3666,7 @@ function buildArabyaDataHealthReport() {
         results: readLen("arabya_results_db")
       };
     })(),
-    syncUrl: systemState.config?.googleFormUrl || systemState.activeTeacher?.integrationConfig?.googleFormUrl || "",
+    syncUrlConfigured: !!(systemState.config?.googleFormUrl || systemState.activeTeacher?.integrationConfig?.googleFormUrl),
     apiSecretConfigured: !!getArabyaApiSecret(),
     lastCloudSync: lastOk ? (lastOk.at || "—") : "—",
     lastCloudError: lastErr || "—",
@@ -3693,7 +3693,7 @@ window.showArabyaDataHealthReport = function() {
     `schemaVersion: ${r.schemaVersion}\n\n` +
     `السجلات (ذاكرة): معلمون ${r.counts.teachers} · طلاب ${r.counts.students} · امتحانات ${r.counts.exams} · نتائج ${r.counts.results}\n` +
     `localStorage: معلمون ${r.localStorage.teachers} · طلاب ${r.localStorage.students} · امتحانات ${r.localStorage.exams} · نتائج ${r.localStorage.results}\n\n` +
-    `رابط المزامنة: ${r.syncUrl || "(غير مُعيَّن)"}\n` +
+    `المزامنة السحابية: ${r.syncUrlConfigured ? "مضبوطة" : "غير مضبوطة"}\n` +
     `سر API: ${r.apiSecretConfigured ? "مضبوط" : "غير مضبوط"}\n` +
     `آخر مزامنة ناجحة: ${r.lastCloudSync}\n` +
     `آخر خطأ رفع: ${r.lastCloudError}` +
@@ -4013,9 +4013,9 @@ function refreshCloudSyncStatusUI(liveMessage, state) {
   } else if (state === "fail" && indicator) {
     indicator.innerHTML = `<span class="material-icons" style="color:var(--error); font-size:1.1rem;">cloud_off</span> ${escapeHtml(liveMessage || "فشل الاتصال بالسحابة — البيانات محفوظة محلياً فقط")}`;
   } else if (state === "local" && indicator) {
-    indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem;">save</span> ${escapeHtml(liveMessage || "تم الحفظ محلياً فقط — أضف رابط Web App من تبويب الربط")}`;
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem;">save</span> ${escapeHtml(liveMessage || "تم الحفظ محلياً فقط — اضبط المزامنة من تبويب الربط")}`;
   } else if (indicator && !urlConfigured) {
-    indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem;">cloud_queue</span> المزامنة غير مهيأة — أدخل رابط <code>/exec</code> في تبويب الربط`;
+    indicator.innerHTML = `<span class="material-icons" style="color:var(--warning); font-size:1.1rem;">cloud_queue</span> المزامنة غير مهيأة — اضبطها من تبويب الربط`;
   }
 
   if (lastLine) {
@@ -4194,11 +4194,21 @@ function getGeneralTeacherSyncUrls() {
     if (isValidCloudSyncUrl(cfg.googleFormUrl)) urls.add(normalizeArabyaWebAppUrl(cfg.googleFormUrl.trim()));
   } catch (e) {}
   try {
+    const pending = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+    if (isValidCloudSyncUrl(pending)) urls.add(normalizeArabyaWebAppUrl(pending.trim()));
+  } catch (e) {}
+  try {
     const teacherUrlInput = document.getElementById("teacher-config-url");
     if (teacherUrlInput && isValidCloudSyncUrl(teacherUrlInput.value)) {
       urls.add(normalizeArabyaWebAppUrl(teacherUrlInput.value.trim()));
     }
   } catch (e) {}
+  const teacherParam = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
+  const fromTeacherParam = resolveSyncUrlForTeacherUsername(teacherParam);
+  if (fromTeacherParam) urls.add(fromTeacherParam);
+  Object.values(loadTeacherSyncRegistry()).forEach(url => {
+    if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(String(url).trim()));
+  });
   return Array.from(urls).filter(Boolean);
 }
 
@@ -4739,15 +4749,76 @@ function normalizeArabyaWebAppUrl(rawUrl) {
 
 const ARABYA_API_SECRET_QUERY = "apiSecret";
 
+const ARABYA_TEACHER_SYNC_REGISTRY_KEY = "arabya_teacher_sync_registry";
+
 function getTeacherLoginFormApiSecret() {
   try {
-    const input = document.getElementById("teacher-login-api-secret");
-    const fromInput = input ? String(input.value || "").trim() : "";
-    if (fromInput) return fromInput;
     return String(localStorage.getItem("arabya_pending_api_secret") || "").trim();
   } catch (e) {
     return "";
   }
+}
+
+function getInternalTeacherLoginSyncUrl() {
+  try {
+    const pending = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+    if (isValidCloudSyncUrl(pending)) return normalizeArabyaWebAppUrl(pending.trim());
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    if (isValidCloudSyncUrl(cfg.googleFormUrl)) return normalizeArabyaWebAppUrl(cfg.googleFormUrl.trim());
+  } catch (e) {}
+  return "";
+}
+
+function loadTeacherSyncRegistry() {
+  try {
+    const raw = localStorage.getItem(ARABYA_TEACHER_SYNC_REGISTRY_KEY) || "{}";
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveTeacherSyncRegistryEntry(username, url) {
+  const user = String(username || "").trim();
+  const clean = isValidCloudSyncUrl(url) ? normalizeArabyaWebAppUrl(String(url).trim()) : "";
+  if (!user || !clean) return;
+  const registry = loadTeacherSyncRegistry();
+  registry[user] = clean;
+  try {
+    localStorage.setItem(ARABYA_TEACHER_SYNC_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (e) {}
+}
+
+function resolveSyncUrlForTeacherUsername(username) {
+  const user = String(username || "").trim();
+  if (!user) return "";
+  try {
+    const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+    const matched = teachers.find(t => t && (t.username === user || t.name === user));
+    const fromTeacher = matched?.integrationConfig?.googleFormUrl || "";
+    if (isValidCloudSyncUrl(fromTeacher)) return normalizeArabyaWebAppUrl(fromTeacher.trim());
+  } catch (e) {}
+  const registry = loadTeacherSyncRegistry();
+  const fromRegistry = registry[user] || "";
+  if (isValidCloudSyncUrl(fromRegistry)) return normalizeArabyaWebAppUrl(fromRegistry.trim());
+  return "";
+}
+
+function stripSensitiveUrlParamsFromBrowser() {
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    ["s", "apiSecret"].forEach(param => {
+      if (url.searchParams.has(param)) {
+        url.searchParams.delete(param);
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    const next = url.pathname + (url.search ? url.search : "") + (url.hash || "");
+    window.history.replaceState({}, document.title, next);
+  } catch (e) {}
 }
 
 function getArabyaApiSecret() {
@@ -5681,7 +5752,7 @@ function persistTeacherLoginCloudSettings(syncUrl, apiSecret) {
 
 function persistCloudSyncUrlForTeacher(url) {
   if (!isValidCloudSyncUrl(url) || !systemState.activeTeacher) return;
-  const clean = url.trim();
+  const clean = normalizeArabyaWebAppUrl(url.trim());
   systemState.activeTeacher.integrationConfig = systemState.activeTeacher.integrationConfig || {};
   systemState.activeTeacher.integrationConfig.googleFormUrl = clean;
   systemState.config = systemState.config || {};
@@ -5693,6 +5764,7 @@ function persistCloudSyncUrlForTeacher(url) {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   localStorage.setItem("arabya_pending_cloud_sync_url", clean);
+  saveTeacherSyncRegistryEntry(systemState.activeTeacher.username, clean);
 }
 
 async function prefetchTeacherAccountsFromCloud(syncUrl, apiSecret) {
@@ -5883,7 +5955,7 @@ function syncTeacherDataOnLogin(options = {}) {
       console.error("syncTeacherDataOnLogin failed:", err);
       finishTeacherLoginNavigation(options);
       if (isLikelyFreshLocalDatabase()) {
-        alert("تعذر جلب البيانات من السحابة.\n\nتأكد من:\n- إدخال رابط Web App الصحيح (ينتهي بـ /exec)\n- رفع نسخة احتياطية سحابية من المتصفح الأصلي\n- نشر Apps Script للوصول Anyone");
+        alert("تعذر جلب البيانات من السحابة.\n\nتأكد من:\n- ضبط المزامنة السحابية من تبويب الربط على المتصفح الأصلي\n- رفع نسخة احتياطية سحابية\n- نشر Apps Script للوصول Anyone");
       }
       return { synced: false, reason: "fetch_failed" };
     });
@@ -6101,16 +6173,6 @@ function navigateToView(viewId) {
       populateExamSelectionList();
     }
   } else if (viewId === "teacher-login-view") {
-    const pendingSyncUrl = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
-    const syncInput = document.getElementById("teacher-login-sync-url");
-    if (syncInput && pendingSyncUrl && !syncInput.value.trim()) {
-      syncInput.value = pendingSyncUrl;
-    }
-    const pendingSecret = localStorage.getItem("arabya_pending_api_secret") || "";
-    const secretInput = document.getElementById("teacher-login-api-secret");
-    if (secretInput && pendingSecret && !secretInput.value.trim()) {
-      secretInput.value = pendingSecret;
-    }
     updateTeacherAppVersionLabel();
   } else if (viewId === "teacher-register-view") {
     if (!canUsePublicTeacherRegistration()) {
@@ -6172,8 +6234,6 @@ function getExamDirectLink(exam) {
   if (systemState.activeTeacher) {
     params.set("teacher", systemState.activeTeacher.username);
   }
-  const syncUrl = getEffectiveExamSyncUrl(exam);
-  if (syncUrl) params.set("s", syncUrl);
   return `${getAppBaseUrl()}?${params.toString()}`;
 }
 
@@ -6207,8 +6267,9 @@ async function checkUrlParameters() {
     const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
     const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
     if (matchedTeacher) {
+      const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
       systemState.config = {
-        googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+        googleFormUrl: teacherSyncUrl,
         entryName: matchedTeacher.integrationConfig?.entryName || "",
         entryId: matchedTeacher.integrationConfig?.entryId || "",
         entryCode: matchedTeacher.integrationConfig?.entryCode || "",
@@ -6217,15 +6278,23 @@ async function checkUrlParameters() {
         autoEntryCode: matchedTeacher.autoEntryCode || ""
       };
       systemState.targetTeacherUsername = matchedTeacher.username;
+      if (isValidCloudSyncUrl(teacherSyncUrl)) {
+        saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
+      }
     }
   }
 
-  // 3.b رابط المزامنة المضمّن في الرابط المباشر (يعمل عبر الأجهزة المختلفة)
+  // 3.b دعم روابط قديمة تحتوي s= — يُستهلك داخلياً ثم يُزال من شريط العنوان
   const syncParam = getUrlParameter("s");
-  if (syncParam && (syncParam.includes("/macros/s/") || syncParam.endsWith("/exec"))) {
+  if (syncParam && isValidCloudSyncUrl(syncParam)) {
+    const cleanSync = normalizeArabyaWebAppUrl(syncParam.trim());
     systemState.config = systemState.config || {};
-    systemState.config.googleFormUrl = syncParam;
+    systemState.config.googleFormUrl = cleanSync;
     try { localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config)); } catch (e) {}
+    try { localStorage.setItem("arabya_pending_cloud_sync_url", cleanSync); } catch (e) {}
+    if (systemState.targetTeacherUsername) {
+      saveTeacherSyncRegistryEntry(systemState.targetTeacherUsername, cleanSync);
+    }
     setTimeout(function() {
       if (typeof syncDatabaseFromCloud === "function") {
         syncDatabaseFromCloud({
@@ -6243,6 +6312,7 @@ async function checkUrlParameters() {
         });
       }
     }, 50);
+    stripSensitiveUrlParamsFromBrowser();
   }
 
   // 4. فتح امتحان مخصص للطالب (عبر البارامتر ?exam=... أو عبر المسار الفرعي الحقيقي في pathname)
@@ -6286,8 +6356,9 @@ async function checkUrlParameters() {
           const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
           const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
           if (matchedTeacher) {
+            const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
             systemState.config = {
-              googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+              googleFormUrl: teacherSyncUrl,
               entryName: matchedTeacher.integrationConfig?.entryName || "",
               entryId: matchedTeacher.integrationConfig?.entryId || "",
               entryCode: matchedTeacher.integrationConfig?.entryCode || "",
@@ -6296,6 +6367,9 @@ async function checkUrlParameters() {
               autoEntryCode: matchedTeacher.autoEntryCode || ""
             };
             systemState.targetTeacherUsername = matchedTeacher.username;
+            if (isValidCloudSyncUrl(teacherSyncUrl)) {
+              saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
+            }
           }
         }
       }
@@ -6498,7 +6572,7 @@ function setupUIEventListeners() {
 async function handleTeacherLogin() {
   const usernameInput = document.getElementById("teacher-login-username").value.trim();
   const passwordInput = document.getElementById("teacher-password").value;
-  const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+  const extraSyncUrl = getInternalTeacherLoginSyncUrl();
   const apiSecret = getTeacherLoginFormApiSecret();
 
   if (!usernameInput || !passwordInput) {
@@ -6524,9 +6598,8 @@ async function handleTeacherLogin() {
     alert(
       "بيانات المعلم غير صحيحة أو الحساب غير موجود على هذا المتصفح.\n\n" +
       "للدخول من متصفح جديد:\n" +
-      "1) أدخل رابط Web App (ينتهي بـ /exec)\n" +
-      "2) أدخل سر API إن وُجد في Apps Script\n" +
-      "3) ارفع نسخة احتياطية سحابية من المتصفح الأصلي أولاً"
+      "1) أنشئ رابط دخول لمرة واحدة من الملف الشخصي على المتصفح الأصلي\n" +
+      "2) أو اضبط المزامنة السحابية من تبويب الربط ثم ارفع نسخة احتياطية"
     );
   }
 }
@@ -6534,7 +6607,7 @@ async function handleTeacherLogin() {
 async function handleTeacherQuickLogin() {
   const codeInput = document.getElementById("teacher-quick-code");
   const codeVal = codeInput ? codeInput.value.trim() : "";
-  const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
+  const extraSyncUrl = getInternalTeacherLoginSyncUrl();
   const apiSecret = getTeacherLoginFormApiSecret();
 
   if (!codeVal) {
@@ -6563,8 +6636,7 @@ async function handleTeacherQuickLogin() {
   } else {
     alert(
       "رمز الدخول السريع غير صحيح أو الحساب غير موجود على هذا المتصفح.\n\n" +
-      "أدخل رابط Web App وسر API (إن وُجد) ثم حاول مجدداً.\n" +
-      "تأكد من رفع نسخة احتياطية سحابية من المتصفح الأصلي."
+      "للدخول من متصفح جديد استخدم رابط دخول لمرة واحدة من الملف الشخصي على المتصفح الأصلي."
     );
   }
 }
@@ -12730,30 +12802,8 @@ function buildExamShareLink(rawUrl) {
       url.searchParams.set("teacher", systemState.activeTeacher.username);
     }
 
-    let syncUrl = getEffectiveExamSyncUrl(exam || {});
-
-    if (!syncUrl) {
-      const teacherUser = url.searchParams.get("teacher") || "";
-      if (teacherUser && Array.isArray(systemState.teachers)) {
-        const t = systemState.teachers.find(x => x.username === teacherUser || x.name === teacherUser);
-        if (t && t.integrationConfig && t.integrationConfig.googleFormUrl) {
-          const u = String(t.integrationConfig.googleFormUrl).trim();
-          if (u.includes("/macros/s/") || u.endsWith("/exec")) syncUrl = u;
-        }
-      }
-    }
-
-    if (!syncUrl) {
-      try {
-        const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
-        const u = cfg.googleFormUrl ? String(cfg.googleFormUrl).trim() : "";
-        if (u && (u.includes("/macros/s/") || u.endsWith("/exec"))) syncUrl = u;
-      } catch (e) {}
-    }
-
-    if (syncUrl) {
-      url.searchParams.set("s", syncUrl);
-    }
+    url.searchParams.delete("s");
+    url.searchParams.delete("apiSecret");
 
     return url.toString();
   } catch (e) {
