@@ -325,13 +325,18 @@
       .filter(Boolean);
   }
 
+  function normalizeIpForMatch(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
   function ipMatchesAllowedList(clientIp, allowedList) {
-    const ip = String(clientIp || "").trim();
+    const ip = normalizeIpForMatch(clientIp);
     if (!ip || !allowedList || !allowedList.length) return false;
     return allowedList.some(allowed => {
-      const a = String(allowed || "").trim();
+      const a = normalizeIpForMatch(allowed);
       if (!a) return false;
       if (ip === a) return true;
+      if (a.endsWith(".*") && ip.startsWith(a.slice(0, -1))) return true;
       const prefix = a.split(".").slice(0, 3).join(".");
       return prefix.length >= 7 && ip.startsWith(prefix + ".");
     });

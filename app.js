@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.7";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.8";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -2201,6 +2201,26 @@ function clearExamDeviceRegistryForStudentExam(studentLookupKey, examId) {
   saveExamDeviceRegistry(registry);
 }
 
+function clearExamDeviceRegistryForExamFingerprint(examId, deviceFingerprint) {
+  const fp = String(deviceFingerprint || "").trim();
+  if (!examId || !fp) return;
+  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  registry.bindings = (registry.bindings || []).filter(entry =>
+    !(entry.examId === examId && entry.deviceFingerprint === fp)
+  );
+  saveExamDeviceRegistry(registry);
+}
+
+function clearExamDeviceRegistryForExamIp(examId, clientIp) {
+  const ip = normalizeDeviceIp(clientIp);
+  if (!examId || !ip) return;
+  const registry = pruneExamDeviceRegistry(loadExamDeviceRegistry());
+  registry.bindings = (registry.bindings || []).filter(entry =>
+    !(entry.examId === examId && normalizeDeviceIp(entry.clientIp) === ip)
+  );
+  saveExamDeviceRegistry(registry);
+}
+
 function isRegistryBindingForDeletedStudent(entry) {
   if (!entry) return false;
   loadDeletedStudentKeysFromStorage();
@@ -2302,8 +2322,12 @@ function applyResultIpReleaseByStaff(res, newIpValue, syncStatusEl) {
   if (lookupKey && res.examId) {
     clearExamDeviceRegistryForStudentExam(lookupKey, res.examId);
   }
+  if (res.deviceFingerprint && res.examId) {
+    clearExamDeviceRegistryForExamFingerprint(res.examId, res.deviceFingerprint);
+  }
   if (ip && res.examId) {
     addAllowedRetakeIpToExam(res.examId, ip);
+    clearExamDeviceRegistryForExamIp(res.examId, ip);
   }
   return persistResultRecordWithCloudSync(res, syncStatusEl).then(() => {
     renderTeacherResultDeviceIpPanel(res);
@@ -3287,18 +3311,38 @@ function getExamMaxStudentsPerSharedIp(exam) {
   return 15;
 }
 
-function isIpOnExamAllowlist(exam, clientIp) {
-  if (!exam || !clientIp) return false;
+function getExamIpAllowlist(exam) {
+  if (!exam) return [];
   normalizeExamIpLists(exam);
-  const allowed = [
+  return [
     ...(exam.hallMode?.allowedIps || []),
     ...(exam.allowedRetakeIps || [])
-  ];
+  ].map(ip => String(ip || "").trim()).filter(Boolean);
+}
+
+function isIpOnExamAllowlist(exam, clientIp) {
+  if (!exam || !clientIp) return false;
+  const allowed = getExamIpAllowlist(exam);
+  if (!allowed.length) return false;
   if (window.ArabyaPlatformSync && window.ArabyaPlatformSync.ipMatchesAllowedList) {
     return window.ArabyaPlatformSync.ipMatchesAllowedList(clientIp, allowed);
   }
   const ip = normalizeDeviceIp(clientIp);
   return allowed.some(a => normalizeDeviceIp(a) === ip);
+}
+
+function shouldBypassExamDeviceLock(exam, profile, conflictResult) {
+  if (!exam) return false;
+  if (isIpOnExamAllowlist(exam, profile?.clientIp)) return true;
+  if (conflictResult && isIpOnExamAllowlist(exam, conflictResult.clientIp)) return true;
+  return false;
+}
+
+function formatExamIpAllowlistHint(exam, profile) {
+  const allowed = getExamIpAllowlist(exam);
+  const current = String(profile?.clientIp || "").trim() || "غير متاح";
+  const allowedText = allowed.length ? allowed.join(" ، ") : "لا يوجد";
+  return `\n\nعنوان IP الحالي للطالب: ${current}\nالعناوين المسموحة في الامتحان: ${allowedText}`;
 }
 
 function countDistinctStudentsOnExamIp(examId, clientIp, excludeLookupKey) {
@@ -11103,37 +11147,37 @@ async function enforceExamDeviceBinding(studentLookupKey, studentName, examId, s
     studentKey: studentLookupKey,
     name: studentName || ""
   });
-  const ipAllowlisted = isIpOnExamAllowlist(exam, profile.clientIp);
   const ipSlot = checkExamSharedIpAdmission(exam, profile.clientIp, studentLookupKey, ctx);
   if (!ipSlot.ok) {
     void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: ipSlot.message, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
     return { ok: false, message: ipSlot.message, profile };
   }
-  if (!ipAllowlisted) {
-    const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
-    if (attemptConflict?.kind === "same_student") {
-      const msg = getExamBlockingMessage(attemptConflict.result);
-      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-      return { ok: false, message: msg, profile };
-    }
-    if (attemptConflict?.kind === "other_student") {
-      const other = attemptConflict.result || {};
-      const msg =
-        "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
-        `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
-        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
-      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-      return { ok: false, message: msg, profile };
-    }
-    const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
-    if (conflict) {
-      const msg =
-        "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
-        `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
-        "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز.";
-      void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
-      return { ok: false, message: msg, profile };
-    }
+  const attemptConflict = findDeviceExamAttemptConflict(profile, examId, ctx);
+  if (attemptConflict?.kind === "same_student" && !shouldBypassExamDeviceLock(exam, profile, attemptConflict.result)) {
+    const msg = getExamBlockingMessage(attemptConflict.result);
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
+  }
+  if (attemptConflict?.kind === "other_student" && !shouldBypassExamDeviceLock(exam, profile, attemptConflict.result)) {
+    const other = attemptConflict.result || {};
+    const msg =
+      "تم رفض الدخول: هذا الجهاز/المتصفح استُخدم مسبقاً لامتحان آخر على نفس الحساب أو لطالب آخر.\n\n" +
+      `آخر طالب مسجّل على الجهاز: ${other.name || other.studentName || "غير معروف"}.\n` +
+      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز." +
+      formatExamIpAllowlistHint(exam, profile) +
+      "\n\nللسماح في قاعة مشتركة: أضف عنوان IP الظاهر أعلاه في «IP مسموح بإعادة الدخول» ثم احفظ الامتحان وارفع نسخة سحابية.";
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
+  }
+  const conflict = findDeviceBindingConflict(profile, examId, studentLookupKey, ctx);
+  if (conflict && !shouldBypassExamDeviceLock(exam, profile, conflict)) {
+    const msg =
+      "تم رفض الدخول: هذا الجهاز/المتصفح مرتبط بطالب آخر في المنصة.\n\n" +
+      `الطالب المسجّل سابقاً على الجهاز: ${conflict.studentName || "غير معروف"}.\n` +
+      "يجب أن يؤدي كل طالب الامتحان من جهازه الشخصي فقط — لا يمكن أداء الامتحان لصالح زميل على نفس الجهاز." +
+      formatExamIpAllowlistHint(exam, profile);
+    void logExamDeviceReject_({ studentLookupKey, studentName, examId, message: msg, deviceFingerprint: profile.deviceFingerprint, clientIp: profile.clientIp });
+    return { ok: false, message: msg, profile };
   }
   registerExamDeviceBinding(profile, studentLookupKey, studentName, examId);
   return { ok: true, profile };
@@ -12188,8 +12232,10 @@ function addAllowedRetakeIpToExam(examId, ip) {
   const exam = systemState.exams.find(e => e.id === examId);
   if (!exam) return;
   normalizeExamIpLists(exam);
-  if (!exam.allowedRetakeIps.includes(clean)) {
+  const alreadyListed = exam.allowedRetakeIps.some(entry => normalizeDeviceIp(entry) === normalizeDeviceIp(clean));
+  if (!alreadyListed) {
     exam.allowedRetakeIps.push(clean);
+    clearExamDeviceRegistryForExamIp(examId, clean);
     saveSystemState(true);
   }
 }

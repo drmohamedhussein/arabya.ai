@@ -211,4 +211,49 @@ assert.ok(canStudentBypassExamLockForExam([retakeAllowed], examId, ctx));
 const ipReleased = { ...completedWithoutDevice, ipReleasedByTeacher: true };
 assert.ok(canStudentBypassExamLockForExam([ipReleased], examId, ctx));
 
+function ipMatchesAllowedList(clientIp, allowedList) {
+  const ip = normalizeDeviceIp(clientIp);
+  if (!ip || !allowedList || !allowedList.length) return false;
+  return allowedList.some(allowed => {
+    const a = normalizeDeviceIp(allowed);
+    if (!a) return false;
+    if (ip === a) return true;
+    const prefix = a.split(".").slice(0, 3).join(".");
+    return prefix.length >= 7 && ip.startsWith(prefix + ".");
+  });
+}
+
+function shouldBypassExamDeviceLock(exam, profile, conflictResult) {
+  const allowed = [
+    ...(exam?.hallMode?.allowedIps || []),
+    ...(exam?.allowedRetakeIps || [])
+  ];
+  const onList = ip => ipMatchesAllowedList(ip, allowed);
+  if (onList(profile?.clientIp)) return true;
+  if (conflictResult && onList(conflictResult.clientIp)) return true;
+  return false;
+}
+
+const labExam = {
+  id: examId,
+  allowedRetakeIps: ["198.51.100.8"],
+  hallMode: { enabled: false, allowedIps: [] }
+};
+const blockedOther = {
+  ...completedWithoutDevice,
+  deviceFingerprint: "fp-shared",
+  clientIp: "198.51.100.8"
+};
+assert.ok(shouldBypassExamDeviceLock(
+  labExam,
+  { clientIp: "198.51.100.9", deviceFingerprint: "fp-shared" },
+  blockedOther
+), "allowlist on prior result IP bypasses device lock for lab PCs");
+
+assert.ok(!shouldBypassExamDeviceLock(
+  { id: examId, allowedRetakeIps: [], hallMode: { allowedIps: [] } },
+  { clientIp: "198.51.100.9" },
+  blockedOther
+), "no allowlist keeps device lock");
+
 console.log("All exam device lock tests passed.");

@@ -456,7 +456,7 @@ function findBlockingArabyaResult_(db, studentLookupKey, examId) {
   return null;
 }
 
-function findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey) {
+function findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp) {
   var fp = String(deviceFingerprint || "").trim();
   if (!fp) return null;
   var bindings = db.examDeviceRegistry && Array.isArray(db.examDeviceRegistry.bindings)
@@ -466,12 +466,52 @@ function findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLooku
     var entry = bindings[i];
     if (!entry || String(entry.examId || "") !== String(examId || "")) continue;
     if (String(entry.deviceFingerprint || "") !== fp) continue;
-    if (String(entry.studentLookupKey || "") !== String(studentLookupKey || "")) return entry;
+    if (String(entry.studentLookupKey || "") !== String(studentLookupKey || "")) {
+      if (shouldBypassArabyaDeviceLock_(exam, clientIp, entry)) continue;
+      return entry;
+    }
   }
   return null;
 }
 
-function findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey) {
+function normalizeArabyaIpForMatch_(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getExamIpAllowlist_(exam) {
+  if (!exam) return [];
+  var hall = exam.hallMode || {};
+  var hallIps = Array.isArray(hall.allowedIps) ? hall.allowedIps : (hall.allowedIp ? [hall.allowedIp] : []);
+  var retakeIps = Array.isArray(exam.allowedRetakeIps) ? exam.allowedRetakeIps : [];
+  return hallIps.concat(retakeIps).map(function(ip) {
+    return String(ip || "").trim();
+  }).filter(Boolean);
+}
+
+function ipMatchesExamAllowlist_(clientIp, allowedList) {
+  var ip = normalizeArabyaIpForMatch_(clientIp);
+  if (!ip || !allowedList || !allowedList.length) return false;
+  for (var i = 0; i < allowedList.length; i++) {
+    var a = normalizeArabyaIpForMatch_(allowedList[i]);
+    if (!a) continue;
+    if (ip === a) return true;
+    if (a.indexOf(".*") === a.length - 2 && ip.indexOf(a.slice(0, -1)) === 0) return true;
+    var prefix = a.split(".").slice(0, 3).join(".");
+    if (prefix.length >= 7 && ip.indexOf(prefix + ".") === 0) return true;
+  }
+  return false;
+}
+
+function shouldBypassArabyaDeviceLock_(exam, clientIp, conflictResult) {
+  if (!exam) return false;
+  var allowed = getExamIpAllowlist_(exam);
+  if (!allowed.length) return false;
+  if (ipMatchesExamAllowlist_(clientIp, allowed)) return true;
+  if (conflictResult && ipMatchesExamAllowlist_(conflictResult.clientIp, allowed)) return true;
+  return false;
+}
+
+function findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp) {
   var fp = String(deviceFingerprint || "").trim();
   if (!fp) return null;
   var results = db && Array.isArray(db.results) ? db.results : [];
@@ -484,6 +524,7 @@ function findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookup
     if (resultMatchesStudentLookup_(row, studentLookupKey)) {
       return { kind: "same_student", result: row };
     }
+    if (shouldBypassArabyaDeviceLock_(exam, clientIp, row)) continue;
     return { kind: "other_student", result: row };
   }
   return null;
@@ -526,11 +567,12 @@ function registerArabyaExamAttempt_(data) {
   if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
     return { error: "تم رفض بدء الامتحان: يوجد محاولة سابقة مسجّلة لهذا الطالب.", code: "blocked_attempt" };
   }
-  var attemptConflict = findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey);
+  var clientIp = String(data.clientIp || "").trim();
+  var attemptConflict = findDeviceAttemptConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
   if (attemptConflict && attemptConflict.kind === "other_student") {
     return { error: "تم رفض الدخول: هذا الجهاز استُخدم لطالب آخر.", code: "device_conflict" };
   }
-  var registryConflict = findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey);
+  var registryConflict = findDeviceRegistryConflict_(db, examId, deviceFingerprint, studentLookupKey, exam, clientIp);
   if (registryConflict) {
     return { error: "تم رفض الدخول: الجهاز مرتبط بطالب آخر.", code: "device_registry_conflict" };
   }
