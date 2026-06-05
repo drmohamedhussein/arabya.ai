@@ -1,0 +1,319 @@
+{
+  "label": "ARABYA.NET — نسخة احتياطية كاملة قبل إصلاحات الأمان",
+  "createdAt": "2026-06-05T05:04:51Z",
+  "gitCommit": "6472aa8f124f02aea08079f313a6a3004f48d1a0",
+  "gitBranch": "main",
+  "backupBranch": "backup/pre-security-fixes-2026-06-05-e0f2",
+  "backupTag": "backup-2026-06-05-pre-security-fixes",
+  "fileCount": 60,
+  "totalBytes": 3008249,
+  "database": {
+    "path": "database/arabya-db.json",
+    "bytes": 17550,
+    "sha256": "13b6cb082ec7c71af5e0014da5d1f6aa43959f9ee81caae57cd8bc0dc831a58f",
+    "schemaVersion": 1,
+    "note": "نسخة من المستودع — قد تختلف عن بيانات المتصفح أو Google Sheets"
+  },
+  "files": [
+    {
+      "path": "404.html",
+      "bytes": 1248,
+      "sha256": "79359846e51507ff9d4a5c602104147040466abb0c3dfb7aac77863c9b8788e2"
+    },
+    {
+      "path": "app.js",
+      "bytes": 496564,
+      "sha256": "d6ec376e5d1663dfdaaf55755d1c50739051b9c509d205e2cc7536437f64a99b"
+    },
+    {
+      "path": "CNAME",
+      "bytes": 11,
+      "sha256": "76978370ef812927abe4d4c2d6300f49a1b8ca9f14d3bf1b807b817a15d367b7"
+    },
+    {
+      "path": "database/arabya-db.json",
+      "bytes": 17550,
+      "sha256": "13b6cb082ec7c71af5e0014da5d1f6aa43959f9ee81caae57cd8bc0dc831a58f"
+    },
+    {
+      "path": "database/README.md",
+      "bytes": 1175,
+      "sha256": "00ca7314d60daaf06cb1d3f94c149dca5b478f8f992866f9af4447f91da1de12"
+    },
+    {
+      "path": "hero_illustration.png",
+      "bytes": 796789,
+      "sha256": "59a9fae2a5f8c492adfee888b9ac52f64fc8326540dc2be637b621b969997cf8"
+    },
+    {
+      "path": "index.html",
+      "bytes": 137249,
+      "sha256": "908314cece12c66dc1274fbca74acfad1532a6199672743dd6792445ae5a5882"
+    },
+    {
+      "path": "integrations/google-apps-script-backend.gs",
+      "bytes": 42201,
+      "sha256": "2badade6dd909096465d16b91cdc760027ba5d5525a2e620d7d4891d44a9d5c1"
+    },
+    {
+      "path": "js/arabya-analytics.js",
+      "bytes": 10085,
+      "sha256": "9fbfcb69a6e524e91a65d8c4bebb8ac3091f750b8c16e32f6208be3e07256d47"
+    },
+    {
+      "path": "js/arabya-cloud-sync.js",
+      "bytes": 13133,
+      "sha256": "6aac4f037470370b0ff19fc02ce515be2dae70babbeab5fae2db770c88d172ea"
+    },
+    {
+      "path": "js/arabya-offline-queue.js",
+      "bytes": 2148,
+      "sha256": "b8850b58b4fb7a7065699c1fd9a9e5b417e636c7741fe35ae262f607915fc3ad"
+    },
+    {
+      "path": "js/arabya-platform-sync.js",
+      "bytes": 18751,
+      "sha256": "ebe5f96640ea8b90799945c5f4ccc77cb13dac55c55056af1feace86773123e8"
+    },
+    {
+      "path": "js/arabya-question-bank.js",
+      "bytes": 16175,
+      "sha256": "625970f0b7595e34bed2a7648feae7cf73631a7252718f5cf364bf8916bb5e9c"
+    },
+    {
+      "path": "js/arabya-realtime-bridge.js",
+      "bytes": 1773,
+      "sha256": "2362daacd60da34f1ed2585b17039dcb56a40a86adf2dcf956dba512f40ec12e"
+    },
+    {
+      "path": "js/arabya-security.js",
+      "bytes": 2996,
+      "sha256": "dba4605f774b56506cde20679e7723741fea4723e7ade2c976c7182968e7552b"
+    },
+    {
+      "path": "js/arabya-toast.js",
+      "bytes": 1312,
+      "sha256": "8ead4ca1ed39996738992eaeb7476603e6fbd060781897c3efbbbe5acdad156e"
+    },
+    {
+      "path": "js/arabya-version-boot.js",
+      "bytes": 3134,
+      "sha256": "56521194097775bb0a3750eae15ea23b321a7d4e4e30c3a9cf470e6bded4b465"
+    },
+    {
+      "path": "js/README.md",
+      "bytes": 1116,
+      "sha256": "f37514a627db9ef6460cc3bbd27597058058488ce051428754274b578c62e0a0"
+    },
+    {
+      "path": "LAUNCH.md",
+      "bytes": 1061,
+      "sha256": "7fe7407ba68cbcdf946ca16fbe41ae2c513234ccb87daa2aa6b0ab617c93b97e"
+    },
+    {
+      "path": "logo.jpg",
+      "bytes": 316659,
+      "sha256": "ad7907f8c7157d43aca73b3287bc447adbfc40805020d89e018f285e7e4fd402"
+    },
+    {
+      "path": "logo.png",
+      "bytes": 636138,
+      "sha256": "bf08536c3b3c8eea48b2b05288eb1bc47be7f2918fca08d894c9bc501be9a3b2"
+    },
+    {
+      "path": "questions.js",
+      "bytes": 34049,
+      "sha256": "39f951aabd4bd4247aafd6d29f98cd2cad65e8ac32452d97f671517d749bea27"
+    },
+    {
+      "path": "README.md",
+      "bytes": 10557,
+      "sha256": "0aa209120ba8c3ab5255131ff845d15f6ffe3d04c0752e35cb8f2c7cece23e50"
+    },
+    {
+      "path": "_redirects",
+      "bytes": 19,
+      "sha256": "6036983e5fc00f0169c9e939b1816ed771eee00e27f2fcc517b819041460b9ef"
+    },
+    {
+      "path": "scripts/patch_cheat_attempts_teacher_log.py",
+      "bytes": 20394,
+      "sha256": "009eb4f81e5e7e304aeba167a11aa849b5d6da79bb8acf627bc3d1334ae05ae4"
+    },
+    {
+      "path": "scripts/patch_device_fingerprint_teacher.py",
+      "bytes": 18097,
+      "sha256": "46a9e33ce7a4ae79a96f8a965adb45cbdd377b8867156592648f2be1f58f8485"
+    },
+    {
+      "path": "scripts/patch_exam_anticheat_ux.py",
+      "bytes": 9881,
+      "sha256": "237f5b0382de05aac7e2c288b1034bcad7ac995b16bcc632cdce66702080c091"
+    },
+    {
+      "path": "scripts/patch_exam_anticheat_v2.py",
+      "bytes": 7363,
+      "sha256": "75f7b2c05f7fb7415c304eb99ff7eb2c54501a60e495f5b9e4b5cae337d220b8"
+    },
+    {
+      "path": "scripts/patch_exam_retake_management.py",
+      "bytes": 24250,
+      "sha256": "d41086eb7a72819ac5e437a69a5745d94d6df8283634e5a597d3501c8f3be293"
+    },
+    {
+      "path": "scripts/patch_exam_security_device_lock.py",
+      "bytes": 31743,
+      "sha256": "a341b31317e5292e4f3b65806754dd59352d7ad24d994e712759ef7659e37da9"
+    },
+    {
+      "path": "scripts/patch_exam_tab_leave_detect.py",
+      "bytes": 8177,
+      "sha256": "a4082af3df76c6d9e31cebcffd0a9bdebf96ba5e6dc1ce3326b46807e0166011"
+    },
+    {
+      "path": "scripts/patch_filters_sort_attempts_mobile.py",
+      "bytes": 41933,
+      "sha256": "1cc2558140836ce026433f3403bec9308f06acf4f2b68a36410f708db942c761"
+    },
+    {
+      "path": "scripts/patch_filters_super_admin.py",
+      "bytes": 13313,
+      "sha256": "ab7434c265ca0bb8162e42f2e4e47527f7cbbbaef6d2db62028e38c2b4c1f0f6"
+    },
+    {
+      "path": "scripts/patch_quick_filters.py",
+      "bytes": 31927,
+      "sha256": "81531a7a2b76ff5e67b79cef84a646e92500c2f30b3054abc6a91f307376215e"
+    },
+    {
+      "path": "scripts/patch_recent_results_sync.py",
+      "bytes": 8478,
+      "sha256": "b3d03c7f0c0a310c74edc0c471bfa3acac4a7f375e3167748a78f05a8c879cbb"
+    },
+    {
+      "path": "scripts/patch_results_tab_sort.py",
+      "bytes": 2532,
+      "sha256": "4432c79702c6f4efb5db1b11c56bb3b2123bf377ad368ab2e5fa3fdaefa42178"
+    },
+    {
+      "path": "scripts/patch_retake_clarity_preserve.py",
+      "bytes": 13099,
+      "sha256": "c5f2ff485e4a0116407fc64ab894965530c50c8ff27694c0470446e2c5f7abf0"
+    },
+    {
+      "path": "scripts/patch_roles_and_version.py",
+      "bytes": 14454,
+      "sha256": "ad1d6c286bb6d00eb6b0d69931091e4fc15b60edaa2231efd4e0564e18fa2a17"
+    },
+    {
+      "path": "scripts/patch_sheets_cheat_device_sync.py",
+      "bytes": 3033,
+      "sha256": "3f2b1427201230b2e59418dcac455a8d512787f45900595b5ac651f5fc593a05"
+    },
+    {
+      "path": "scripts/patch_stats_buttons_fix.py",
+      "bytes": 8394,
+      "sha256": "32155542726f6cfcf45ace9eef2ab30997966296ccfefeef9581206b386cfffb"
+    },
+    {
+      "path": "scripts/patch_student_code_validation.py",
+      "bytes": 11966,
+      "sha256": "ed4883cad4d27fb5b185828ae343291f82cd682688f9892cf4c249e989cbfb0a"
+    },
+    {
+      "path": "scripts/patch_table_sort_display.py",
+      "bytes": 14412,
+      "sha256": "35e42eb76aa39a5632eea24c95d992714e9a43610f9c856e20185da07e3b0ab1"
+    },
+    {
+      "path": "scripts/patch_teachers_tab_super_admin.py",
+      "bytes": 27984,
+      "sha256": "f218bd7299b32d5b71c3c078f1865d170607853aa5f808c23c72b18cfa9af8f1"
+    },
+    {
+      "path": "scripts/patch_teacher_stats_dashboard.py",
+      "bytes": 21436,
+      "sha256": "492594c6957742038a4fefb8b39877af6449423685105b86f95a4d96213068f0"
+    },
+    {
+      "path": "scripts/patch_teacher_tab_persist.py",
+      "bytes": 9219,
+      "sha256": "2ec51bc599830baa24fe35a4c752bdb2b09996510085547b8f391030b9f559b6"
+    },
+    {
+      "path": "scripts/restore_cloud_sync.py",
+      "bytes": 30377,
+      "sha256": "4c1c1354239f5e369e94f4449777cd2026a9dba6d5d08dbc0f729c644d9ad8ce"
+    },
+    {
+      "path": "style.css",
+      "bytes": 32716,
+      "sha256": "99b7d0dca62aa6b625768e9c42ec906eabb88967741aa6d27f55d312e86c861d"
+    },
+    {
+      "path": "style.responsive-dashboard.css",
+      "bytes": 8618,
+      "sha256": "1b99d574ff666f8e6b9d77c19a4214a62d87bd5cad808c2aafc7a8a4fee09747"
+    },
+    {
+      "path": "tests/app-version.test.js",
+      "bytes": 1206,
+      "sha256": "595ec0dfca6a93b5231d26c6a6f8d9187771f0d58067ff4208ef085b9892ddc0"
+    },
+    {
+      "path": "tests/cloud-sync-scope.test.js",
+      "bytes": 1651,
+      "sha256": "f3ca9127c6e8de9a1f2f49b3b38b9bfbaaa528a8c8c26a876a7a372104b4025a"
+    },
+    {
+      "path": "tests/device-registry-deleted-student.test.js",
+      "bytes": 1746,
+      "sha256": "380ca300cfc76d5e4e57c71ff72d01ea0f9967f734a9e18815dc1b85ec277182"
+    },
+    {
+      "path": "tests/exam-cloud-merge.test.js",
+      "bytes": 1431,
+      "sha256": "093038ac6247c279d7f3ceb26630bae079b51f633d762e137f74948e2ba2267e"
+    },
+    {
+      "path": "tests/exam-deadline.test.js",
+      "bytes": 1151,
+      "sha256": "a12163dac98b760fd1ca3b901a647ee8601bdb4e3bd7a9fca1d470d1fed154d8"
+    },
+    {
+      "path": "tests/exam-device-lock.test.js",
+      "bytes": 7480,
+      "sha256": "c15ed959c386cf938d67f93e126a0c6bafe2143a28343a08839be41fa6773722"
+    },
+    {
+      "path": "tests/exam-security.test.js",
+      "bytes": 1998,
+      "sha256": "f45adad16b1c4ce012a38da446a58fb878ac4903878e56f749fa999a2745fb3b"
+    },
+    {
+      "path": "tests/result-answer-hydration.test.js",
+      "bytes": 6709,
+      "sha256": "1534e0a9979baa3b734d31c4418ad7f429a7a138155c06d0d660a37cc12f1620"
+    },
+    {
+      "path": "tests/shared-ip-admission.test.js",
+      "bytes": 1343,
+      "sha256": "9344750b4d9d30fec88c888fc4aaeea7d6539f6df04a511ed4c647d80d6f251f"
+    },
+    {
+      "path": "tests/student-delete-hydrate.test.js",
+      "bytes": 2389,
+      "sha256": "9789d041d80c9d30af6bce3de641d765ae033f82371312f2cde86c97f26301f9"
+    },
+    {
+      "path": "tests/student-flow.test.js",
+      "bytes": 4232,
+      "sha256": "7248205da0bf55759af4bf874a9e9fcbdf67d15234a191b39c1dcd6808e062d6"
+    },
+    {
+      "path": "tests/students-from-sheet.test.js",
+      "bytes": 1224,
+      "sha256": "f2615200bf293ddf110e80e0759c41de599057bb2c142231481d6c06a420292b"
+    }
+  ]
+}
