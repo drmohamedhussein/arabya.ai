@@ -1,0 +1,9 @@
+{
+  "name": "arabya-net",
+  "private": true,
+  "description": "ARABYA.NET exam platform",
+  "scripts": {
+    "check": "node --check app.js",
+    "test": "node scripts/run-tests.js"
+  }
+}

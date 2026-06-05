@@ -80,16 +80,8 @@
       }
       const mode = getConflictMode();
       if (mode === "ask") {
-        conflicts.push({ key, label: label || key, local, remote, localTs, remoteTs });
-        if (remoteTs >= localTs) {
-          const merged = { ...local, ...remote };
-          if (isExamMerge && shouldKeepLocalExamQuestions(local, remote)) {
-            merged.questions = local.questions;
-            merged.questionsUpdatedAt = local.questionsUpdatedAt || merged.questionsUpdatedAt;
-            merged.localRevision = local.localRevision || merged.localRevision;
-          }
-          map[key] = merged;
-        } else map[key] = { ...local };
+        conflicts.push({ key, label: label || key, local, remote, localTs, remoteTs, isExamMerge });
+        map[key] = { ...local };
       } else if (remoteTs >= localTs) {
         const merged = { ...local, ...remote };
         if (isExamMerge && shouldKeepLocalExamQuestions(local, remote)) {
@@ -116,11 +108,19 @@
     const useRemote = confirm(
       `وُجد تعارض بين نسختك المحلية والسحابة لـ ${conflicts.length} سجل(اً):\n${lines}\n\nموافق = اعتماد السحابة (الأحدث)\nإلغاء = الإبقاء على المحلي`
     );
-    if (useRemote) {
-      conflicts.forEach(c => {
-        map[c.key] = { ...c.local, ...c.remote };
-      });
-    }
+    conflicts.forEach(c => {
+      if (useRemote) {
+        let merged = { ...c.local, ...c.remote };
+        if (c.isExamMerge && shouldKeepLocalExamQuestions(c.local, c.remote)) {
+          merged.questions = c.local.questions;
+          merged.questionsUpdatedAt = c.local.questionsUpdatedAt || merged.questionsUpdatedAt;
+          merged.localRevision = c.local.localRevision || merged.localRevision;
+        }
+        map[c.key] = merged;
+      } else {
+        map[c.key] = { ...c.local };
+      }
+    });
   }
 
   function recordQuestionBankSync(ok, detail) {

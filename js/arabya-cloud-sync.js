@@ -265,7 +265,6 @@
       return;
     }
     if (remoteRevision !== localRevision) {
-      setStoredCloudRevision(remoteRevision);
       await runPullFromCloud("sheet-edit");
     }
   }

@@ -2,36 +2,15 @@
  * Student identity and result search scenario tests
  */
 const assert = require("assert");
-
-function sanitizeStudentCodeInput(code) {
-  const raw = (code || "").toString().trim();
-  if (!raw) return "";
-  const compact = raw.replace(/\s+/g, "");
-  const digitsOnly = compact.replace(/\D/g, "");
-  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) return "00000";
-  return compact;
-}
-
-function normalizeStudentCodeForCompare(code) {
-  return sanitizeStudentCodeInput(code).toUpperCase();
-}
-
-function isSharedStudentCode(code) {
-  return normalizeStudentCodeForCompare(code) === "00000";
-}
-
-function isPrivateStudentCode(code) {
-  const clean = sanitizeStudentCodeInput(code);
-  return !!clean && !isSharedStudentCode(clean);
-}
-
-function normalizeStudentIdForCompare(studentId) {
-  return (studentId || "").toString().trim().toUpperCase();
-}
-
-function normalizeStudentName(name) {
-  return (name || "").toString().trim().replace(/\s+/g, " ").toLowerCase();
-}
+const { validateStudentIdentityInput } = require("../lib/student-identity");
+const {
+  sanitizeStudentCodeInput,
+  normalizeStudentCodeForCompare,
+  isSharedStudentCode,
+  isPrivateStudentCode,
+  normalizeStudentIdForCompare,
+  normalizeStudentName
+} = require("../lib/student-codes");
 
 function classifyResultSearchQuery(results, rawQuery) {
   const trimmed = (rawQuery || "").trim();
@@ -59,33 +38,6 @@ function filterResultsForStudentSearch(results, queryInfo) {
     return results.filter(res => normalizeStudentName(res.name) === queryInfo.name);
   }
   return [];
-}
-
-function validateStudentIdentityInput(id, code, students, options = {}) {
-  const name = (options.name || "").toString().trim();
-  const normalizedName = normalizeStudentName(name);
-  const normalizedId = normalizeStudentIdForCompare(id);
-  const inputCode = sanitizeStudentCodeInput(code);
-  const normalizedCode = normalizeStudentCodeForCompare(inputCode);
-  const editingStudentKey = options.editingStudentKey || "";
-
-  for (const student of students) {
-    if (editingStudentKey && student.studentKey === editingStudentKey) continue;
-    const otherId = normalizeStudentIdForCompare(student.id);
-    const otherName = normalizeStudentName(student.name);
-    const otherCode = normalizeStudentCodeForCompare(student.code);
-    if (normalizedId && otherId === normalizedId && otherName !== normalizedName) {
-      return { ok: false };
-    }
-    if (normalizedCode && otherCode === normalizedCode && isPrivateStudentCode(inputCode)) {
-      if (options.purpose === "exam_start") {
-        if (normalizedId && otherId && otherId !== normalizedId) return { ok: false };
-        continue;
-      }
-      if (otherName !== normalizedName) return { ok: false };
-    }
-  }
-  return { ok: true };
 }
 
 const results = [

@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.37";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.1";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -190,6 +190,7 @@ function teacherMustChangePassword(teacher) {
 
 function migrateLegacyTeacherSecurity(teacher) {
   if (!teacher) return teacher;
+  // ترحيل لمرة واحدة لبيانات قديمة — غيّر TEACHER2026 يدوياً في الإنتاج ثم احذف الاعتماد عليه.
   if (!teacher.role) {
     const legacySuper =
       String(teacher.username || "").trim() === "TEACHER2026" ||
@@ -1711,19 +1712,18 @@ function normalizeContactField(value) {
   return (value || "").toString().trim();
 }
 
-function normalizeStudentCodeForCompare(code) {
-  return sanitizeStudentCodeInput(code).toUpperCase();
+function studentCodesApi() {
+  return window.ArabyaStudentCodes || {};
 }
 
 function sanitizeStudentCodeInput(code) {
-  const raw = (code || "").toString().trim();
-  if (!raw) return "";
-  const compact = raw.replace(/\s+/g, "");
-  const digitsOnly = compact.replace(/\D/g, "");
-  if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) {
-    return "00000";
-  }
-  return compact;
+  const fn = studentCodesApi().sanitizeStudentCodeInput;
+  return fn ? fn(code) : String(code || "").trim();
+}
+
+function normalizeStudentCodeForCompare(code) {
+  const fn = studentCodesApi().normalizeStudentCodeForCompare;
+  return fn ? fn(code) : sanitizeStudentCodeInput(code).toUpperCase();
 }
 
 function isValidStudentIdFormat(studentId) {
@@ -1733,29 +1733,36 @@ function isValidStudentIdFormat(studentId) {
 }
 
 function isValidStudentCodeFormat(code) {
+  const fn = studentCodesApi().isValidStudentCodeFormat;
+  if (fn) return fn(code);
   const clean = sanitizeStudentCodeInput(code);
   if (!clean) return true;
   return /^[A-Za-z0-9]+$/i.test(clean) && clean.length <= 32;
 }
 
 function isFiveDigitStudentCode(code) {
-  return hasStudentCode(code);
+  const fn = studentCodesApi().isFiveDigitStudentCode;
+  return fn ? fn(code) : hasStudentCode(code);
 }
 
 function hasStudentCode(code) {
-  return !!sanitizeStudentCodeInput(code);
+  const fn = studentCodesApi().hasStudentCode;
+  return fn ? fn(code) : !!sanitizeStudentCodeInput(code);
 }
 
 function isSharedStudentCode(code) {
-  return normalizeStudentCodeForCompare(code) === "00000";
+  const fn = studentCodesApi().isSharedStudentCode;
+  return fn ? fn(code) : normalizeStudentCodeForCompare(code) === "00000";
 }
 
 function isPrivateStudentCode(code) {
-  const clean = sanitizeStudentCodeInput(code);
-  return !!clean && !isSharedStudentCode(clean);
+  const fn = studentCodesApi().isPrivateStudentCode;
+  return fn ? fn(code) : !!sanitizeStudentCodeInput(code) && !isSharedStudentCode(code);
 }
 
 function studentCodesMatch(codeA, codeB) {
+  const fn = studentCodesApi().studentCodesMatch;
+  if (fn) return fn(codeA, codeB);
   const a = normalizeStudentCodeForCompare(codeA);
   const b = normalizeStudentCodeForCompare(codeB);
   return !!(a && b && a === b);
@@ -3299,34 +3306,78 @@ window.isSharedStudentCode = isSharedStudentCode;
 window.isFiveDigitStudentCode = isFiveDigitStudentCode;
 window.hasStudentCode = hasStudentCode;
 
+function buildArabyaDataHealthReport() {
+  let teachers = [];
+  try { teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]"); } catch (e) {}
+  const warnings = [];
+  teachers.forEach(t => {
+    if (!t) return;
+    if (t.password) warnings.push(`كلمة مرور نصية لحساب: ${t.username || t.name || "?"}`);
+    const creds = [t.username, t.password, t.autoEntryCode].map(v => String(v || "").trim());
+    if (creds.includes("TEACHER2026")) warnings.push(`TEACHER2026 ما زال مستخدماً: ${t.username || t.name || "?"}`);
+  });
+  let schemaVersion = "—";
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    if (cfg.schemaVersion) schemaVersion = String(cfg.schemaVersion);
+  } catch (e) {}
+  const lastOk = systemState.lastCloudSyncOk;
+  const lastErr = systemState.lastCloudPushError || "";
+  return {
+    appVersion: getPlatformAppVersion(),
+    buildVersion: ARABYA_APP_BUILD_VERSION,
+    schemaVersion,
+    counts: {
+      teachers: systemState.teachers.length,
+      students: systemState.students.length,
+      exams: systemState.exams.length,
+      results: systemState.results.length
+    },
+    localStorage: (function () {
+      const readLen = key => {
+        try { return (JSON.parse(localStorage.getItem(key) || "[]") || []).length; } catch (e) { return 0; }
+      };
+      return {
+        teachers: teachers.length,
+        exams: readLen("arabya_exams_db"),
+        students: readLen("arabya_students_db"),
+        results: readLen("arabya_results_db")
+      };
+    })(),
+    syncUrl: systemState.config?.googleFormUrl || systemState.activeTeacher?.integrationConfig?.googleFormUrl || "",
+    apiSecretConfigured: !!getArabyaApiSecret(),
+    lastCloudSync: lastOk ? (lastOk.at || "—") : "—",
+    lastCloudError: lastErr || "—",
+    warnings
+  };
+}
+
 // ===== أداة التشخيص السريع - اكتب arabya_diagnose() في الكونسول =====
 window.arabya_diagnose = function() {
-  const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-  const exams    = JSON.parse(localStorage.getItem("arabya_exams_db") || "[]");
-  const students = JSON.parse(localStorage.getItem("arabya_students_db") || "[]");
-  const results  = JSON.parse(localStorage.getItem("arabya_results_db") || "[]");
-  const report = {
-    "💾 localStorage": {
-      "معلمون (arabya_teachers_db)": teachers.length,
-      "امتحانات (arabya_exams_db)": exams.length,
-      "طلاب (arabya_students_db)": students.length,
-      "نتائج (arabya_results_db)": results.length,
-    },
-    "🧠 systemState (RAM)": {
-      "معلمون": systemState.teachers.length,
-      "امتحانات": systemState.exams.length,
-      "طلاب": systemState.students.length,
-      "نتائج": systemState.results.length,
-    },
-    "🔗 رابط المزامنة": systemState.config?.googleFormUrl || "(غير مُعيَّن)",
-    "📦 بيانات المعلم النشط": systemState.activeTeacher?.username || "(لا يوجد)"
-  };
-  console.table(report["💾 localStorage"]);
-  console.table(report["🧠 systemState (RAM)"]);
-  console.log("🔗 رابط المزامنة:", report["🔗 رابط المزامنة"]);
-  console.log("👤 المعلم النشط:", report["📦 بيانات المعلم النشط"]);
-  alert(`✅ التشخيص:\n\nمحلي: معلمون=${teachers.length} | امتحانات=${exams.length} | طلاب=${students.length} | نتائج=${results.length}\n\nذاكرة: معلمون=${systemState.teachers.length} | امتحانات=${systemState.exams.length} | طلاب=${systemState.students.length} | نتائج=${systemState.results.length}\n\nالمزامنة: ${systemState.config?.googleFormUrl || "(غير مُعيَّنة)"}`);
+  const report = buildArabyaDataHealthReport();
+  console.log("[ARABYA] فحص سلامة البيانات", report);
+  if (report.warnings.length) console.warn("[ARABYA] تحذيرات:", report.warnings);
   return report;
+};
+
+window.showArabyaDataHealthReport = function() {
+  const r = buildArabyaDataHealthReport();
+  const warnBlock = r.warnings.length
+    ? `\n\n⚠️ تحذيرات:\n${r.warnings.slice(0, 8).map(w => `• ${w}`).join("\n")}`
+    : "\n\n✓ لا توجد تحذيرات أمنية واضحة في البيانات المحلية.";
+  alert(
+    `فحص سلامة البيانات — ARABYA.NET\n\n` +
+    `إصدار التطبيق: ${r.appVersion} (بناء ${r.buildVersion})\n` +
+    `schemaVersion: ${r.schemaVersion}\n\n` +
+    `السجلات (ذاكرة): معلمون ${r.counts.teachers} · طلاب ${r.counts.students} · امتحانات ${r.counts.exams} · نتائج ${r.counts.results}\n` +
+    `localStorage: معلمون ${r.localStorage.teachers} · طلاب ${r.localStorage.students} · امتحانات ${r.localStorage.exams} · نتائج ${r.localStorage.results}\n\n` +
+    `رابط المزامنة: ${r.syncUrl || "(غير مُعيَّن)"}\n` +
+    `سر API: ${r.apiSecretConfigured ? "مضبوط" : "غير مضبوط"}\n` +
+    `آخر مزامنة ناجحة: ${r.lastCloudSync}\n` +
+    `آخر خطأ رفع: ${r.lastCloudError}` +
+    warnBlock
+  );
+  return r;
 };
 
 
@@ -4505,10 +4556,17 @@ function buildSaveBackupPayload(reason) {
   return payload;
 }
 
+function isArabyaCloudPostQueued(response) {
+  return !!(response && response.status === "queued");
+}
+
 async function postSaveBackupToCloudUrl(url, payload) {
   const revisionBefore = await fetchCloudRevisionForUrl(url);
   try {
     const response = await postToArabyaWebApp(url, payload);
+    if (isArabyaCloudPostQueued(response)) {
+      return { ok: false, queued: true, response, mode: "queued" };
+    }
     return { ok: true, response, mode: "cors" };
   } catch (corsErr) {
     const message = corsErr && corsErr.message ? corsErr.message : String(corsErr);
@@ -4634,6 +4692,14 @@ async function pushCloudBackupNow(reason) {
       systemState.lastCloudPushError = "";
       break;
     }
+    if (result.queued) {
+      lastError = "محفوظ محلياً — سيُرفع عند عودة الشبكة";
+      markCloudSyncLocalOnly(lastError);
+      if (window.ArabyaToast) {
+        window.ArabyaToast.showToast(lastError, "warning", 5000);
+      }
+      break;
+    }
     lastError = result.error || lastError;
     console.warn("pushCloudBackupNow:", url, result.error);
   }
@@ -4695,15 +4761,23 @@ async function syncTeacherCredentialsToCloud(teacher = systemState.activeTeacher
   };
 
   let entityOk = false;
+  let entityQueued = false;
   for (const url of urlList) {
     try {
-      await postToArabyaWebApp(url, payload);
-      entityOk = true;
+      const res = await postToArabyaWebApp(url, payload);
+      if (isArabyaCloudPostQueued(res)) {
+        entityQueued = true;
+      } else {
+        entityOk = true;
+      }
     } catch (e) {
       try {
         if (await postToArabyaWebAppNoCors(url, payload)) entityOk = true;
       } catch (e2) {}
     }
+  }
+  if (entityQueued && !entityOk) {
+    return { ok: false, reason: "queued", queued: true };
   }
 
   let backupOk = false;
@@ -5429,7 +5503,7 @@ window.restoreDatabaseFromCloud = async function() {
     alert("يرجى إدخال رابط ويب اب (Web App URL) أولاً لتمكين استعادة النسخة الاحتياطية!");
     return;
   }
-  if (!confirm("تحذير: سيقوم هذا باستبدال قاعدة البيانات الحالية بالكامل بالبيانات المستعادة من جوجل شيت. هل ترغب في الاستمرار؟")) return;
+  if (!confirm("تحذير: سيتم دمج البيانات المستعادة من Google Sheets مع نسختك المحلية (الأحدث يُفضَّل عند التعارض). هل ترغب في الاستمرار؟")) return;
   const btnRestore = document.getElementById("btn-cloud-restore");
   const originalText = btnRestore ? btnRestore.innerHTML : "";
   if (btnRestore) { btnRestore.disabled = true; btnRestore.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري جلب البيانات...`; }
