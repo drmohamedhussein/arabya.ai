@@ -101,6 +101,9 @@
     delete copy.passwordHash;
     delete copy.passwordSalt;
     delete copy.loginTokens;
+    if (copy.integrationConfig) {
+      delete copy.integrationConfig.apiSecret;
+    }
     return copy;
   }
 
@@ -112,8 +115,9 @@
     delete copy.passwordSalt;
     delete copy.autoEntryCode;
     delete copy.loginTokens;
-    if (copy.integrationConfig && copy.integrationConfig.teacherCode) {
+    if (copy.integrationConfig) {
       delete copy.integrationConfig.teacherCode;
+      delete copy.integrationConfig.apiSecret;
     }
     return copy;
   }

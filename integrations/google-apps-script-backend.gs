@@ -8,6 +8,7 @@
  * GITHUB_REPO    = drmohamedhussein/arabya.ai
  * GITHUB_BRANCH  = main
  * GITHUB_DB_PATH = database/arabya-db.json
+ * ARABYA_API_SECRET = سر طويل عشوائي (يُضبط أيضاً في تبويب الربط بالموقع)
  */
 
 var ARABYA_DEFAULT_DB = {
@@ -71,6 +72,9 @@ function doPost(e) {
   try {
     var data = parseArabyaPayload_(e);
     var action = data.action || "save_backup";
+    if (!isArabyaApiAuthorized_(e, data)) {
+      return unauthorizedArabya_();
+    }
 
     if (action === "add_result") {
       upsertArabyaResult_(data);
@@ -131,6 +135,11 @@ function doPost(e) {
 function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
+    if (action === "get_sync_meta" || action === "get_backup") {
+      if (!isArabyaApiAuthorized_(e, null)) {
+        return unauthorizedArabya_();
+      }
+    }
     if (action === "get_sync_meta") {
       var stats = getArabyaSyncStats_();
       return jsonArabya_(Object.assign({ status: "success", service: "ARABYA.NET backend bridge" }, stats));
@@ -148,7 +157,7 @@ function doGet(e) {
       var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
         status: "success",
-        data: db,
+        data: sanitizeArabyaDbForClient_(db),
         cloudRevision: cloudRevision,
         counts: countArabya_(db),
         sheetResultRows: resultCount,
@@ -169,6 +178,59 @@ function parseArabyaPayload_(e) {
   } catch (err) {
     throw new Error("Invalid JSON payload: " + err.message);
   }
+}
+
+function getArabyaApiSecret_() {
+  return String(PropertiesService.getScriptProperties().getProperty("ARABYA_API_SECRET") || "").trim();
+}
+
+function extractClientApiSecret_(e, data) {
+  var fromQuery = e && e.parameter
+    ? String(e.parameter.apiSecret || e.parameter.api_secret || "").trim()
+    : "";
+  var fromBody = data
+    ? String(data.apiSecret || data.api_secret || "").trim()
+    : "";
+  return fromBody || fromQuery;
+}
+
+function isArabyaApiAuthorized_(e, data) {
+  var expected = getArabyaApiSecret_();
+  if (!expected) return true;
+  return extractClientApiSecret_(e, data) === expected;
+}
+
+function unauthorizedArabya_(message) {
+  return jsonArabya_({
+    status: "error",
+    code: "unauthorized",
+    message: message || "Unauthorized API secret"
+  });
+}
+
+function sanitizeArabyaDbForClient_(db) {
+  if (!db) return db;
+  var copy = JSON.parse(JSON.stringify(db));
+  delete copy._sha;
+  delete copy._githubSyncSkipped;
+  if (Array.isArray(copy.teachers)) {
+    copy.teachers = copy.teachers.map(function(teacher) {
+      if (!teacher) return teacher;
+      var safe = Object.assign({}, teacher);
+      delete safe.password;
+      delete safe.passwordHash;
+      delete safe.passwordSalt;
+      delete safe.autoEntryCode;
+      delete safe.loginTokens;
+      if (safe.integrationConfig) {
+        safe.integrationConfig = Object.assign({}, safe.integrationConfig);
+        delete safe.integrationConfig.teacherCode;
+        delete safe.integrationConfig.apiSecret;
+      }
+      return safe;
+    });
+  }
+  return copy;
 }
 
 function getArabyaResultsSheet_() {

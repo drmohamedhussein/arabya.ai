@@ -43,9 +43,12 @@
     if (!q.length) return { flushed: 0, remaining: 0 };
     const remaining = [];
     let flushed = 0;
+    const securePayload = typeof global.withArabyaApiSecret === "function"
+      ? global.withArabyaApiSecret
+      : payload => payload;
     for (const item of q) {
       try {
-        await poster(item.url, item.payload);
+        await poster(item.url, securePayload(item.payload));
         flushed++;
       } catch (e) {
         remaining.push(item);

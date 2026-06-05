@@ -165,7 +165,10 @@
   async function fetchSyncMeta() {
     const urls = getCloudUrls();
     for (const rawUrl of urls) {
-      const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_sync_meta";
+      const fetchUrl = typeof global.buildArabyaCloudActionUrl === "function"
+        ? global.buildArabyaCloudActionUrl(rawUrl, "get_sync_meta")
+        : rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_sync_meta";
+      if (!fetchUrl) continue;
       try {
         const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
         if (!res.ok) continue;

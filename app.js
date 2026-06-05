@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.31";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.32";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1067,6 +1067,10 @@ document.addEventListener("DOMContentLoaded", () => {
   window.ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
   window.ARABYA_CLOUD_BACKUP_SCOPE_ALL = ARABYA_CLOUD_BACKUP_SCOPE_ALL;
   window.normalizeArabyaWebAppUrl = normalizeArabyaWebAppUrl;
+  window.getArabyaApiSecret = getArabyaApiSecret;
+  window.withArabyaApiSecret = withArabyaApiSecret;
+  window.appendArabyaApiSecretToUrl = appendArabyaApiSecretToUrl;
+  window.buildArabyaCloudActionUrl = buildArabyaCloudActionUrl;
   window.isSuperAdminTeacher = isSuperAdminTeacher;
   window.inferTeacherRole = inferTeacherRole;
   window.isTeacherStaffAccount = isTeacherStaffAccount;
@@ -1371,7 +1375,8 @@ function initDatabase() {
 async function fetchPlatformAppVersionFromCloudMeta() {
   const urls = getGeneralTeacherSyncUrls();
   for (const rawUrl of urls) {
-    const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_sync_meta";
+    const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_sync_meta");
+    if (!fetchUrl) continue;
     try {
       const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
       if (!res.ok) continue;
@@ -4229,6 +4234,41 @@ function normalizeArabyaWebAppUrl(rawUrl) {
   return url;
 }
 
+const ARABYA_API_SECRET_QUERY = "apiSecret";
+
+function getArabyaApiSecret() {
+  const fromTeacher = systemState.activeTeacher?.integrationConfig?.apiSecret;
+  const fromConfig = systemState.config?.apiSecret;
+  try {
+    const cfg = JSON.parse(localStorage.getItem("arabya_teacher_config") || "{}");
+    return String(fromTeacher || fromConfig || cfg.apiSecret || "").trim();
+  } catch (e) {
+    return String(fromTeacher || fromConfig || "").trim();
+  }
+}
+
+function withArabyaApiSecret(payload) {
+  const secret = getArabyaApiSecret();
+  if (!secret || !payload || typeof payload !== "object") return payload;
+  return { ...payload, apiSecret: secret };
+}
+
+function appendArabyaApiSecretToUrl(rawUrl) {
+  const base = normalizeArabyaWebAppUrl(rawUrl);
+  if (!base) return "";
+  const secret = getArabyaApiSecret();
+  if (!secret) return base;
+  const sep = base.includes("?") ? "&" : "?";
+  return base + sep + ARABYA_API_SECRET_QUERY + "=" + encodeURIComponent(secret);
+}
+
+function buildArabyaCloudActionUrl(rawUrl, action) {
+  const base = appendArabyaApiSecretToUrl(rawUrl);
+  if (!base) return "";
+  const sep = base.includes("?") ? "&" : "?";
+  return base + sep + "action=" + encodeURIComponent(action);
+}
+
 function buildSlimResultCloudPayload(payload) {
   const slim = { ...payload };
   if (slim.details && String(slim.details).length > 12000) {
@@ -4246,7 +4286,7 @@ async function postToArabyaWebAppNoCors(url, payload) {
       method: "POST",
       mode: "no-cors",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(withArabyaApiSecret(payload))
     });
     return true;
   } catch (e) {
@@ -4259,9 +4299,8 @@ function delayMs(ms) {
 }
 
 async function fetchCloudRevisionForUrl(rawUrl) {
-  const url = normalizeArabyaWebAppUrl(rawUrl);
-  if (!url) return "";
-  const fetchUrl = url + (url.includes("?") ? "&" : "?") + "action=get_sync_meta";
+  const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_sync_meta");
+  if (!fetchUrl) return "";
   try {
     const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
     if (!res.ok) return "";
@@ -4346,16 +4385,17 @@ function postToArabyaWebApp(url, payload) {
   if (!targetUrl) return Promise.reject(new Error("رابط Web App غير صالح"));
 
   if (!navigator.onLine && window.ArabyaOfflineQueue) {
-    window.ArabyaOfflineQueue.enqueue(targetUrl, payload);
+    window.ArabyaOfflineQueue.enqueue(targetUrl, withArabyaApiSecret(payload));
     return Promise.resolve({ status: "queued" });
   }
 
+  const securedPayload = withArabyaApiSecret(payload);
   const attempt = () => fetch(targetUrl, {
     method: "POST",
     mode: "cors",
     redirect: "follow",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(securedPayload)
   }).then(async res => {
     const text = (await res.text()) || "";
     let parsed = null;
@@ -4369,7 +4409,12 @@ function postToArabyaWebApp(url, payload) {
       throw new Error((parsed && parsed.message) || text.slice(0, 200) || ("HTTP " + res.status));
     }
     if (parsed && parsed.status === "error") {
-      throw new Error(parsed.message || "Cloud sync error");
+      const unauthorized = parsed.code === "unauthorized";
+      throw new Error(
+        unauthorized
+          ? "سر API غير صحيح أو غير مضبوط — أضف ARABYA_API_SECRET في Script Properties وتبويب الربط."
+          : (parsed.message || "Cloud sync error")
+      );
     }
     if (!parsed && text && !/success|تم/i.test(text)) {
       throw new Error("استجابة غير متوقعة من الخادم. تأكد من نشر Apps Script كـ Web App للجميع (Anyone) واستخدام رابط /exec");
@@ -4654,7 +4699,8 @@ function recordPreExamSyncDuration(durationMs) {
 }
 
 async function fetchCloudBackupJson_(rawUrl, timeoutMs) {
-  const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+  const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup");
+  if (!fetchUrl) return null;
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller && timeoutMs > 0
     ? setTimeout(() => controller.abort(), timeoutMs)
@@ -4919,7 +4965,7 @@ window.testExamSync = function(examId) {
     return;
   }
   if (badge) badge.innerHTML = `<span class="material-icons" style="font-size:1rem; color:var(--secondary); animation:spin 1s infinite linear;">sync</span> <span style="color:var(--secondary); font-weight:700;">جاري اختبار الاتصال بجوجل شيت...</span>`;
-  const testUrl = url + (url.includes("?") ? "&" : "?") + "action=get_backup";
+  const testUrl = buildArabyaCloudActionUrl(url, "get_sync_meta");
   fetch(testUrl, { method: "GET", headers: { Accept: "application/json" } })
     .then(res => res.json())
     .then(data => {
@@ -5075,7 +5121,11 @@ function fetchCloudBackupFromUrls(urlList) {
         return;
       }
       const rawUrl = urlList[index++];
-      const fetchUrl = rawUrl + (rawUrl.includes("?") ? "&" : "?") + "action=get_backup";
+      const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup");
+      if (!fetchUrl) {
+        tryFetchNext();
+        return;
+      }
       fetch(fetchUrl, { method: "GET", headers: { "Accept": "application/json" } })
         .then(res => (res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status))))
         .then(response => {
@@ -5587,6 +5637,7 @@ async function loginTeacherObject(teacher, loginCredential, options = {}) {
   systemState.teacherProfile = { name: teacher.name, subject: teacher.subject };
   systemState.config = {
     googleFormUrl: teacher.integrationConfig?.googleFormUrl || "",
+    apiSecret: teacher.integrationConfig?.apiSecret || systemState.config?.apiSecret || "",
     entryName: teacher.integrationConfig?.entryName || "",
     entryId: teacher.integrationConfig?.entryId || "",
     entryCode: teacher.integrationConfig?.entryCode || "",
@@ -6346,6 +6397,12 @@ function loadTeacherDashboardData() {
     ? ""
     : (systemState.activeTeacher.password || "");
   document.getElementById("teacher-config-url").value = systemState.activeTeacher.integrationConfig?.googleFormUrl || "";
+  const apiSecretInput = document.getElementById("teacher-config-api-secret");
+  if (apiSecretInput) {
+    apiSecretInput.value = systemState.activeTeacher.integrationConfig?.apiSecret
+      || systemState.config?.apiSecret
+      || "";
+  }
   document.getElementById("teacher-config-name").value = systemState.activeTeacher.integrationConfig?.entryName || "";
   document.getElementById("teacher-config-id").value = systemState.activeTeacher.integrationConfig?.entryId || "";
   document.getElementById("teacher-config-code-id").value = systemState.activeTeacher.integrationConfig?.entryCode || "";
@@ -6459,6 +6516,7 @@ async function saveTeacherIntegrationConfig() {
 
   const code = document.getElementById("teacher-config-code").value.trim();
   const url = document.getElementById("teacher-config-url").value.trim();
+  const apiSecret = String((document.getElementById("teacher-config-api-secret") || {}).value || "").trim();
   const entryName = document.getElementById("teacher-config-name").value.trim();
   const entryId = document.getElementById("teacher-config-id").value.trim();
   const entryCode = document.getElementById("teacher-config-code-id").value.trim();
@@ -6466,15 +6524,19 @@ async function saveTeacherIntegrationConfig() {
   const entryDetails = document.getElementById("teacher-config-details").value.trim();
   const cloudBackupScope = ARABYA_CLOUD_BACKUP_SCOPE_GENERAL;
 
-  if (!code) {
-    alert("الرقم السري لا يمكن أن يكون فارغاً!");
+  if (!code && !systemState.activeTeacher.passwordHash) {
+    alert("الرقم السري لا يمكن أن يكون فارغاً لحساب جديد!");
     return;
   }
 
-  systemState.activeTeacher.password = code;
+  if (code) {
+    systemState.activeTeacher.password = code;
+  }
+
   systemState.activeTeacher.integrationConfig = {
     ...(systemState.activeTeacher.integrationConfig || {}),
     googleFormUrl: url,
+    apiSecret,
     entryName,
     entryId,
     entryCode,
@@ -6485,6 +6547,7 @@ async function saveTeacherIntegrationConfig() {
 
   systemState.config = {
     googleFormUrl: url,
+    apiSecret,
     entryName,
     entryId,
     entryCode,
@@ -6499,7 +6562,7 @@ async function saveTeacherIntegrationConfig() {
     systemState.teachers[idx] = systemState.activeTeacher;
   }
 
-  if (window.ArabyaSecurity) {
+  if (code && window.ArabyaSecurity) {
     await window.ArabyaSecurity.ensureTeacherPasswordHashed(systemState.activeTeacher, code);
     window.ArabyaSecurity.stripTeacherPlainPassword(systemState.activeTeacher);
     if (idx !== -1) {
