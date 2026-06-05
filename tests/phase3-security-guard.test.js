@@ -21,8 +21,9 @@ test("phase3: syncActiveTeacherCredentials does not force password = autoEntryCo
 test("phase3: teacher login uses separate password and quick-code matchers", () => {
   assert.ok(appSource.includes("async function teacherPasswordMatches"));
   assert.ok(appSource.includes("async function teacherAutoEntryCodeMatches"));
-  assert.ok(appSource.includes("await teacherPasswordMatches(t, passwordInput)"));
-  assert.ok(appSource.includes("await teacherAutoEntryCodeMatches(t, codeVal)"));
+  assert.ok(appSource.includes("findTeachersMatchingPassword"));
+  assert.ok(appSource.includes("findTeachersMatchingQuickCode"));
+  assert.ok(appSource.includes("viaQuickCode: true"));
 });
 
 test("phase3: saveTeacherProfile does not overwrite password with auto code", () => {

@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.2";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.3";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -190,7 +190,7 @@ function teacherMustChangePassword(teacher) {
 
 function migrateLegacyTeacherSecurity(teacher) {
   if (!teacher) return teacher;
-  // ترحيل لمرة واحدة لبيانات قديمة — غيّر TEACHER2026 يدوياً في الإنتاج ثم احذف الاعتماد عليه.
+  // ترحيل لمرة واحدة لبيانات قديمة — اسم المستخدم TEACHER2026 يبقى للحسابات الموجودة مسبقاً.
   if (!teacher.role) {
     const legacySuper =
       String(teacher.username || "").trim() === "TEACHER2026" ||
@@ -201,6 +201,92 @@ function migrateLegacyTeacherSecurity(teacher) {
   }
   if (teacherMustChangePassword(teacher)) teacher.mustChangePassword = true;
   return teacher;
+}
+
+function teacherHasLoginCredentials(teacher) {
+  if (!teacher) return false;
+  return !!(
+    (teacher.passwordHash && teacher.passwordSalt) ||
+    String(teacher.password || "").trim() ||
+    String(teacher.autoEntryCode || "").trim()
+  );
+}
+
+function isOrphanPlatformAdminAccount(teacher) {
+  if (!teacher) return false;
+  if (String(teacher.username || "").trim() !== "platform_admin") return false;
+  return !teacherHasLoginCredentials(teacher);
+}
+
+function pruneOrphanTeacherAccounts() {
+  const before = (systemState.teachers || []).length;
+  systemState.teachers = (systemState.teachers || []).filter(t => !isOrphanPlatformAdminAccount(t));
+  if (systemState.teachers.length !== before) saveTeachersToLocalStorage();
+}
+
+function scoreTeacherForLoginPreference(teacher) {
+  let score = 0;
+  if (inferTeacherRole(teacher) === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) score += 40;
+  if (String(teacher.integrationConfig?.googleFormUrl || "").trim()) score += 60;
+  if (teacher.mustChangePassword !== true) score += 35;
+  if (String(teacher.username || "").trim() === "platform_admin") score -= 200;
+  if (String(teacher.username || "").trim() === "TEACHER2026") score -= 10;
+  return score;
+}
+
+function pickPreferredTeacherLoginMatch(candidates) {
+  if (!Array.isArray(candidates) || !candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  return [...candidates].sort((a, b) => scoreTeacherForLoginPreference(b) - scoreTeacherForLoginPreference(a))[0];
+}
+
+async function findTeachersMatchingPassword(usernameInput, passwordInput) {
+  const username = String(usernameInput || "").trim();
+  const password = String(passwordInput || "").trim();
+  if (!password) return [];
+  const matches = [];
+  for (const teacher of systemState.teachers || []) {
+    const identityOk = !username
+      || teacher.username.toLowerCase() === username.toLowerCase()
+      || teacher.name === username;
+    if (!identityOk) continue;
+    if (await teacherPasswordMatches(teacher, password)) matches.push(teacher);
+  }
+  return matches;
+}
+
+async function findTeachersMatchingQuickCode(codeVal) {
+  const code = String(codeVal || "").trim();
+  if (!code) return [];
+  const matches = [];
+  for (const teacher of systemState.teachers || []) {
+    if (await teacherAutoEntryCodeMatches(teacher, code)) matches.push(teacher);
+  }
+  return matches;
+}
+
+function reconcileDuplicateSuperAdminAccounts() {
+  const groups = new Map();
+  (systemState.teachers || []).forEach(teacher => {
+    const code = String(teacher.autoEntryCode || "").trim();
+    if (!code) return;
+    if (!groups.has(code)) groups.set(code, []);
+    groups.get(code).push(teacher);
+  });
+  let changed = false;
+  groups.forEach(group => {
+    if (group.length < 2) return;
+    const preferred = pickPreferredTeacherLoginMatch(group);
+    if (!preferred) return;
+    group.forEach(teacher => {
+      if (teacher.username !== preferred.username) return;
+      if (teacher.mustChangePassword === true && String(teacher.integrationConfig?.googleFormUrl || "").trim()) {
+        teacher.mustChangePassword = false;
+        changed = true;
+      }
+    });
+  });
+  if (changed) saveTeachersToLocalStorage();
 }
 
 function persistTeacherSessionToken(username) {
@@ -1349,6 +1435,8 @@ function initDatabase() {
   }
 
   normalizeAllTeacherAccounts();
+  pruneOrphanTeacherAccounts();
+  reconcileDuplicateSuperAdminAccounts();
   systemState.students = (systemState.students || []).map(s => ensureStudentAccountType(s));
 
   // محاولة تحميل المعلم النشط من الجلسة السابقة
@@ -5546,7 +5634,12 @@ function finishTeacherLoginNavigation(options = {}) {
   if (!options.skipPasswordCheck && teacherMustChangePassword(systemState.activeTeacher)) {
     navigateToView("teacher-login-view");
     showMandatoryPasswordChangeModal();
-    if (options.message) alert(options.message);
+    alert(
+      (options.message ? options.message + "\n\n" : "") +
+      "تم تسجيل الدخول بنجاح إلى حساب: " + (systemState.activeTeacher?.username || systemState.activeTeacher?.name || "") + ".\n\n" +
+      "كلمة المرور الحالية ضعيفة (مثل TEACHER2026) — عيّن كلمة مرور جديدة في النافذة الظاهرة.\n" +
+      "بياناتك (امتحانات، طلاب، نتائج) محفوظة ولن تُحذف."
+    );
     return;
   }
   navigateToView("teacher-dashboard-view");
@@ -6035,9 +6128,13 @@ async function checkUrlParameters() {
 async function loginTeacherObject(teacher, loginCredential, options = {}) {
   const normalized = normalizeTeacherAccount(teacher);
   const credential = String(loginCredential || "").trim();
-  if (credential && window.ArabyaSecurity) {
+  const shouldUpgradePasswordHash = credential && !options.viaQuickCode && !options.restoreSession;
+  if (shouldUpgradePasswordHash && window.ArabyaSecurity) {
     if (typeof window.ArabyaSecurity.upgradeTeacherPasswordHashIfNeeded === "function") {
-      await window.ArabyaSecurity.upgradeTeacherPasswordHashIfNeeded(normalized, credential);
+      const passwordMatched = await teacherPasswordMatches(normalized, credential);
+      if (passwordMatched) {
+        await window.ArabyaSecurity.upgradeTeacherPasswordHashIfNeeded(normalized, credential);
+      }
     } else {
       await window.ArabyaSecurity.ensureTeacherPasswordHashed(normalized, credential);
     }
@@ -6205,14 +6302,8 @@ async function handleTeacherLogin() {
     return;
   }
 
-  let matched = null;
-  for (const t of systemState.teachers) {
-    const identityOk = t.username.toLowerCase() === usernameInput.toLowerCase() || t.name === usernameInput;
-    if (identityOk && await teacherPasswordMatches(t, passwordInput)) {
-      matched = t;
-      break;
-    }
-  }
+  const passwordMatches = await findTeachersMatchingPassword(usernameInput, passwordInput);
+  const matched = pickPreferredTeacherLoginMatch(passwordMatches);
 
   if (matched) {
     await loginTeacherObject(matched, passwordInput);
@@ -6233,16 +6324,11 @@ async function handleTeacherQuickLogin() {
     return;
   }
 
-  let matched = null;
-  for (const t of systemState.teachers) {
-    if (await teacherAutoEntryCodeMatches(t, codeVal)) {
-      matched = t;
-      break;
-    }
-  }
+  const quickMatches = await findTeachersMatchingQuickCode(codeVal);
+  const matched = pickPreferredTeacherLoginMatch(quickMatches);
 
   if (matched) {
-    await loginTeacherObject(matched, codeVal);
+    await loginTeacherObject(matched, codeVal, { viaQuickCode: true });
     const extraSyncUrl = document.getElementById("teacher-login-sync-url")?.value.trim() || "";
     syncTeacherDataOnLogin({
       extraSyncUrl,
