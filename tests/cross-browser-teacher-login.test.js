@@ -30,6 +30,20 @@ test("cross-browser: GAS exposes teacher_login scope with auth fields", () => {
   assert.ok(!teacherLoginBlock.includes("delete safe.autoEntryCode"));
 });
 
+test("cross-browser: teacher_login scope requires configured API secret", () => {
+  const getBackupStart = gasSource.indexOf('if (action === "get_backup")');
+  const getBackupBlock = gasSource.slice(
+    getBackupStart,
+    gasSource.indexOf("var db = readArabyaDatabase_", getBackupStart)
+  );
+
+  assert.ok(gasSource.includes("function isArabyaApiSecretConfigured_()"));
+  assert.ok(gasSource.includes("return !!getArabyaApiSecret_();"));
+  assert.ok(getBackupBlock.includes('scope === "teacher_login"'));
+  assert.ok(getBackupBlock.includes("!isArabyaApiSecretConfigured_()"));
+  assert.ok(getBackupBlock.includes('return unauthorizedArabya_("ARABYA_API_SECRET is required for teacher_login scope")'));
+});
+
 test("cross-browser: cloud backup preserves teacher auth hashes", () => {
   const cloudBlock = securitySource.slice(
     securitySource.indexOf("function sanitizeTeacherForCloud"),

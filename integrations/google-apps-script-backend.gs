@@ -200,6 +200,9 @@ function doGet(e) {
     if (action === "get_backup") {
       var scope = e && e.parameter ? String(e.parameter.scope || "").trim() : "";
       var examId = e && e.parameter ? String(e.parameter.exam || e.parameter.examId || "").trim() : "";
+      if (scope === "teacher_login" && !isArabyaApiSecretConfigured_()) {
+        return unauthorizedArabya_("ARABYA_API_SECRET is required for teacher_login scope");
+      }
       if (!checkArabyaRateLimit_(e, null, "get_backup", scope)) {
         return rateLimitedArabya_();
       }
@@ -244,6 +247,10 @@ function parseArabyaPayload_(e) {
 
 function getArabyaApiSecret_() {
   return String(PropertiesService.getScriptProperties().getProperty("ARABYA_API_SECRET") || "").trim();
+}
+
+function isArabyaApiSecretConfigured_() {
+  return !!getArabyaApiSecret_();
 }
 
 function extractClientApiSecret_(e, data) {
