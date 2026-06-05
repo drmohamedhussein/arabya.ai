@@ -130,31 +130,254 @@ const ARABYA_ACCOUNT_ROLES = {
   TEACHER: "teacher",
   STUDENT: "student"
 };
-const ARABYA_SUPER_ADMIN_SEEDS = new Set(["TEACHER2026"]);
+
+/** كلمات مرور معروفة/ضعيفة — يُطلب تغييرها عند أول دخول */
+const ARABYA_BANNED_TEACHER_CREDENTIALS = new Set([
+  "TEACHER2026",
+  "123456",
+  "12345678",
+  "password",
+  "admin",
+  "000000",
+  "111111"
+]);
+
+const TEACHER_SESSION_TOKEN_KEY = "arabya_teacher_session_token";
+const TEACHER_SESSION_TOKEN_TTL_MS = 2 * 60 * 60 * 1000;
+const TEACHER_LOGIN_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const TEACHER_LOGIN_TOKEN_PARAM_ID = "tlt";
+const TEACHER_LOGIN_TOKEN_PARAM_KEY = "tlk";
+
+function generateSecureRandomCode(length = 16) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const arr = new Uint8Array(length);
+  if (globalThis.crypto && crypto.getRandomValues) {
+    crypto.getRandomValues(arr);
+  } else {
+    for (let i = 0; i < length; i++) arr[i] = Math.floor(Math.random() * 256);
+  }
+  let out = "";
+  for (let i = 0; i < length; i++) out += chars[arr[i] % chars.length];
+  return out;
+}
 
 function inferTeacherRole(teacher) {
   if (!teacher) return ARABYA_ACCOUNT_ROLES.TEACHER;
   if (teacher.role === ARABYA_ACCOUNT_ROLES.STUDENT) return ARABYA_ACCOUNT_ROLES.STUDENT;
   if (teacher.role === ARABYA_ACCOUNT_ROLES.SUPER_ADMIN) return ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
-  const username = String(teacher.username || "").trim();
-  const password = String(teacher.password || "").trim();
-  const autoCode = String(teacher.autoEntryCode || "").trim();
-  const sessionCredential = (teacher === systemState.activeTeacher && systemState.activeTeacherLoginCredential)
-    ? String(systemState.activeTeacherLoginCredential).trim()
-    : "";
-  if (
-    ARABYA_SUPER_ADMIN_SEEDS.has(username) ||
-    ARABYA_SUPER_ADMIN_SEEDS.has(password) ||
-    ARABYA_SUPER_ADMIN_SEEDS.has(autoCode) ||
-    (sessionCredential && ARABYA_SUPER_ADMIN_SEEDS.has(sessionCredential))
-  ) {
-    return ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
-  }
-  return teacher.role === ARABYA_ACCOUNT_ROLES.TEACHER ? ARABYA_ACCOUNT_ROLES.TEACHER : ARABYA_ACCOUNT_ROLES.TEACHER;
+  if (teacher.role === ARABYA_ACCOUNT_ROLES.TEACHER) return ARABYA_ACCOUNT_ROLES.TEACHER;
+  return ARABYA_ACCOUNT_ROLES.TEACHER;
 }
+
+function isWeakTeacherCredential(value) {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  if (ARABYA_BANNED_TEACHER_CREDENTIALS.has(v)) return true;
+  if (v.length < 8) return true;
+  return false;
+}
+
+function teacherMustChangePassword(teacher) {
+  if (!teacher) return false;
+  if (teacher.mustChangePassword === true) return true;
+  if (isWeakTeacherCredential(teacher.password)) return true;
+  if (isWeakTeacherCredential(teacher.autoEntryCode)) return true;
+  const pass = String(teacher.password || "").trim();
+  const code = String(teacher.autoEntryCode || "").trim();
+  if (pass && code && pass === code && pass.length < 12) return true;
+  return false;
+}
+
+function migrateLegacyTeacherSecurity(teacher) {
+  if (!teacher) return teacher;
+  if (!teacher.role) {
+    const legacySuper =
+      String(teacher.username || "").trim() === "TEACHER2026" ||
+      String(teacher.password || "").trim() === "TEACHER2026" ||
+      String(teacher.autoEntryCode || "").trim() === "TEACHER2026" ||
+      String(teacher.name || "").includes("مدير المنصة");
+    teacher.role = legacySuper ? ARABYA_ACCOUNT_ROLES.SUPER_ADMIN : ARABYA_ACCOUNT_ROLES.TEACHER;
+  }
+  if (teacherMustChangePassword(teacher)) teacher.mustChangePassword = true;
+  return teacher;
+}
+
+function persistTeacherSessionToken(username) {
+  try {
+    localStorage.setItem(TEACHER_SESSION_TOKEN_KEY, JSON.stringify({
+      username: String(username || "").trim(),
+      token: generateSecureRandomCode(32),
+      expiresAt: Date.now() + TEACHER_SESSION_TOKEN_TTL_MS
+    }));
+  } catch (e) {}
+}
+
+function verifyTeacherSessionToken(username) {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TEACHER_SESSION_TOKEN_KEY) || "null");
+    if (!raw || String(raw.username || "").trim() !== String(username || "").trim()) return false;
+    if (!raw.token || Date.now() > Number(raw.expiresAt || 0)) return false;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function clearTeacherSessionToken() {
+  try { localStorage.removeItem(TEACHER_SESSION_TOKEN_KEY); } catch (e) {}
+}
+
+async function hashTeacherLoginTokenSecret(secret) {
+  const data = new TextEncoder().encode(`arabya.login.token|${String(secret || "")}`);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function createTeacherLoginToken(teacher) {
+  const normalized = normalizeTeacherAccount(teacher);
+  const tokenId = generateSecureRandomCode(10);
+  const tokenSecret = generateSecureRandomCode(24);
+  const secretHash = await hashTeacherLoginTokenSecret(tokenSecret);
+  normalized.loginTokens = Array.isArray(normalized.loginTokens) ? normalized.loginTokens : [];
+  const now = Date.now();
+  normalized.loginTokens = normalized.loginTokens.filter(t => !t.used && Number(t.expiresAt || 0) > now);
+  normalized.loginTokens.push({
+    id: tokenId,
+    secretHash,
+    expiresAt: now + TEACHER_LOGIN_TOKEN_TTL_MS,
+    used: false,
+    createdAt: new Date().toISOString()
+  });
+  const idx = systemState.teachers.findIndex(t => t.username === normalized.username);
+  if (idx !== -1) systemState.teachers[idx] = { ...systemState.teachers[idx], loginTokens: normalized.loginTokens };
+  saveTeachersToLocalStorage();
+  return { tokenId, tokenSecret, url: buildTeacherLoginTokenUrl(tokenId, tokenSecret) };
+}
+
+function buildTeacherLoginTokenUrl(tokenId, tokenSecret) {
+  const params = new URLSearchParams();
+  params.set(TEACHER_LOGIN_TOKEN_PARAM_ID, tokenId);
+  params.set(TEACHER_LOGIN_TOKEN_PARAM_KEY, tokenSecret);
+  return `${getAppBaseUrl()}?${params.toString()}`;
+}
+
+async function consumeTeacherLoginToken(tokenId, tokenSecret) {
+  const id = String(tokenId || "").trim();
+  const secret = String(tokenSecret || "").trim();
+  if (!id || !secret) return null;
+  const secretHash = await hashTeacherLoginTokenSecret(secret);
+  for (const teacher of systemState.teachers || []) {
+    const tokens = Array.isArray(teacher.loginTokens) ? teacher.loginTokens : [];
+    const match = tokens.find(t =>
+      t && t.id === id && !t.used && Number(t.expiresAt || 0) > Date.now() && t.secretHash === secretHash
+    );
+    if (match) {
+      match.used = true;
+      const idx = systemState.teachers.findIndex(t => t.username === teacher.username);
+      if (idx !== -1) systemState.teachers[idx] = { ...systemState.teachers[idx], loginTokens: tokens };
+      saveTeachersToLocalStorage();
+      return teacher;
+    }
+  }
+  return null;
+}
+
+function showMandatoryPasswordChangeModal() {
+  const modal = document.getElementById("teacher-password-change-modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  const newPass = document.getElementById("teacher-force-new-password");
+  const newCode = document.getElementById("teacher-force-new-autocode");
+  const confirmPass = document.getElementById("teacher-force-confirm-password");
+  if (newPass) newPass.value = "";
+  if (newCode) newCode.value = "";
+  if (confirmPass) confirmPass.value = "";
+  setTimeout(() => { if (newPass) newPass.focus(); }, 50);
+}
+
+function hideMandatoryPasswordChangeModal() {
+  const modal = document.getElementById("teacher-password-change-modal");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+}
+
+async function applyMandatoryTeacherPasswordChange() {
+  if (!systemState.activeTeacher) {
+    alert("يرجى تسجيل الدخول أولاً.");
+    return false;
+  }
+  const newPass = String((document.getElementById("teacher-force-new-password") || {}).value || "").trim();
+  const newCode = String((document.getElementById("teacher-force-new-autocode") || {}).value || "").trim();
+  const confirmPass = String((document.getElementById("teacher-force-confirm-password") || {}).value || "").trim();
+  if (!newPass || newPass.length < 8) {
+    alert("كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل.");
+    return false;
+  }
+  if (newPass !== confirmPass) {
+    alert("تأكيد كلمة المرور غير متطابق.");
+    return false;
+  }
+  if (isWeakTeacherCredential(newPass) || (newCode && isWeakTeacherCredential(newCode))) {
+    alert("كلمة المرور أو رمز الدخول السريع ضعيف أو معروف. اختر قيمة أقوى.");
+    return false;
+  }
+  if (newCode && newCode === newPass) {
+    alert("رمز الدخول السريع يجب أن يختلف عن كلمة المرور.");
+    return false;
+  }
+  const teacher = systemState.activeTeacher;
+  teacher.password = newPass;
+  teacher.autoEntryCode = newCode || teacher.autoEntryCode || generateSecureRandomCode(8);
+  teacher.mustChangePassword = false;
+  if (window.ArabyaSecurity) {
+    await window.ArabyaSecurity.ensureTeacherPasswordHashed(teacher, newPass);
+  }
+  const idx = systemState.teachers.findIndex(t => t.username === teacher.username);
+  if (idx !== -1) {
+    systemState.teachers[idx] = {
+      ...systemState.teachers[idx],
+      password: teacher.password,
+      autoEntryCode: teacher.autoEntryCode,
+      passwordHash: teacher.passwordHash,
+      passwordSalt: teacher.passwordSalt,
+      mustChangePassword: false,
+      role: teacher.role
+    };
+  }
+  saveTeachersToLocalStorage();
+  syncActiveTeacherCredentials(teacher.autoEntryCode);
+  hideMandatoryPasswordChangeModal();
+  return true;
+}
+
+window.handleMandatoryTeacherPasswordChange = async function() {
+  const ok = await applyMandatoryTeacherPasswordChange();
+  if (!ok) return;
+  alert("تم تحديث كلمة المرور بنجاح. مرحباً بك في لوحة التحكم.");
+  finishTeacherLoginNavigation({ skipPasswordCheck: true });
+};
+
+window.generateTeacherLoginLink = async function() {
+  if (!systemState.activeTeacher) {
+    alert("يرجى تسجيل الدخول أولاً.");
+    return;
+  }
+  const created = await createTeacherLoginToken(systemState.activeTeacher);
+  const input = document.getElementById("teacher-auto-login-url");
+  if (input) input.value = created.url;
+  try {
+    await navigator.clipboard.writeText(created.url);
+    alert("تم إنشاء رابط دخول لمرة واحدة (صالح 24 ساعة) ونسخه.\n\nلا تشاركه علناً — يعمل مرة واحدة فقط.");
+  } catch (e) {
+    alert("تم إنشاء الرابط. انسخه يدوياً من الحقل.");
+  }
+};
 
 function normalizeTeacherAccount(teacher) {
   if (!teacher) return teacher;
+  migrateLegacyTeacherSecurity(teacher);
   teacher.role = inferTeacherRole(teacher);
   return teacher;
 }
@@ -769,7 +992,7 @@ let systemState = {
   
   // إعدادات التكامل مع جوجل شيت
   config: {
-    teacherCode: "TEACHER2026",
+    teacherCode: "",
     appVersion: ARABYA_APP_BUILD_VERSION,
     googleFormUrl: "",
     entryName: "",
@@ -777,7 +1000,7 @@ let systemState = {
     entryCode: "",
     entryScore: "",
     entryDetails: "",
-    autoEntryCode: "TEACHER2026"
+    autoEntryCode: ""
   }
 };
 
@@ -912,6 +1135,18 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
   
+  if (systemState._pendingFirstRunCredentials) {
+    const creds = systemState._pendingFirstRunCredentials;
+    delete systemState._pendingFirstRunCredentials;
+    alert(
+      "تم إنشاء حساب مدير المنصة لأول مرة.\n\n" +
+      "اسم المستخدم: " + creds.username + "\n" +
+      "كلمة المرور: " + creds.password + "\n" +
+      "رمز الدخول السريع: " + creds.autoEntryCode + "\n\n" +
+      "احفظ هذه البيانات الآن — لن تُعرض مرة أخرى."
+    );
+  }
+
   void (async () => {
   const wasRedirected = await checkUrlParameters();
   if (!wasRedirected) {
@@ -919,15 +1154,25 @@ document.addEventListener("DOMContentLoaded", () => {
     if (savedView && savedView !== "exam-runner-view") {
       if (savedView === "teacher-dashboard-view") {
         const activeTeacherUsername = localStorage.getItem("arabya_active_teacher_username");
-        if (activeTeacherUsername) {
+        if (activeTeacherUsername && verifyTeacherSessionToken(activeTeacherUsername)) {
           const matched = systemState.teachers.find(t => t.username === activeTeacherUsername);
           if (matched) {
-            await loginTeacherObject(matched);
-            navigateToView("teacher-dashboard-view");
+            await loginTeacherObject(matched, "", { restoreSession: true });
+            if (teacherMustChangePassword(systemState.activeTeacher)) {
+              navigateToView("teacher-login-view");
+              showMandatoryPasswordChangeModal();
+            } else {
+              navigateToView("teacher-dashboard-view");
+              loadTeacherDashboardData();
+            }
           } else {
+            clearTeacherSessionToken();
+            localStorage.removeItem("arabya_active_teacher_username");
             navigateToView("teacher-login-view");
           }
         } else {
+          clearTeacherSessionToken();
+          localStorage.removeItem("arabya_active_teacher_username");
           navigateToView("teacher-login-view");
         }
       } else {
@@ -952,15 +1197,18 @@ function initDatabase() {
     }
   }
   
-  // إذا لم يكن هناك معلمون، نقوم بإنشاء المعلم الافتراضي
+  // إذا لم يكن هناك معلمون، نُنشئ حساب مدير أولي بكلمة مرور عشوائية (تُعرض مرة واحدة)
   if (systemState.teachers.length === 0) {
+    const initialPassword = generateSecureRandomCode(12);
+    const initialQuickCode = generateSecureRandomCode(10);
     const defaultTeacher = {
       name: "مدير المنصة ARABYA",
-      username: "TEACHER2026",
+      username: "platform_admin",
       subject: "إدارة المنصة الشاملة",
-      password: "TEACHER2026",
-      autoEntryCode: "TEACHER2026",
+      password: initialPassword,
+      autoEntryCode: initialQuickCode,
       role: ARABYA_ACCOUNT_ROLES.SUPER_ADMIN,
+      mustChangePassword: false,
       integrationConfig: {
         googleFormUrl: "",
         entryName: "",
@@ -972,6 +1220,11 @@ function initDatabase() {
     };
     systemState.teachers.push(normalizeTeacherAccount(defaultTeacher));
     localStorage.setItem("arabya_teachers_db", JSON.stringify(systemState.teachers));
+    systemState._pendingFirstRunCredentials = {
+      username: defaultTeacher.username,
+      password: initialPassword,
+      autoEntryCode: initialQuickCode
+    };
   }
 
   normalizeAllTeacherAccounts();
@@ -4791,9 +5044,14 @@ function fetchCloudBackupFromUrls(urlList) {
 }
 
 function finishTeacherLoginNavigation(options = {}) {
+  if (!options.skipPasswordCheck && teacherMustChangePassword(systemState.activeTeacher)) {
+    navigateToView("teacher-login-view");
+    showMandatoryPasswordChangeModal();
+    if (options.message) alert(options.message);
+    return;
+  }
   navigateToView("teacher-dashboard-view");
-  renderExamsList();
-  renderTeacherStudentsTable();
+  loadTeacherDashboardData();
   if (options.message) alert(options.message);
 }
 
@@ -5120,30 +5378,24 @@ function getExamDirectLink(exam) {
 async function checkUrlParameters() {
   let redirected = false;
 
-  // 1. الدخول التلقائي للمعلم عبر رمز الدخول التلقائي
-  const autoCode = getUrlParameter("teacher_autocode");
-  if (autoCode) {
-    for (const t of systemState.teachers) {
-      if (!(await teacherCredentialMatches(t, autoCode))) continue;
-      await loginTeacherObject(t, autoCode);
-      navigateToView("teacher-dashboard-view");
-      alert(`مرحباً بك يا أستاذ ${t.name}! تم تسجيل الدخول تلقائياً عبر رمز الدخول السريع.`);
+  // 1. الدخول عبر رابط لمرة واحدة (بدلاً من كشف كلمة المرور في الرابط)
+  const tokenId = getUrlParameter(TEACHER_LOGIN_TOKEN_PARAM_ID);
+  const tokenKey = getUrlParameter(TEACHER_LOGIN_TOKEN_PARAM_KEY);
+  if (tokenId && tokenKey) {
+    const matched = await consumeTeacherLoginToken(tokenId, tokenKey);
+    if (matched) {
+      await loginTeacherObject(matched, "", { viaLoginToken: true });
+      finishTeacherLoginNavigation({
+        message: `مرحباً بك يا أستاذ ${matched.name}! تم تسجيل الدخول عبر رابط لمرة واحدة.`
+      });
       return true;
     }
+    alert("رابط الدخول غير صالح أو منتهٍ أو مُستخدم مسبقاً. سجّل الدخول يدوياً أو أنشئ رابطاً جديداً من الملف الشخصي.");
   }
-  
-  // 2. الدخول التلقائي للمعلم عبر اسم المستخدم وكلمة المرور
-  const user = getUrlParameter("teacher_username");
-  const pass = getUrlParameter("teacher_pass");
-  if (user && pass) {
-    for (const t of systemState.teachers) {
-      if (t.username.toLowerCase() !== user.toLowerCase()) continue;
-      if (!(await teacherCredentialMatches(t, pass))) continue;
-      await loginTeacherObject(t, pass);
-      navigateToView("teacher-dashboard-view");
-      alert(`مرحباً بك يا أستاذ ${t.name}! تم تسجيل الدخول تلقائياً.`);
-      return true;
-    }
+
+  // روابط قديمة — لم تعد مدعومة لأسباب أمنية
+  if (getUrlParameter("teacher_autocode") || getUrlParameter("teacher_pass") || getUrlParameter("teacher_username")) {
+    console.warn("[ARABYA] تم تجاهل معاملات دخول قديمة في الرابط (teacher_autocode / teacher_pass). استخدم رابط الدخول لمرة واحدة من الملف الشخصي.");
   }
 
   // 3. التحقق من وجود المعلم وتجهيز الإعدادات لتصفية الامتحانات ومزامنة الدرجات
@@ -5270,12 +5522,9 @@ async function checkUrlParameters() {
 }
 
 // تسجيل دخول كائن معلم محدد وتطبيق إعداداته
-async function loginTeacherObject(teacher, loginCredential) {
+async function loginTeacherObject(teacher, loginCredential, options = {}) {
   const normalized = normalizeTeacherAccount(teacher);
   const credential = String(loginCredential || "").trim();
-  if (credential && ARABYA_SUPER_ADMIN_SEEDS.has(credential)) {
-    normalized.role = ARABYA_ACCOUNT_ROLES.SUPER_ADMIN;
-  }
   if (credential && window.ArabyaSecurity) {
     await window.ArabyaSecurity.ensureTeacherPasswordHashed(normalized, credential);
     const idx = systemState.teachers.findIndex(t => t.username === normalized.username);
@@ -5288,6 +5537,9 @@ async function loginTeacherObject(teacher, loginCredential) {
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
   localStorage.setItem("arabya_active_teacher_username", normalized.username || teacher.username);
+  if (!options.restoreSession) {
+    persistTeacherSessionToken(normalized.username || teacher.username);
+  }
   
   systemState.teacherProfile = { name: teacher.name, subject: teacher.subject };
   systemState.config = {
@@ -6039,10 +6291,12 @@ function loadTeacherDashboardData() {
   document.getElementById("teacher-config-score").value = systemState.activeTeacher.integrationConfig?.entryScore || "";
   document.getElementById("teacher-config-details").value = systemState.activeTeacher.integrationConfig?.entryDetails || "";
 
-  // توليد وعرض رابط الدخول التلقائي للمعلم
-  const baseUrl = getAppBaseUrl();
-  const autoUrl = `${baseUrl}?teacher_autocode=${systemState.activeTeacher.autoEntryCode}`;
-  document.getElementById("teacher-auto-login-url").value = autoUrl;
+  // رابط الدخول لمرة واحدة — يُنشأ عند الضغط على «إنشاء رابط دخول»
+  const autoUrlInput = document.getElementById("teacher-auto-login-url");
+  if (autoUrlInput && !autoUrlInput.value) {
+    autoUrlInput.value = "";
+    autoUrlInput.placeholder = "اضغط «إنشاء رابط دخول» لإنشاء رابط لمرة واحدة (24 ساعة)";
+  }
 
   renderTeacherProfilePanel();
   renderTeacherHomeDashboard();
@@ -7014,6 +7268,16 @@ function importExamFromGoogleForm() {
   }
 }
 
+function parseFbPublicLoadDataSafe(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+}
+
 function parseGoogleFormHTML(html) {
   try {
     const parser = new DOMParser();
@@ -7035,7 +7299,8 @@ function parseGoogleFormHTML(html) {
         const match = text.match(/FB_PUBLIC_LOAD_DATA_\s*=\s*(.*?);/);
         if (match && match[1]) {
           try {
-            const rawData = eval(match[1]);
+            const rawData = parseFbPublicLoadDataSafe(match[1]);
+            if (!rawData) throw new Error("Invalid FB_PUBLIC_LOAD_DATA payload");
             const items = rawData[1][1];
             
             items.forEach(item => {
@@ -11675,9 +11940,11 @@ window.importCompleteDatabase = function(event) {
 // تسجيل خروج المعلم نهائياً وتنظيف الجلسة
 window.logoutTeacher = function() {
   if (window.ArabyaCloudSync) window.ArabyaCloudSync.stopPullLoop();
+  clearTeacherSessionToken();
   localStorage.removeItem("arabya_active_teacher_username");
   localStorage.removeItem("arabya_active_view");
   systemState.activeTeacher = null;
+  hideMandatoryPasswordChangeModal();
   location.reload();
 };
 

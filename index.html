@@ -431,7 +431,7 @@
         <div class="form-group">
           <label class="form-label" for="teacher-quick-code">الدخول السريع عبر الرمز الخاص بك:</label>
           <div class="input-wrapper">
-            <input type="text" id="teacher-quick-code" class="form-control" placeholder="مثال: TEACHER2026..." autocomplete="off">
+            <input type="text" id="teacher-quick-code" class="form-control" placeholder="أدخل رمز الدخول السريع..." autocomplete="off">
             <span class="material-icons input-icon" aria-hidden="true">vpn_key</span>
           </div>
         </div>
@@ -1689,10 +1689,10 @@ function doGet(e) {
 
               <div id="teacher-auto-login-box" class="exam-direct-link-box" style="margin-top: 2rem; background: rgba(245, 158, 11, 0.05); border-color: rgba(245, 158, 11, 0.2);">
                 <div>
-                  <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط الدخول التلقائي والمستمر للوحة التحكم الخاصة بك (احفظه في المفضلة):</span>
-                  <input type="text" id="teacher-auto-login-url" class="exam-link-input" style="color:var(--accent);" readonly>
+                  <span style="font-size:0.85rem; color:var(--text-muted); display:block; margin-bottom:0.25rem;">رابط دخول لمرة واحدة (صالح 24 ساعة — لا يكشف كلمة مرورك):</span>
+                  <input type="text" id="teacher-auto-login-url" class="exam-link-input" style="color:var(--accent);" readonly placeholder="اضغط «إنشاء رابط دخول» أدناه">
                 </div>
-                <button type="button" class="btn btn-accent btn-sm" onclick="navigator.clipboard.writeText(document.getElementById('teacher-auto-login-url').value).then(() => alert('تم نسخ رابط الدخول التلقائي بنجاح! احفظه لتسجيل الدخول الفوري لاحقاً.'));">نسخ الرابط</button>
+                <button type="button" class="btn btn-accent btn-sm" onclick="generateTeacherLoginLink()">إنشاء رابط دخول</button>
               </div>
             </div>
 
@@ -1713,6 +1713,31 @@ function doGet(e) {
     </section>
 
   </main>
+
+  <!-- إجبار تغيير كلمة المرور الافتراضية/الضعيفة -->
+  <div id="teacher-password-change-modal" class="hidden teacher-password-change-modal" role="dialog" aria-modal="true" aria-labelledby="teacher-password-change-title">
+    <div class="card" style="max-width:480px; width:100%; margin:0;">
+      <div class="card-header">
+        <h2 id="teacher-password-change-title" class="card-title" style="color:var(--warning);">تغيير كلمة المرور مطلوب</h2>
+        <p class="subtitle">لأسباب أمنية، يجب تعيين كلمة مرور جديدة قوية قبل استخدام لوحة التحكم.</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="teacher-force-new-password">كلمة المرور الجديدة (8 أحرف على الأقل):</label>
+        <input type="password" id="teacher-force-new-password" class="form-control" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="teacher-force-confirm-password">تأكيد كلمة المرور:</label>
+        <input type="password" id="teacher-force-confirm-password" class="form-control" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="teacher-force-new-autocode">رمز الدخول السريع الجديد (اختياري — يجب أن يختلف عن كلمة المرور):</label>
+        <input type="text" id="teacher-force-new-autocode" class="form-control" autocomplete="off">
+      </div>
+      <button type="button" class="btn btn-primary" style="width:100%;" onclick="handleMandatoryTeacherPasswordChange()">
+        حفظ والمتابعة إلى لوحة التحكم
+      </button>
+    </div>
+  </div>
 
   <!-- تذييل الصفحة الفاخر (Footer) -->
   <footer class="footer" role="contentinfo">

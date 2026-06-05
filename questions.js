@@ -483,8 +483,8 @@ function hydrateArabyaTeacherProfileFallback() {
   if (nameInput && !nameInput.value) nameInput.value = teacher.name || "";
   if (subjectInput && !subjectInput.value) subjectInput.value = teacher.subject || "";
   if (autoCodeInput && !autoCodeInput.value) autoCodeInput.value = teacher.autoEntryCode || teacher.password || "";
-  if (autoUrlInput && !autoUrlInput.value && (teacher.autoEntryCode || teacher.password)) {
-    autoUrlInput.value = getArabyaBaseUrl() + "?teacher_autocode=" + encodeURIComponent(teacher.autoEntryCode || teacher.password);
+  if (autoUrlInput && !autoUrlInput.value) {
+    autoUrlInput.placeholder = "اضغط «إنشاء رابط دخول» لإنشاء رابط لمرة واحدة (24 ساعة)";
   }
 }
 
