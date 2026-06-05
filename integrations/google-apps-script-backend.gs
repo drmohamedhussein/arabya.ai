@@ -290,9 +290,15 @@ function sanitizeArabyaDbForClient_(db) {
         safe.integrationConfig = Object.assign({}, safe.integrationConfig);
         delete safe.integrationConfig.teacherCode;
         delete safe.integrationConfig.apiSecret;
+        delete safe.integrationConfig.googleFormUrl;
       }
       return safe;
     });
+  }
+  if (copy.config && typeof copy.config === "object") {
+    copy.config = Object.assign({}, copy.config);
+    delete copy.config.googleFormUrl;
+    delete copy.config.apiSecret;
   }
   return copy;
 }
@@ -311,6 +317,7 @@ function sanitizeArabyaDbForTeacherLogin_(db) {
       if (safe.integrationConfig) {
         safe.integrationConfig = Object.assign({}, safe.integrationConfig);
         delete safe.integrationConfig.apiSecret;
+        delete safe.integrationConfig.googleFormUrl;
       }
       return safe;
     })
