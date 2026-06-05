@@ -75,6 +75,9 @@ function doPost(e) {
     if (!isArabyaApiAuthorized_(e, data)) {
       return unauthorizedArabya_();
     }
+    if (!checkArabyaRateLimit_(e, data, action, "")) {
+      return rateLimitedArabya_();
+    }
 
     if (action === "add_result") {
       upsertArabyaResult_(data);
@@ -141,11 +144,19 @@ function doGet(e) {
       }
     }
     if (action === "get_sync_meta") {
+      if (!checkArabyaRateLimit_(e, null, "get_sync_meta", "")) {
+        return rateLimitedArabya_();
+      }
       var stats = getArabyaSyncStats_();
       return jsonArabya_(Object.assign({ status: "success", service: "ARABYA.NET backend bridge" }, stats));
     }
 
     if (action === "get_backup") {
+      var scope = e && e.parameter ? String(e.parameter.scope || "").trim() : "";
+      var examId = e && e.parameter ? String(e.parameter.exam || e.parameter.examId || "").trim() : "";
+      if (!checkArabyaRateLimit_(e, null, "get_backup", scope)) {
+        return rateLimitedArabya_();
+      }
       var db = readArabyaDatabase_();
       var sheetRowCount = readArabyaResultsFromSheet_().length;
       db.results = buildArabyaResultsForClient_(db);
@@ -153,13 +164,15 @@ function doGet(e) {
       if (db.deletedStudentKeys && db.deletedStudentKeys.length) {
         db.students = filterArabyaStudentsByDeletedKeys_(db.students || [], db.deletedStudentKeys);
       }
-      var resultCount = (db.results || []).length;
+      var payloadDb = scope === "exam_start" ? buildArabyaExamStartBackup_(db, examId) : db;
+      var resultCount = (payloadDb.results || []).length;
       var cloudRevision = getArabyaCloudRevision_();
       return jsonArabya_({
         status: "success",
-        data: sanitizeArabyaDbForClient_(db),
+        scope: scope || "full",
+        data: sanitizeArabyaDbForClient_(payloadDb),
         cloudRevision: cloudRevision,
-        counts: countArabya_(db),
+        counts: countArabya_(payloadDb),
         sheetResultRows: resultCount,
         sheetTotalRows: sheetRowCount,
         backupResultRows: resultCount
@@ -231,6 +244,97 @@ function sanitizeArabyaDbForClient_(db) {
     });
   }
   return copy;
+}
+
+function slimArabyaResultForExamStart_(result) {
+  if (!result) return result;
+  return {
+    recordId: result.recordId || "",
+    examId: result.examId || "",
+    examTitle: result.examTitle || "",
+    studentLookupKey: result.studentLookupKey || "",
+    id: result.id || "",
+    name: result.name || "",
+    accessCode: result.accessCode || result.code || "",
+    status: result.status || "",
+    allowRetake: result.allowRetake,
+    retakeGrantedAt: result.retakeGrantedAt,
+    superseded: result.superseded,
+    supersededAt: result.supersededAt,
+    clientIp: result.clientIp || "",
+    staffIpReleased: result.staffIpReleased,
+    staffIpReleasedAt: result.staffIpReleasedAt,
+    timestamp: result.timestamp || "",
+    score: result.score || ""
+  };
+}
+
+function buildArabyaExamStartBackup_(db, examId) {
+  var targetExamId = String(examId || "").trim();
+  var exams = Array.isArray(db.exams) ? db.exams : [];
+  if (targetExamId) {
+    exams = exams.filter(function(ex) {
+      return ex && String(ex.id || "") === targetExamId;
+    });
+  }
+  var results = Array.isArray(db.results) ? db.results : [];
+  if (targetExamId) {
+    results = results.filter(function(row) {
+      return row && String(row.examId || "") === targetExamId;
+    });
+  }
+  results = results.map(slimArabyaResultForExamStart_);
+  var bindings = db.examDeviceRegistry && Array.isArray(db.examDeviceRegistry.bindings)
+    ? db.examDeviceRegistry.bindings
+    : [];
+  if (targetExamId) {
+    bindings = bindings.filter(function(binding) {
+      return binding && String(binding.examId || "") === targetExamId;
+    });
+  }
+  return {
+    schemaVersion: db.schemaVersion || ARABYA_DEFAULT_DB.schemaVersion,
+    appVersion: db.appVersion || "",
+    updatedAt: db.updatedAt || "",
+    source: db.source || "arabya.net",
+    exams: exams,
+    results: results,
+    examDeviceRegistry: { bindings: bindings },
+    deletedStudentKeys: Array.isArray(db.deletedStudentKeys) ? db.deletedStudentKeys : [],
+    deletedResultKeys: Array.isArray(db.deletedResultKeys) ? db.deletedResultKeys : [],
+    teachers: [],
+    students: [],
+    questionBanks: {},
+    auditLog: []
+  };
+}
+
+function checkArabyaRateLimit_(e, data, action, scope) {
+  try {
+    var cache = CacheService.getScriptCache();
+    var bucket = String(Math.floor(Date.now() / 60000));
+    var identity = extractClientApiSecret_(e, data) || "open";
+    var key = "rl_" + String(action || "x") + "_" + identity.substring(0, 16) + "_" + bucket;
+    var count = parseInt(cache.get(key) || "0", 10) + 1;
+    cache.put(key, String(count), 120);
+    var limit = 45;
+    if (action === "get_backup") {
+      limit = scope === "exam_start" ? 60 : 35;
+    } else if (action === "get_sync_meta") {
+      limit = 90;
+    }
+    return count <= limit;
+  } catch (err) {
+    return true;
+  }
+}
+
+function rateLimitedArabya_() {
+  return jsonArabya_({
+    status: "error",
+    code: "rate_limited",
+    message: "Too many requests. Please retry shortly."
+  });
 }
 
 function getArabyaResultsSheet_() {

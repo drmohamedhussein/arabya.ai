@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.33";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.34";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1071,6 +1071,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.withArabyaApiSecret = withArabyaApiSecret;
   window.appendArabyaApiSecretToUrl = appendArabyaApiSecretToUrl;
   window.buildArabyaCloudActionUrl = buildArabyaCloudActionUrl;
+  window.resolveStudentExamScopeId = resolveStudentExamScopeId;
   window.isSuperAdminTeacher = isSuperAdminTeacher;
   window.inferTeacherRole = inferTeacherRole;
   window.isTeacherStaffAccount = isTeacherStaffAccount;
@@ -4284,11 +4285,39 @@ function appendArabyaApiSecretToUrl(rawUrl) {
   return base + sep + ARABYA_API_SECRET_QUERY + "=" + encodeURIComponent(secret);
 }
 
-function buildArabyaCloudActionUrl(rawUrl, action) {
+function resolveStudentExamScopeId(fallback = "") {
+  try {
+    return String(
+      fallback ||
+      systemState.lockedExamId ||
+      getUrlParameter("exam") ||
+      ""
+    ).trim();
+  } catch (e) {
+    return String(fallback || systemState.lockedExamId || "").trim();
+  }
+}
+
+function buildCloudBackupFetchParams(mergeOptions = {}) {
+  if (mergeOptions.scope !== "exam_start") return {};
+  const params = { scope: "exam_start" };
+  const examId = resolveStudentExamScopeId(mergeOptions.examId || "");
+  if (examId) params.exam = examId;
+  return params;
+}
+
+function buildArabyaCloudActionUrl(rawUrl, action, extraParams = {}) {
   const base = appendArabyaApiSecretToUrl(rawUrl);
   if (!base) return "";
+  const parts = ["action=" + encodeURIComponent(action)];
+  Object.keys(extraParams || {}).forEach(key => {
+    const val = extraParams[key];
+    if (val !== undefined && val !== null && String(val).trim() !== "") {
+      parts.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(val).trim()));
+    }
+  });
   const sep = base.includes("?") ? "&" : "?";
-  return base + sep + "action=" + encodeURIComponent(action);
+  return base + sep + parts.join("&");
 }
 
 function buildSlimResultCloudPayload(payload) {
@@ -4432,10 +4461,13 @@ function postToArabyaWebApp(url, payload) {
     }
     if (parsed && parsed.status === "error") {
       const unauthorized = parsed.code === "unauthorized";
+      const rateLimited = parsed.code === "rate_limited";
       throw new Error(
         unauthorized
           ? "سر API غير صحيح أو غير مضبوط — أضف ARABYA_API_SECRET في Script Properties وتبويب الربط."
-          : (parsed.message || "Cloud sync error")
+          : rateLimited
+            ? "تم تجاوز حد طلبات المزامنة. انتظر دقيقة ثم أعد المحاولة."
+            : (parsed.message || "Cloud sync error")
       );
     }
     if (!parsed && text && !/success|تم/i.test(text)) {
@@ -4720,8 +4752,12 @@ function recordPreExamSyncDuration(durationMs) {
   } catch (e) {}
 }
 
-async function fetchCloudBackupJson_(rawUrl, timeoutMs) {
-  const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup");
+async function fetchCloudBackupJson_(rawUrl, timeoutMs, mergeOptions = {}) {
+  const fetchUrl = buildArabyaCloudActionUrl(
+    rawUrl,
+    "get_backup",
+    buildCloudBackupFetchParams(mergeOptions)
+  );
   if (!fetchUrl) return null;
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller && timeoutMs > 0
@@ -4754,7 +4790,7 @@ async function fetchAndMergeAllCloudBackups(mergeOptions = {}, timeoutMs = 0) {
   let lastResponse = null;
   let anyMerged = false;
   if (timeoutMs > 0) {
-    const settled = await Promise.all(urlList.map(url => fetchCloudBackupJson_(url, timeoutMs)));
+    const settled = await Promise.all(urlList.map(url => fetchCloudBackupJson_(url, timeoutMs, mergeOptions)));
     settled.forEach(response => {
       if (!response || !response.data) return;
       mergeRemoteDatabaseIntoLocal(response.data, mergeOptions);
@@ -4763,7 +4799,7 @@ async function fetchAndMergeAllCloudBackups(mergeOptions = {}, timeoutMs = 0) {
     });
   } else {
     for (const rawUrl of urlList) {
-      const response = await fetchCloudBackupJson_(rawUrl, 0);
+      const response = await fetchCloudBackupJson_(rawUrl, 0, mergeOptions);
       if (!response || !response.data) continue;
       mergeRemoteDatabaseIntoLocal(response.data, mergeOptions);
       anyMerged = true;
@@ -4784,6 +4820,7 @@ function prefetchStudentExamGateData() {
   studentExamGatePrefetchPromise = syncDatabaseFromCloud({
     silent: true,
     scope: "exam_start",
+    examId: resolveStudentExamScopeId(),
     timeoutMs: 8000
   }).then(result => {
     recordPreExamSyncDuration(performance.now() - started);
@@ -4900,7 +4937,9 @@ async function syncDatabaseFromCloud(options = {}) {
   }
   if (!silent) refreshCloudSyncStatusUI("جاري جلب البيانات من Google Sheets...", "syncing");
 
-  const mergeOpts = scope === "exam_start" ? { scope: "exam_start" } : {};
+  const mergeOpts = scope === "exam_start"
+    ? { scope: "exam_start", examId: options.examId || resolveStudentExamScopeId() }
+    : {};
   const pullResult = await fetchAndMergeAllCloudBackups(mergeOpts, timeoutMs);
   const response = pullResult.lastResponse;
 
@@ -5542,7 +5581,11 @@ async function checkUrlParameters() {
     try { localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config)); } catch (e) {}
     setTimeout(function() {
       if (typeof syncDatabaseFromCloud === "function") {
-        syncDatabaseFromCloud({ silent: true }).then(function(ok) {
+        syncDatabaseFromCloud({
+          silent: true,
+          scope: "exam_start",
+          examId: systemState.lockedExamId || resolveStudentExamScopeId()
+        }).then(function(ok) {
           if (ok) {
             try { populateExamSelectionList(); } catch (e) {}
             if (systemState.lockedExamId) {
@@ -7861,6 +7904,7 @@ async function validateStudentAndStart() {
     const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
       silent: true,
       scope: "exam_start",
+      examId,
       timeoutMs: 8000
     });
     try {
