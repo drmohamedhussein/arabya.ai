@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.05.35";
+const ARABYA_APP_BUILD_VERSION = "2026.06.05.36";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -517,21 +517,93 @@ function getStudentDashboardAccount() {
   return student;
 }
 
+function renderStudentPostExamProfile() {
+  const student = getActiveStudentForProfile();
+  const nameEl = document.getElementById("student-profile-name-display");
+  const idEl = document.getElementById("student-profile-id-display");
+  const codeEl = document.getElementById("student-profile-code-display");
+  const resultEl = document.getElementById("student-profile-exam-result");
+
+  const navProfileLink = document.getElementById("nav-student-profile-link");
+  if (navProfileLink) navProfileLink.classList.toggle("hidden", !student);
+
+  if (!student) {
+    if (resultEl) resultEl.innerHTML = '<div style="text-align:center; padding:1.5rem; color:var(--text-muted);">لا يوجد سجل طالب. ابدأ امتحاناً أولاً من بوابة الطالب.</div>';
+    return;
+  }
+
+  if (nameEl) nameEl.textContent = student.name || "—";
+  if (idEl) idEl.textContent = student.id || "—";
+  if (codeEl) codeEl.textContent = student.accessCode || student.code || "—";
+
+  const examId = systemState.lastCompletedExamId || systemState.currentExam?.id;
+  const ctx = buildStudentMatchContext(student);
+  const rows = (systemState.results || [])
+    .filter(res => {
+      if (!res || isSupersededResult(res)) return false;
+      if (examId && res.examId !== examId) return false;
+      return resultMatchesStudentIdentity(res, ctx);
+    })
+    .sort((a, b) => compareResultsByRecency(a, b, buildResultIndexMap(systemState.results)));
+
+  if (!resultEl) return;
+  if (!rows.length) {
+    resultEl.innerHTML = '<div style="text-align:center; padding:1.5rem; color:var(--text-muted);">لا توجد نتائج مسجلة بعد.</div>';
+    return;
+  }
+
+  resultEl.innerHTML = rows.map(res => {
+    const statusLabel = res.status === "canceled" ? "ملغاة" : getResultDisplayStatus(res) === "incomplete" ? "غير مكتملة" : "مكتملة";
+    const tone = res.status === "canceled" ? "var(--error)" : "var(--secondary)";
+    const retakeNote = resultHasActiveRetakeGrant(res)
+      ? `<div style="font-size:0.8rem; color:var(--accent); margin-top:0.25rem; font-weight:700;">✓ مسموح لك بإعادة الامتحان — ارجع لبوابة الامتحانات</div>`
+      : "";
+    return `<div class="result-query-card" style="text-align:right; margin-bottom:0.5rem;">` +
+      `<div class="result-query-title">${escapeHtml(res.examTitle || "امتحان")}</div>` +
+      `<div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(res.timestamp || "—")} · <span style="color:${tone}; font-weight:700;">${escapeHtml(statusLabel)}</span></div>` +
+      `<div style="font-weight:800; font-size:1.1rem; color:var(--secondary); margin-top:0.35rem;">${escapeHtml(formatResultGradeCell(res))}</div>` +
+      retakeNote +
+      `</div>`;
+  }).join("");
+}
+
+function getActiveStudentForProfile() {
+  // يعطي الأولوية لبيانات الطالب الذي أنهى الامتحان للتو
+  const cur = systemState.currentStudent;
+  if (cur && (cur.name || cur.id)) return cur;
+  return null;
+}
+
 function renderStudentDashboardProfile() {
-  const student = getStudentDashboardAccount();
   const nameEl = document.getElementById("student-dashboard-profile-name");
   const idEl = document.getElementById("student-dashboard-profile-id");
   const codeEl = document.getElementById("student-dashboard-profile-code");
   const historyEl = document.getElementById("student-dashboard-exam-history");
-  if (!student || !historyEl) return;
+  if (!historyEl) return;
+
+  // لا يوجد طالب نشط (لم يؤد الطالب أي امتحان على هذا الجهاز)
+  const student = getActiveStudentForProfile();
+  if (!student) {
+    if (nameEl) nameEl.textContent = "—";
+    if (idEl) idEl.textContent = "—";
+    if (codeEl) codeEl.textContent = "—";
+    historyEl.innerHTML = '<div style="text-align:center; padding:1.5rem; color:var(--text-muted);">لا يوجد سجل طالب لهذا الجهاز. ابدأ امتحاناً أولاً.</div>';
+    return;
+  }
 
   if (nameEl) nameEl.textContent = student.name || "—";
   if (idEl) idEl.textContent = student.id || "—";
-  if (codeEl) codeEl.textContent = student.code || "—";
+  if (codeEl) codeEl.textContent = student.accessCode || student.code || "—";
 
-  const keys = new Set(getStudentLookupKeysForMatch(student).filter(Boolean));
+  // اعرض نتيجة امتحانه الأخير فقط (lastCompletedExamId أو currentExam)
+  const examId = systemState.lastCompletedExamId || systemState.currentExam?.id;
+  const ctx = buildStudentMatchContext(student);
   const rows = (systemState.results || [])
-    .filter(res => keys.has(res.studentLookupKey) || normalizeStudentId(res.id) === normalizeStudentId(student.id))
+    .filter(res => {
+      if (!res || isSupersededResult(res)) return false;
+      if (examId && res.examId !== examId) return false;
+      return resultMatchesStudentIdentity(res, ctx);
+    })
     .sort((a, b) => compareResultsByRecency(a, b, buildResultIndexMap(systemState.results)));
 
   if (!rows.length) {
@@ -540,12 +612,22 @@ function renderStudentDashboardProfile() {
   }
 
   historyEl.innerHTML = rows.map(res => {
-    const status = isSupersededResult(res) ? "محاولة سابقة" : res.status === "canceled" ? "ملغاة" : getResultDisplayStatus(res) === "incomplete" ? "غير مكتملة" : "مكتملة";
-    const tone = res.status === "canceled" ? "var(--error)" : isSupersededResult(res) ? "var(--text-muted)" : "var(--secondary)";
+    const statusLabel = res.status === "canceled"
+      ? "ملغاة"
+      : getResultDisplayStatus(res) === "incomplete"
+        ? "غير مكتملة"
+        : "مكتملة";
+    const tone = res.status === "canceled" ? "var(--error)" : "var(--secondary)";
+    // درجة مختصرة فقط — بدون تفاصيل الإجابات أو أسماء الطلاب الآخرين
+    const gradeOnly = formatResultGradeCell(res);
+    const retakeNote = resultHasActiveRetakeGrant(res)
+      ? `<div style="font-size:0.8rem; color:var(--accent); margin-top:0.25rem;">✓ مسموح لك بإعادة الامتحان</div>`
+      : "";
     return `<div class="result-query-card" style="text-align:right; margin-bottom:0.5rem;">` +
       `<div class="result-query-title">${escapeHtml(res.examTitle || "امتحان")}</div>` +
-      `<div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(res.timestamp || "—")} · <span style="color:${tone}; font-weight:700;">${escapeHtml(status)}</span></div>` +
-      `<div style="font-weight:800; color:var(--secondary); margin-top:0.35rem;">${escapeHtml(formatResultGradeCell(res))}</div>` +
+      `<div style="font-size:0.85rem; color:var(--text-muted); margin-top:0.25rem;">${escapeHtml(res.timestamp || "—")} · <span style="color:${tone}; font-weight:700;">${escapeHtml(statusLabel)}</span></div>` +
+      `<div style="font-weight:800; color:var(--secondary); margin-top:0.35rem;">${escapeHtml(gradeOnly)}</div>` +
+      retakeNote +
       `</div>`;
   }).join("");
 }
@@ -980,6 +1062,8 @@ let systemState = {
     email: "",
     mobile: ""
   },
+  /** معرف الامتحان الذي أكمله الطالب آخر مرة — لعرض ملفه الشخصي وإغلاق قائمة الامتحانات */
+  lastCompletedExamId: null,
   currentExam: null,
   currentExamRuntime: null,
   shuffledQuestions: [],
@@ -5458,9 +5542,15 @@ function navigateToView(viewId) {
     }
   });
 
-  if (viewId === "student-login-view") {
+  if (viewId === "student-profile-after-exam") {
+    renderStudentPostExamProfile();
+  } else if (viewId === "student-login-view") {
     populateExamSelectionList();
     prefetchStudentExamGateData();
+    // تحديث شريط الامتحانات بعد السماح بإعادة التقديم إذا تغيرت البيانات
+    if (systemState.lastCompletedExamId) {
+      populateExamSelectionList();
+    }
   } else if (viewId === "teacher-login-view") {
     const pendingSyncUrl = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
     const syncInput = document.getElementById("teacher-login-sync-url");
@@ -5819,7 +5909,7 @@ function setupUIEventListeners() {
 
   const restartBtn = document.getElementById("runner-restart-btn");
   if (restartBtn) {
-    restartBtn.addEventListener("click", () => navigateToView("welcome-view"));
+    restartBtn.addEventListener("click", () => navigateToView("student-login-view"));
   }
 
   const searchResultBtn = document.getElementById("student-search-submit");
@@ -7745,20 +7835,49 @@ function importResultsFromJSON(event) {
 // 7. بوابة الطالب والامتحان الفعلي مع إتاحة الوصول (Accessibility)
 // ==========================================
 
+function getStudentCompletedExamIds() {
+  const student = systemState.currentStudent;
+  if (!student || (!student.name && !student.id && !student.accessCode)) return new Set();
+  const ctx = buildStudentMatchContext(student);
+  const ids = new Set();
+  (systemState.results || []).forEach(r => {
+    if (!r || isSupersededResult(r)) return;
+    if (r.status !== "completed" && r.status !== "canceled") return;
+    if (!resultMatchesStudentIdentity(r, ctx)) return;
+    ids.add(r.examId);
+  });
+  return ids;
+}
+
+function studentHasActiveRetakeForExam(examId) {
+  const student = systemState.currentStudent;
+  if (!student || !examId) return false;
+  const ctx = buildStudentMatchContext(student);
+  const key = student.studentKey || getStudentLookupKey(student);
+  return !!findActiveRetakeGrant(key, examId, ctx);
+}
+
 function populateExamSelectionList() {
   const select = document.getElementById("student-exam-select");
   if (!select) return;
 
   select.disabled = false;
   select.innerHTML = `<option value="" disabled selected>-- اختر الامتحان الذي ترغب في أدائه --</option>`;
-  
-  // تصفية الامتحانات لتظهر فقط امتحانات المعلم المرتبط بالرابط إن وجد
+
+  // 1. الامتحانات الظاهرة للطالب: مقيّدة بالمعلم / الرابط المباشر
   let filteredExams = systemState.exams;
   if (systemState.targetTeacherUsername) {
     filteredExams = systemState.exams.filter(exam => exam.teacher === systemState.targetTeacherUsername || !exam.teacher);
   }
   if (systemState.lockedExamId) {
     filteredExams = filteredExams.filter(exam => exam.id === systemState.lockedExamId);
+  }
+
+  // 2. بعد انتهاء الامتحان: يُقيّد العرض بالامتحان الأخير المنجز فقط
+  const lastId = systemState.lastCompletedExamId;
+  if (lastId && !systemState.lockedExamId) {
+    const lastExam = filteredExams.find(e => e.id === lastId);
+    if (lastExam) filteredExams = [lastExam];
   }
 
   if (filteredExams.length === 0) {
@@ -7773,15 +7892,22 @@ function populateExamSelectionList() {
     return;
   }
 
+  const completedIds = getStudentCompletedExamIds();
+
   filteredExams.forEach(exam => {
     const opt = document.createElement("option");
     opt.value = exam.id;
     const expired = isExamPastDeadline(exam);
-    opt.innerText = expired
-      ? `${exam.title} (${exam.subject}) — منتهي الموعد`
-      : `${exam.title} (${exam.subject})`;
+    // الطالب أنهى هذا الامتحان ولم يُسمح له بإعادته → اعرض كـ "مكتمل"
+    const done = completedIds.has(exam.id) && !studentHasActiveRetakeForExam(exam.id);
     if (expired) {
+      opt.innerText = `${exam.title} (${exam.subject}) — منتهي الموعد`;
       opt.disabled = true;
+    } else if (done) {
+      opt.innerText = `${exam.title} (${exam.subject}) — تم أداؤه`;
+      opt.disabled = true;
+    } else {
+      opt.innerText = `${exam.title} (${exam.subject})`;
     }
     select.appendChild(opt);
   });
@@ -7790,6 +7916,8 @@ function populateExamSelectionList() {
     select.value = systemState.lockedExamId;
     select.disabled = true;
     select.setAttribute("aria-describedby", "direct-exam-lock-note");
+  } else if (lastId) {
+    select.value = lastId;
   }
 }
 
@@ -8397,6 +8525,10 @@ function submitFinishedExam() {
       systemState.currentExam.id
     );
   }
+  systemState.lastCompletedExamId = systemState.currentExam.id;
+  // إظهار رابط الملف الشخصي في شريط التنقل
+  const navProfileLi = document.getElementById("nav-student-profile-link");
+  if (navProfileLi) navProfileLi.classList.remove("hidden");
   saveSystemState(false);
   systemState.currentExamRuntime = null;
   showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
