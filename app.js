@@ -1151,13 +1151,35 @@ document.addEventListener("DOMContentLoaded", () => {
   if (systemState._pendingFirstRunCredentials) {
     const creds = systemState._pendingFirstRunCredentials;
     delete systemState._pendingFirstRunCredentials;
-    alert(
-      "تم إنشاء حساب مدير المنصة لأول مرة.\n\n" +
-      "اسم المستخدم: " + creds.username + "\n" +
-      "كلمة المرور: " + creds.password + "\n" +
-      "رمز الدخول السريع: " + creds.autoEntryCode + "\n\n" +
-      "احفظ هذه البيانات الآن — لن تُعرض مرة أخرى."
-    );
+
+    const hasTeacherLoginToken = !!(getUrlParameter("tlt") && getUrlParameter("tlk"));
+    const isLikelyStudentExamRequest = (() => {
+      try {
+        // الروابط المباشرة للامتحان غالباً تحتوي exam= أو يكون مسار الصفحة ينتهي بمعرف امتحان.
+        if (getUrlParameter("exam")) return true;
+      } catch (e) {}
+      try {
+        const path = String(window.location.pathname || "");
+        if (path.includes("online_exam_portal")) return true;
+        const segs = path.split("/").filter(Boolean);
+        if (segs.length > 0) {
+          const last = segs[segs.length - 1];
+          if (last && last !== "index.html") return true;
+        }
+      } catch (e) {}
+      return false;
+    })();
+
+    // منع كشف بيانات الحساب الأولي للطلاب عند فتح رابط امتحان لأول مرة على جهازهم.
+    if (hasTeacherLoginToken || !isLikelyStudentExamRequest) {
+      alert(
+        "تم إنشاء حساب مدير المنصة لأول مرة.\n\n" +
+        "اسم المستخدم: " + creds.username + "\n" +
+        "كلمة المرور: " + creds.password + "\n" +
+        "رمز الدخول السريع: " + creds.autoEntryCode + "\n\n" +
+        "احفظ هذه البيانات الآن — لن تُعرض مرة أخرى."
+      );
+    }
   }
 
   void (async () => {
