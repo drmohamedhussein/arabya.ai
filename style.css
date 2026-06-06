@@ -475,6 +475,7 @@ body {
   color: var(--text-muted);
   font-size: 1.25rem;
   transition: var(--transition-smooth);
+  pointer-events: none;
 }
 
 .form-control {

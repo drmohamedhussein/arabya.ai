@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.17";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.18";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1208,6 +1208,7 @@ document.addEventListener("DOMContentLoaded", () => {
   setupNavigation();
   ensureResultsQuickFiltersMarkup();
   ensureStudentsQuickFiltersMarkup();
+  setupResultsTableSearchControl();
   setupUIEventListeners();
   setupAntiCheatHandlers();
   setupStudentAutofill();
@@ -10447,6 +10448,7 @@ function resetResultsTableFilters() {
   view.dateFilter = "all";
   view.dateFrom = "";
   view.dateTo = "";
+  view.searchQuery = "";
   view.page = 1;
   const searchInput = document.getElementById("teacher-results-search-input");
   if (searchInput) searchInput.value = "";
@@ -10706,7 +10708,13 @@ function normalizeResultsSearchText(value) {
 
 function getResultsSearchQuery() {
   const input = document.getElementById("teacher-results-search-input");
-  return input ? input.value.trim() : "";
+  const view = getResultsTableViewSettings();
+  if (input) {
+    const value = input.value.trim();
+    view.searchQuery = value;
+    return value;
+  }
+  return String(view.searchQuery || "").trim();
 }
 
 function resultMatchesSearchQuery(res, query) {
@@ -10740,34 +10748,44 @@ function resultMatchesSearchQuery(res, query) {
 
 function filterResultsForSearch(results, query) {
   const list = Array.isArray(results) ? results : [];
-  if (!getResultsSearchQuery() && !query) return list;
-  const activeQuery = query != null ? String(query).trim() : getResultsSearchQuery();
+  const passedQuery = query != null ? String(query).trim() : "";
+  const activeQuery = passedQuery || getResultsSearchQuery();
   if (!activeQuery) return list;
   return list.filter(res => resultMatchesSearchQuery(res, activeQuery));
 }
 
+function scheduleResultsTableSearchRender() {
+  const view = getResultsTableViewSettings();
+  if (!view._searchRenderTimer) view._searchRenderTimer = null;
+  clearTimeout(view._searchRenderTimer);
+  view._searchRenderTimer = setTimeout(() => {
+    view._searchRenderTimer = null;
+    view.page = 1;
+    renderStudentResultsTable();
+  }, 180);
+}
+
 function setupResultsTableSearchControl() {
-  const input = document.getElementById("teacher-results-search-input");
-  const clearBtn = document.getElementById("teacher-results-search-clear");
-  if (!input || input.dataset.bound) return;
-  input.dataset.bound = "1";
-  let timer = null;
-  input.addEventListener("input", () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => {
-      getResultsTableViewSettings().page = 1;
-      renderStudentResultsTable();
-    }, 180);
+  const toolbar = document.getElementById("teacher-results-toolbar");
+  if (!toolbar || toolbar.dataset.searchBound) return;
+  toolbar.dataset.searchBound = "1";
+  toolbar.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!target || target.id !== "teacher-results-search-input") return;
+    getResultsTableViewSettings().searchQuery = target.value.trim();
+    scheduleResultsTableSearchRender();
   });
-  if (clearBtn && !clearBtn.dataset.bound) {
-    clearBtn.dataset.bound = "1";
-    clearBtn.addEventListener("click", () => {
-      input.value = "";
-      getResultsTableViewSettings().page = 1;
-      renderStudentResultsTable();
-      input.focus();
-    });
-  }
+  toolbar.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!target || target.id !== "teacher-results-search-clear") return;
+    const input = document.getElementById("teacher-results-search-input");
+    if (input) input.value = "";
+    const view = getResultsTableViewSettings();
+    view.searchQuery = "";
+    view.page = 1;
+    renderStudentResultsTable();
+    if (input) input.focus();
+  });
 }
 
 function getResultsTableViewSettings() {
@@ -10801,7 +10819,21 @@ function getResultsTableViewSettings() {
     try {
       columnSort = JSON.parse(localStorage.getItem("arabya_results_column_sort") || "null");
     } catch (e) {}
-    systemState.resultsTableView = { page: 1, pageSize, statusFilter, examFilter, dateFilter, dateFrom, dateTo, sortOrder, columnSort };
+    systemState.resultsTableView = {
+      page: 1,
+      pageSize,
+      statusFilter,
+      examFilter,
+      dateFilter,
+      dateFrom,
+      dateTo,
+      sortOrder,
+      columnSort,
+      searchQuery: ""
+    };
+  }
+  if (systemState.resultsTableView.searchQuery == null) {
+    systemState.resultsTableView.searchQuery = "";
   }
   return systemState.resultsTableView;
 }
