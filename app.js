@@ -2566,6 +2566,11 @@ function snapshotExamAnswerKeys_(exams) {
     });
     if (Object.keys(keys).length) map.set(String(exam.id), keys);
   });
+  Object.entries(systemState._examAnswerKeyVault || {}).forEach(([examId, keys]) => {
+    if (!keys || typeof keys !== "object" || !Object.keys(keys).length) return;
+    const existing = map.get(String(examId)) || {};
+    map.set(String(examId), { ...existing, ...keys });
+  });
   return map;
 }
 
@@ -2591,6 +2596,7 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
 
 /** في بوابة الطالب: بيانات السحابة لها الأولوية على الامتحانات الافتراضية المحلية. */
 function mergeRemoteExamsForStudentGate_(localExams, remoteExams) {
+  loadExamAnswerKeyVaultFromStorage();
   if (!Array.isArray(remoteExams) || !remoteExams.length) {
     return Array.isArray(localExams) ? localExams : [];
   }
@@ -2635,7 +2641,50 @@ function captureExamAnswerKeyVault(exam) {
       keyMap[q.id] = q.correctAnswer;
     }
   });
-  systemState._examAnswerKeyVault[exam.id] = keyMap;
+  if (!Object.keys(keyMap).length) return;
+  systemState._examAnswerKeyVault[exam.id] = {
+    ...(systemState._examAnswerKeyVault[exam.id] || {}),
+    ...keyMap
+  };
+  persistExamAnswerKeyVaultToStorage();
+}
+
+function persistExamAnswerKeyVaultToStorage() {
+  if (isTeacherSessionActive()) return;
+  try {
+    localStorage.setItem(
+      ARABYA_EXAM_ANSWER_VAULT_KEY,
+      JSON.stringify(systemState._examAnswerKeyVault || {})
+    );
+  } catch (e) {
+    console.warn("[ARABYA] persistExamAnswerKeyVaultToStorage:", e);
+  }
+}
+
+function loadExamAnswerKeyVaultFromStorage() {
+  try {
+    const raw = localStorage.getItem(ARABYA_EXAM_ANSWER_VAULT_KEY) || "";
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return;
+    systemState._examAnswerKeyVault = {
+      ...(systemState._examAnswerKeyVault || {}),
+      ...parsed
+    };
+  } catch (e) {
+    console.warn("[ARABYA] loadExamAnswerKeyVaultFromStorage:", e);
+  }
+}
+
+function hasClientGradingKeysForExam(examId) {
+  const targetId = String(examId || "").trim();
+  if (!targetId) return false;
+  const vault = systemState._examAnswerKeyVault?.[targetId];
+  if (vault && Object.keys(vault).length > 0) return true;
+  const fullExam = getFullExamById(targetId);
+  return (fullExam?.questions || []).some(
+    q => q && q.type !== "essay" && q.correctAnswer !== undefined
+  );
 }
 
 function getQuestionCorrectAnswer(examId, questionId) {
@@ -2659,7 +2708,21 @@ function resolveClientQuestionsForGrading_(exam, presentedQuestions) {
 
 function loadExamsForCurrentSession(savedExamsJson) {
   let fullExams = [];
-  if (savedExamsJson) {
+  if (!isTeacherSessionActive()) {
+    loadExamAnswerKeyVaultFromStorage();
+    try {
+      const vaultRaw = localStorage.getItem(ARABYA_STUDENT_EXAM_VAULT_KEY) || "";
+      if (vaultRaw) {
+        const vaultExams = JSON.parse(vaultRaw);
+        if (Array.isArray(vaultExams) && vaultExams.length) {
+          fullExams = vaultExams;
+        }
+      }
+    } catch (e) {
+      console.warn("[ARABYA] loadExamsForCurrentSession vault:", e);
+    }
+  }
+  if (!fullExams.length && savedExamsJson) {
     try {
       fullExams = JSON.parse(savedExamsJson);
     } catch (e) {
@@ -2673,6 +2736,9 @@ function loadExamsForCurrentSession(savedExamsJson) {
   }
   systemState._teacherExamsVault = fullExams;
   systemState.exams = fullExams.map(stripAnswerKeysFromExam);
+  fullExams.forEach(exam => {
+    if (exam?.id) captureExamAnswerKeyVault({ id: exam.id });
+  });
 }
 
 function persistExamsToLocalStorage() {
@@ -2681,13 +2747,15 @@ function persistExamsToLocalStorage() {
   localStorage.setItem("arabya_exams_db", JSON.stringify(fullExams));
 }
 
-/** يحفظ امتحانات بوابة الطالب بعد جلبها من السحابة حتى لا تُمسح عند إعادة التحميل المحلي. */
+/** يحفظ امتحانات بوابة الطالب (مع مفاتيح التصحيح) بعد جلبها من السحابة. */
 function persistStudentGateExamsToLocalStorage() {
   if (isTeacherSessionActive()) return;
   const vault = systemState._teacherExamsVault;
   if (!Array.isArray(vault) || !vault.length) return;
   try {
+    localStorage.setItem(ARABYA_STUDENT_EXAM_VAULT_KEY, JSON.stringify(vault));
     localStorage.setItem("arabya_exams_db", JSON.stringify(vault.map(stripAnswerKeysFromExam)));
+    persistExamAnswerKeyVaultToStorage();
   } catch (e) {
     console.warn("[ARABYA] persistStudentGateExamsToLocalStorage:", e);
   }
@@ -5067,6 +5135,8 @@ function normalizeArabyaWebAppUrl(rawUrl) {
 const ARABYA_API_SECRET_QUERY = "apiSecret";
 const ARABYA_TEACHER_SYNC_CREDENTIALS_KEY = "arabya_teacher_sync_credentials";
 const ARABYA_TEACHER_SYNC_REGISTRY_KEY = "arabya_teacher_sync_registry";
+const ARABYA_STUDENT_EXAM_VAULT_KEY = "arabya_student_exam_vault_db";
+const ARABYA_EXAM_ANSWER_VAULT_KEY = "arabya_exam_answer_vault_db";
 
 function loadTeacherSyncCredentials() {
   try {
@@ -5347,10 +5417,15 @@ function buildSaveBackupPayload(reason) {
     : {
       teachers: systemState.teachers,
       students: systemState.students,
-      exams: systemState.exams,
+      exams: isTeacherSessionActive() ? (systemState._teacherExamsVault || systemState.exams) : undefined,
       results: systemState.results,
       examDeviceRegistry: loadExamDeviceRegistry()
     };
+  if (!isTeacherSessionActive() && fullData && typeof fullData === "object") {
+    delete fullData.exams;
+    delete fullData.teachers;
+    delete fullData.questionBanks;
+  }
   const clientReason = String(reason || "push");
   let data = fullData;
   data._clientReason = clientReason;
@@ -9762,7 +9837,12 @@ async function submitFinishedExam() {
   if (navProfileLi) navProfileLi.classList.remove("hidden");
   saveSystemState(false);
   systemState.currentExamRuntime = null;
-  showStudentResultView("جاري حفظ النتيجة...", hasEssay, "…", examTotalScore);
+  const canGradeLocally = hasClientGradingKeysForExam(systemState.currentExam.id);
+  if (canGradeLocally) {
+    showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
+  } else {
+    showStudentResultView("جاري التصحيح على الخادم...", hasEssay, "…", examTotalScore);
+  }
 
   const syncOutcome = await sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
   const displayScaled = getDisplayScaledScoreFromResult(resultObj, scaledScore);

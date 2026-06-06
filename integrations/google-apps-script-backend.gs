@@ -1156,8 +1156,16 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
       db.results = patch.results.map(function(item) {
         return JSON.parse(JSON.stringify(item || {}));
       });
+    } else if (collection === "exams") {
+      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
+    } else if (collection === "exams") {
+      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
     } else {
-      db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
+      if (collection === "exams") {
+        db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
+      } else {
+        db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
+      }
     }
   });
   if (db.deletedStudentKeys.length) {
@@ -1459,6 +1467,44 @@ function buildArabyaStudentsForClient_(db, sheetResults) {
     if (!duplicate) out.push(JSON.parse(JSON.stringify(backupRow)));
   }
   return out;
+}
+
+
+function mergeArabyaExamQuestionsPreservingAnswerKeys_(baseQuestions, patchQuestions) {
+  var byId = {};
+  (baseQuestions || []).forEach(function(q) {
+    if (q && q.id !== undefined && q.id !== null) byId[String(q.id)] = q;
+  });
+  (patchQuestions || []).forEach(function(pq) {
+    if (!pq || pq.id === undefined || pq.id === null) return;
+    var id = String(pq.id);
+    var base = byId[id] || {};
+    var merged = deepMergeArabyaObjects_(base, pq);
+    if ((merged.correctAnswer === undefined || merged.correctAnswer === null || merged.correctAnswer === "")
+      && base.correctAnswer !== undefined && base.correctAnswer !== null && base.correctAnswer !== "") {
+      merged.correctAnswer = base.correctAnswer;
+    }
+    byId[id] = merged;
+  });
+  return Object.keys(byId).map(function(key) { return byId[key]; });
+}
+
+function mergeArabyaExamsPreservingAnswerKeys_(current, incoming) {
+  var map = {};
+  (current || []).forEach(function(item) {
+    map[getArabyaRecordKey_(item, "exams")] = item;
+  });
+  (incoming || []).forEach(function(item) {
+    if (!item) return;
+    var key = getArabyaRecordKey_(item, "exams");
+    var merged = deepMergeArabyaObjects_(map[key] || {}, item);
+    merged.questions = mergeArabyaExamQuestionsPreservingAnswerKeys_(
+      (map[key] && map[key].questions) || [],
+      (item && item.questions) || []
+    );
+    map[key] = merged;
+  });
+  return Object.keys(map).map(function(key) { return map[key]; });
 }
 
 function mergeArabyaCollection_(current, incoming, collection) {
