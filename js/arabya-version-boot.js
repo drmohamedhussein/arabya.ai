@@ -26,6 +26,16 @@
     if (meta && meta.content) candidates.push(String(meta.content).trim());
     var htmlBuild = document.documentElement && document.documentElement.getAttribute("data-arabya-build");
     if (htmlBuild) candidates.push(String(htmlBuild).trim());
+    var scripts = document.getElementsByTagName("script");
+    for (var i = 0; i < scripts.length; i++) {
+      var src = scripts[i].getAttribute("src") || "";
+      if (src.indexOf("app.js") === -1) continue;
+      var match = src.match(/[?&]v=([^&]+)/);
+      if (match && match[1]) {
+        candidates.push(decodeURIComponent(match[1]).trim());
+        break;
+      }
+    }
     if (global.ARABYA_APP_BUILD_VERSION) candidates.push(String(global.ARABYA_APP_BUILD_VERSION).trim());
     candidates = candidates.filter(Boolean);
     if (!candidates.length) return "";

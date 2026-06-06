@@ -5,13 +5,10 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.18";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
-window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
-window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
 function compareAppVersionStrings(a, b) {
   const partsA = String(a || "").trim().split(".").map(part => parseInt(part, 10) || 0);
@@ -29,6 +26,34 @@ function pickLatestAppVersion(...candidates) {
   if (!list.length) return "";
   return list.reduce((best, current) => (compareAppVersionStrings(current, best) > 0 ? current : best), list[0]);
 }
+
+function resolveEmbeddedAppBuildVersion(fallbackVersion) {
+  const fallback = String(fallbackVersion || "2026.06.06.18").trim();
+  try {
+    const fromMeta = document.querySelector('meta[name="arabya-app-version"]')?.content
+      || document.documentElement?.getAttribute("data-arabya-build")
+      || "";
+    let fromScript = "";
+    const scripts = document.getElementsByTagName("script");
+    for (let i = 0; i < scripts.length; i++) {
+      const src = scripts[i].getAttribute("src") || "";
+      if (!src.includes("app.js")) continue;
+      const match = src.match(/[?&]v=([^&]+)/);
+      if (match && match[1]) {
+        fromScript = decodeURIComponent(match[1]).trim();
+        break;
+      }
+    }
+    return pickLatestAppVersion(fromMeta, fromScript, fallback) || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.18");
+window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
+window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
+
 
 function readAppVersionFromLocalStorageConfig() {
   try {
@@ -9431,7 +9456,23 @@ async function validateStudentAndStart() {
     alert("تعذّر حفظ بيانات الطالب. أعد المحاولة.");
     return;
   }
+  const pendingExamStudent = {
+    name: studentRecord.name,
+    id: studentRecord.id || "",
+    code: studentRecord.code || "",
+    email: studentRecord.email || "",
+    mobile: studentRecord.mobile || "",
+    studentKey: studentRecord.studentKey || getStudentLookupKey(studentRecord),
+    timestamp: studentRecord.timestamp || new Date().toLocaleDateString("ar-EG")
+  };
   saveStudentsToLocalStorage();
+  if (getArabyaWebAppUrls().length > 0) {
+    try {
+      await syncStudentRecordToCloud(studentRecord);
+    } catch (studentSyncErr) {
+      console.warn("[ARABYA] exam_start student cloud sync failed:", studentSyncErr);
+    }
+  }
 
   systemState.currentStudent = {
     name: studentRecord.name,
@@ -9482,6 +9523,7 @@ async function validateStudentAndStart() {
     recordPreExamSyncDuration(performance.now() - syncStarted, examId);
     studentExamGatePrefetchPromise = null;
     reloadSystemStateFromLocalStorage({ preserveGateExams: true });
+    upsertStudentRecord(pendingExamStudent, pendingExamStudent.studentKey);
     saveStudentsToLocalStorage();
 
     selectedExam = systemState.exams.find(e => e.id === examId);
@@ -12066,15 +12108,25 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
   if (!syncUrl) {
     return { ok: true, attemptToken: "" };
   }
+  const student = systemState.currentStudent || {};
   const payload = {
     action: "register_exam_attempt",
     examId,
     studentLookupKey,
-    studentName: systemState.currentStudent?.name || "",
+    studentName: student.name || "",
     deviceFingerprint: profile?.deviceFingerprint || "",
     deviceId: profile?.deviceId || "",
     clientIp: profile?.clientIp || "",
-    deviceMeta: profile?.deviceMeta || buildResultDeviceFields(profile).deviceMeta || {}
+    deviceMeta: profile?.deviceMeta || buildResultDeviceFields(profile).deviceMeta || {},
+    studentRecord: {
+      name: student.name || "",
+      id: student.id || "",
+      code: student.accessCode || student.code || "",
+      email: student.email || "",
+      mobile: student.mobile || "",
+      studentKey: student.studentKey || studentLookupKey,
+      timestamp: student.timestamp || new Date().toLocaleDateString("ar-EG")
+    }
   };
   let response;
   try {

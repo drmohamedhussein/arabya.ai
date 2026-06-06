@@ -34,4 +34,9 @@ assert.strictEqual(
   "2026.06.02.20"
 );
 
+const appSource = require("fs").readFileSync(require("path").join(__dirname, "../app.js"), "utf8");
+assert.ok(appSource.includes("function resolveEmbeddedAppBuildVersion"));
+assert.ok(appSource.includes('meta[name="arabya-app-version"]'));
+assert.ok(appSource.includes("2026.06.06.18"));
+
 console.log("App version tests passed.");

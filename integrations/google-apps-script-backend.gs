@@ -277,7 +277,11 @@ function isArabyaPostActionAuthorized_(action, e, data) {
     "log_cheat_event": true,
     "add_result": true
   };
-  if (publicStudentActions[String(action || "").trim()]) return true;
+  var normalizedAction = String(action || "").trim();
+  if (publicStudentActions[normalizedAction]) return true;
+  if (normalizedAction === "save_entity" && String(data.collection || "").trim() === "students") {
+    return !!(data.record && String(data.record.name || "").trim());
+  }
   return isArabyaApiAuthorized_(e, data);
 }
 
@@ -657,6 +661,12 @@ function registerArabyaExamAttempt_(data) {
   };
   db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, { bindings: [binding] });
   mergeArabyaDatabase_({ examDeviceRegistry: db.examDeviceRegistry }, "register_exam_attempt");
+  if (data.studentRecord && typeof data.studentRecord === "object") {
+    var studentPatch = normalizeArabyaStudentRecordForMerge_(data.studentRecord);
+    if (studentPatch && studentPatch.name) {
+      mergeArabyaDatabase_({ students: [studentPatch] }, "register_exam_attempt:student");
+    }
+  }
   return { attemptToken: token, expiresIn: 14400 };
 }
 
@@ -1299,6 +1309,28 @@ function getArabyaStudentLookupKey_(student) {
   if (id) return "id:" + id;
   var name = String(student.name || "").trim().replace(/\s+/g, " ").toLowerCase();
   return name ? "name:" + name : String(student.studentKey || "");
+}
+
+function normalizeArabyaStudentRecordForMerge_(record) {
+  if (!record || typeof record !== "object") return null;
+  var name = String(record.name || "").trim();
+  if (!name) return null;
+  var code = sanitizeArabyaStudentCode_(record.code || record.accessCode || "");
+  var id = normalizeArabyaStudentId_(record.id || "");
+  var studentKey = String(record.studentKey || "").trim() || getArabyaStudentLookupKey_({
+    name: name,
+    id: id,
+    code: code
+  }) || Utilities.getUuid();
+  return {
+    name: name,
+    id: id,
+    code: code,
+    email: String(record.email || "").trim(),
+    mobile: String(record.mobile || "").trim(),
+    studentKey: studentKey,
+    timestamp: String(record.timestamp || "").trim() || new Date().toLocaleDateString("ar-EG")
+  };
 }
 
 function isArabyaStudentDeleted_(student, deletedKeys) {
