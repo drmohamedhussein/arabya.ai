@@ -39,6 +39,6 @@ assert.ok(appSource.includes("function getStudentAnswerForQuestion"));
 assert.ok(appSource.includes("function hasClientGradingKeysForExam(examId, presentedQuestions)"));
 assert.ok(appSource.includes("Number(studentAns) === Number(correctAnswer)"));
 assert.ok(appSource.includes("preserveSyncStatus"));
-assert.ok(appSource.includes("2026.06.06.20"));
+assert.ok(appSource.includes("2026.06.06.21"));
 
 console.log("App version tests passed.");

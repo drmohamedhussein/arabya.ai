@@ -1199,6 +1199,8 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
       db.results = patch.results.map(function(item) {
         return JSON.parse(JSON.stringify(item || {}));
       });
+    } else if (collection === "exams") {
+      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
     } else {
       db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
     }
@@ -1502,6 +1504,49 @@ function buildArabyaStudentsForClient_(db, sheetResults) {
     if (!duplicate) out.push(JSON.parse(JSON.stringify(backupRow)));
   }
   return out;
+}
+
+
+function mergeArabyaExamQuestionsPreservingAnswerKeys_(baseQuestions, patchQuestions) {
+  var base = Array.isArray(baseQuestions) ? baseQuestions : [];
+  var patch = Array.isArray(patchQuestions) ? patchQuestions : [];
+  if (!patch.length) return base.slice();
+  if (!base.length) return patch.slice();
+  var byId = {};
+  base.forEach(function(q) {
+    if (!q || q.id == null) return;
+    byId[String(q.id)] = q;
+  });
+  return patch.map(function(q) {
+    if (!q || q.id == null) return q;
+    var existing = byId[String(q.id)] || {};
+    var merged = Object.assign({}, existing, q);
+    if ((merged.correctAnswer === undefined || merged.correctAnswer === null) &&
+        existing.correctAnswer !== undefined && existing.correctAnswer !== null) {
+      merged.correctAnswer = existing.correctAnswer;
+    }
+    return merged;
+  });
+}
+
+function mergeArabyaExamsPreservingAnswerKeys_(current, incoming) {
+  var map = {};
+  (current || []).forEach(function(item) {
+    if (!item) return;
+    map[getArabyaRecordKey_(item, "exams")] = item;
+  });
+  (incoming || []).forEach(function(item) {
+    if (!item) return;
+    var key = getArabyaRecordKey_(item, "exams");
+    var existing = map[key] || {};
+    var merged = deepMergeArabyaObjects_(existing, item);
+    if (Array.isArray(item.questions)) {
+      var baseQuestions = Array.isArray(existing.questions) ? existing.questions : [];
+      merged.questions = mergeArabyaExamQuestionsPreservingAnswerKeys_(baseQuestions, item.questions);
+    }
+    map[key] = merged;
+  });
+  return Object.keys(map).map(function(k) { return map[k]; });
 }
 
 function mergeArabyaCollection_(current, incoming, collection) {

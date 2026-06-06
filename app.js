@@ -28,7 +28,7 @@ function pickLatestAppVersion(...candidates) {
 }
 
 function resolveEmbeddedAppBuildVersion(fallbackVersion) {
-  const fallback = String(fallbackVersion || "2026.06.06.20").trim();
+  const fallback = String(fallbackVersion || "2026.06.06.21").trim();
   try {
     const fromMeta = document.querySelector('meta[name="arabya-app-version"]')?.content
       || document.documentElement?.getAttribute("data-arabya-build")
@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.20");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.21");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2650,6 +2650,7 @@ function mergeRemoteExamsForStudentGate_(localExams, remoteExams) {
 function isTeacherSessionActive() {
   return !!(systemState.activeTeacher && systemState.activeView === "teacher-dashboard-view");
 }
+window.isTeacherSessionActive = isTeacherSessionActive;
 
 function getFullExamById(examId) {
   const target = String(examId || "").trim();
@@ -2706,6 +2707,30 @@ function loadExamAnswerKeyVaultFromStorage() {
   }
 }
 
+
+function snapshotAnswerKeysFromExamQuestions_(exam) {
+  const keys = {};
+  (exam?.questions || []).forEach(q => {
+    if (q && q.id != null && q.correctAnswer !== undefined && q.correctAnswer !== null) {
+      keys[String(q.id)] = q.correctAnswer;
+    }
+  });
+  return keys;
+}
+
+function persistTeacherExamAnswerKeysFromExam_(exam) {
+  if (!exam?.id || !isTeacherSessionActive()) return false;
+  const keys = snapshotAnswerKeysFromExamQuestions_(exam);
+  if (!Object.keys(keys).length) return false;
+  applyExamGradingKeysToVault(exam.id, keys);
+  try {
+    const store = JSON.parse(localStorage.getItem(ARABYA_TEACHER_EXAM_KEYS_STORE) || "{}");
+    store[String(exam.id)] = keys;
+    localStorage.setItem(ARABYA_TEACHER_EXAM_KEYS_STORE, JSON.stringify(store));
+  } catch (e) {}
+  return true;
+}
+
 function applyExamGradingKeysToVault(examId, gradingKeys) {
   const targetId = String(examId || "").trim();
   if (!targetId || !gradingKeys || typeof gradingKeys !== "object") return false;
@@ -2730,9 +2755,30 @@ function applyExamGradingKeysToVault(examId, gradingKeys) {
   return true;
 }
 
+async function fetchExamGradingKeysViaGet_(url, examId) {
+  const fetchUrl = buildArabyaCloudActionUrl(url, "get_exam_grading_keys", { examId, exam: examId });
+  if (!fetchUrl) return null;
+  try {
+    const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const body = await res.json();
+    return body && body.status === "success" ? body : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function fetchExamGradingKeysFromCloud(examId) {
   const targetId = String(examId || "").trim();
   if (!targetId) return false;
+  loadExamAnswerKeyVaultFromStorage();
+  try {
+    const teacherStore = JSON.parse(localStorage.getItem(ARABYA_TEACHER_EXAM_KEYS_STORE) || "{}");
+    const storedKeys = teacherStore[targetId];
+    if (storedKeys && typeof storedKeys === "object" && Object.keys(storedKeys).length) {
+      if (applyExamGradingKeysToVault(targetId, storedKeys)) return true;
+    }
+  } catch (e) {}
   const urlList = getArabyaWebAppUrls();
   if (!urlList.length) return false;
   for (const url of urlList) {
@@ -2745,10 +2791,38 @@ async function fetchExamGradingKeysFromCloud(examId) {
         return true;
       }
     } catch (err) {
-      console.warn("[ARABYA] get_exam_grading_keys failed:", url, err);
+      console.warn("[ARABYA] get_exam_grading_keys POST failed:", url, err);
+    }
+    try {
+      const getBody = await fetchExamGradingKeysViaGet_(url, targetId);
+      if (applyExamGradingKeysToVault(targetId, getBody?.gradingKeys)) {
+        return true;
+      }
+    } catch (getErr) {
+      console.warn("[ARABYA] get_exam_grading_keys GET failed:", url, getErr);
     }
   }
-  return false;
+  return hasClientGradingKeysForExam(targetId);
+}
+
+async function ensureExamGradingKeysReady(examId, presentedQuestions) {
+  const targetId = String(examId || "").trim();
+  if (!targetId) return false;
+  loadExamAnswerKeyVaultFromStorage();
+  captureExamAnswerKeyVault({ id: targetId });
+  if (hasClientGradingKeysForExam(targetId, presentedQuestions)) return true;
+  const fullExam = getFullExamById(targetId);
+  const localKeys = snapshotAnswerKeysFromExamQuestions_(fullExam);
+  if (Object.keys(localKeys).length && applyExamGradingKeysToVault(targetId, localKeys)) {
+    return true;
+  }
+  try {
+    if (await fetchExamGradingKeysFromCloud(targetId)) return true;
+  } catch (e) {
+    console.warn("[ARABYA] ensureExamGradingKeysReady:", e);
+  }
+  captureExamAnswerKeyVault({ id: targetId });
+  return hasClientGradingKeysForExam(targetId, presentedQuestions);
 }
 
 function getStudentAnswerForQuestion(answers, questionId) {
@@ -8586,7 +8660,7 @@ function renderQuestionsForEdit(exam) {
       `;
     } else if (q.type === "boolean") {
       q.options.forEach((opt, optIdx) => {
-        const isCorrect = optIdx === q.correctAnswer;
+        const isCorrect = optIdx === Number(q.correctAnswer);
         const optGroup = document.createElement("div");
         optGroup.className = "form-group";
         optGroup.style.display = "flex";
@@ -8613,7 +8687,7 @@ function renderQuestionsForEdit(exam) {
       });
     } else {
       q.options.forEach((opt, optIdx) => {
-        const isCorrect = optIdx === q.correctAnswer;
+        const isCorrect = optIdx === Number(q.correctAnswer);
         const optGroup = document.createElement("div");
         optGroup.className = "form-group";
         optGroup.style.display = "flex";
@@ -8841,6 +8915,8 @@ async function saveAllEditedQuestions() {
   }
   sanitizeQuestionConfig(exam);
   touchExamContentRevision(exam);
+  syncTeacherExamsVaultFromState();
+  persistTeacherExamAnswerKeysFromExam_(exam);
   saveSystemState(false);
 
   let cloudOk = false;
@@ -9626,7 +9702,7 @@ async function validateStudentAndStart() {
     }
     try {
       await waitPreExamCountdownAndSync(overlay, syncPromise, gateAlreadyReady ? Math.min(estimateMs, 1200) : estimateMs);
-      await fetchExamGradingKeysFromCloud(examId);
+      await ensureExamGradingKeysReady(examId, selectedExam?.questions || []);
     } catch (prepErr) {
       console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
       overlay.close();
@@ -9730,11 +9806,8 @@ async function validateStudentAndStart() {
   }
 
   systemState.currentExam = selectedExam;
+  await ensureExamGradingKeysReady(selectedExam.id, selectedExam.questions || []);
   captureExamAnswerKeyVault(selectedExam);
-  if (!hasClientGradingKeysForExam(selectedExam.id, selectedExam.questions)) {
-    try { await fetchExamGradingKeysFromCloud(selectedExam.id); } catch (e) {}
-    captureExamAnswerKeyVault(selectedExam);
-  }
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
   systemState.currentExamRuntime = calculateRuntimeExamMeta(systemState.shuffledQuestions);
@@ -10057,6 +10130,7 @@ async function submitFinishedExam() {
   localStorage.removeItem("arabya_active_student_session");
 
   const studentAnswersMap = { ...systemState.studentAnswers };
+  await ensureExamGradingKeysReady(systemState.currentExam?.id, systemState.shuffledQuestions);
   const canGradeLocally = hasClientGradingKeysForExam(
     systemState.currentExam?.id,
     systemState.shuffledQuestions
