@@ -25,14 +25,15 @@ test("student exam: silent cloud pull does not toast students", () => {
   assert.ok(appSource.includes('recordCloudSyncOutcome(true, "جلب من السحابة", { silent })'));
 });
 
-test("student exam: direct link opens immediately with background sync", () => {
+test("student exam: direct link waits for cloud exam before showing title", () => {
   const block = appSource.slice(
     appSource.indexOf("if (examId) {"),
     appSource.indexOf("} else if (hasStudentGateCloudContext()")
   );
-  assert.ok(block.includes("void prefetchStudentExamGateData"));
-  assert.ok(!block.includes("forcePull: true"));
+  assert.ok(block.includes("await ensureStudentGateExamReady"));
   assert.ok(block.includes("navigateToView(\"student-login-view\")"));
+  assert.ok(appSource.includes("function mergeRemoteExamsForStudentGate_"));
+  assert.ok(appSource.includes("جاري تحميل بيانات الامتحان من السحابة"));
 });
 
 test("student exam: preserves answer keys and waits for server grading", () => {
