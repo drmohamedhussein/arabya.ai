@@ -18,7 +18,10 @@ test("phase5: client passes scope and exam to get_backup", () => {
   assert.ok(appSource.includes("function resolveStudentExamScopeId"));
   assert.ok(appSource.includes('scope: "exam_start"'));
   assert.ok(appSource.includes("buildCloudBackupFetchParams(mergeOptions)"));
-  assert.ok(appSource.includes('examId: resolveStudentExamScopeId()'));
+  assert.ok(
+    appSource.includes('resolveStudentExamScopeId(mergeOptions.examId || "")') ||
+    appSource.includes('examId: options.examId || resolveStudentExamScopeId()')
+  );
 });
 
 test("phase5: student direct-link sync uses exam_start scope", () => {

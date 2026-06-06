@@ -205,6 +205,9 @@ function doGet(e) {
       if (!checkArabyaRateLimit_(e, null, "get_backup", scope)) {
         return rateLimitedArabya_();
       }
+      if (scope === "exam_start" && !examId) {
+        return jsonArabya_({ status: "error", code: "exam_required", message: "exam parameter required for exam_start scope" });
+      }
       var db = readArabyaDatabase_();
       var sheetRowCount = readArabyaResultsFromSheet_().length;
       db.results = buildArabyaResultsForClient_(db);

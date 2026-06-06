@@ -2681,6 +2681,18 @@ function persistExamsToLocalStorage() {
   localStorage.setItem("arabya_exams_db", JSON.stringify(fullExams));
 }
 
+/** يحفظ امتحانات بوابة الطالب بعد جلبها من السحابة حتى لا تُمسح عند إعادة التحميل المحلي. */
+function persistStudentGateExamsToLocalStorage() {
+  if (isTeacherSessionActive()) return;
+  const vault = systemState._teacherExamsVault;
+  if (!Array.isArray(vault) || !vault.length) return;
+  try {
+    localStorage.setItem("arabya_exams_db", JSON.stringify(vault.map(stripAnswerKeysFromExam)));
+  } catch (e) {
+    console.warn("[ARABYA] persistStudentGateExamsToLocalStorage:", e);
+  }
+}
+
 function syncTeacherExamsVaultFromState() {
   if (!isTeacherSessionActive()) return;
   systemState._teacherExamsVault = JSON.parse(JSON.stringify(systemState.exams || []));
@@ -4265,14 +4277,29 @@ function refreshTeacherDashboardViews(options = {}) {
 
 window.refreshTeacherDashboardViews = refreshTeacherDashboardViews;
 
-function reloadSystemStateFromLocalStorage() {
+function reloadSystemStateFromLocalStorage(options = {}) {
+  const preserveGateExams = !!(
+    options.preserveGateExams &&
+    (systemState.studentGateExamReady || (systemState._teacherExamsVault && systemState._teacherExamsVault.length))
+  );
+  const savedGateState = preserveGateExams
+    ? {
+        vault: systemState._teacherExamsVault,
+        exams: systemState.exams,
+        answerVault: systemState._examAnswerKeyVault,
+        ready: systemState.studentGateExamReady,
+        syncedId: systemState.studentGateSyncedExamId
+      }
+    : null;
   try {
     const teachers = localStorage.getItem("arabya_teachers_db");
     if (teachers) systemState.teachers = JSON.parse(teachers);
   } catch (e) { console.error("reloadSystemStateFromLocalStorage: teachers", e); }
-  try {
-    loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
-  } catch (e) { console.error("reloadSystemStateFromLocalStorage: exams", e); }
+  if (!preserveGateExams) {
+    try {
+      loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
+    } catch (e) { console.error("reloadSystemStateFromLocalStorage: exams", e); }
+  }
   try {
     const students = localStorage.getItem("arabya_students_db");
     if (students) systemState.students = JSON.parse(students);
@@ -4287,6 +4314,13 @@ function reloadSystemStateFromLocalStorage() {
   applyDeletionTombstonesToLocalState();
   ensureStudentsDataShape();
   ensureExamsDataShape();
+  if (savedGateState) {
+    systemState._teacherExamsVault = savedGateState.vault;
+    systemState.exams = savedGateState.exams;
+    systemState._examAnswerKeyVault = savedGateState.answerVault;
+    systemState.studentGateExamReady = savedGateState.ready;
+    systemState.studentGateSyncedExamId = savedGateState.syncedId;
+  }
 }
 
 /** كل عمليات السحابة للمعلم الحالي تستخدم رابطاً موحّداً واحداً (الخيار 2). */
@@ -4947,9 +4981,16 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
       systemState.exams = (systemState._teacherExamsVault || []).map(stripAnswerKeysFromExam);
       const lockedId = systemState.lockedExamId || resolveStudentExamScopeId();
       if (lockedId) {
-        captureExamAnswerKeyVault({ id: lockedId });
-        systemState.studentGateExamReady = true;
-        systemState.studentGateSyncedExamId = String(lockedId);
+        const gateExamLoaded = (systemState._teacherExamsVault || []).some(
+          exam => exam && String(exam.id) === String(lockedId)
+        );
+        if (gateExamLoaded) {
+          captureExamAnswerKeyVault({ id: lockedId });
+          systemState.studentGateExamReady = true;
+          systemState.studentGateSyncedExamId = String(lockedId);
+        } else {
+          systemState.studentGateExamReady = false;
+        }
       }
     }
   }
@@ -4987,6 +5028,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   ensureExamsDataShape();
   if (examStartOnly) {
     systemState.exams = (systemState.exams || []).map(stripAnswerKeysFromExam);
+    persistStudentGateExamsToLocalStorage();
   } else if (isTeacherSessionActive()) {
     syncTeacherExamsVaultFromState();
   }
@@ -5215,7 +5257,8 @@ function buildCloudBackupFetchParams(mergeOptions = {}) {
   if (mergeOptions.scope !== "exam_start") return {};
   const params = { scope: "exam_start" };
   const examId = resolveStudentExamScopeId(mergeOptions.examId || "");
-  if (examId) params.exam = examId;
+  if (!examId) return null;
+  params.exam = examId;
   return params;
 }
 
@@ -5701,6 +5744,7 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
 
 const PRE_EXAM_SYNC_ESTIMATE_KEY = "arabya_pre_exam_sync_estimate_ms";
 const PRE_EXAM_SYNC_AT_KEY = "arabya_pre_exam_sync_at";
+const PRE_EXAM_SYNC_META_KEY = "arabya_pre_exam_sync_meta";
 const DEFAULT_PRE_EXAM_SYNC_MS = 2000;
 const MIN_PRE_EXAM_SYNC_MS = 0;
 const MAX_PRE_EXAM_SYNC_MS = 8000;
@@ -5718,22 +5762,47 @@ function getPreExamSyncEstimateMs() {
   return DEFAULT_PRE_EXAM_SYNC_MS;
 }
 
-function recordPreExamSyncDuration(durationMs) {
+function recordPreExamSyncDuration(durationMs, examId = "") {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return;
   const prev = getPreExamSyncEstimateMs();
   const blended = Math.round(prev * 0.65 + durationMs * 0.35);
   const clamped = Math.max(MIN_PRE_EXAM_SYNC_MS, Math.min(MAX_PRE_EXAM_SYNC_MS, blended));
+  const resolvedExamId = String(
+    examId || systemState.studentGateSyncedExamId || resolveStudentExamScopeId() || ""
+  ).trim();
   try {
     localStorage.setItem(PRE_EXAM_SYNC_ESTIMATE_KEY, String(clamped));
     localStorage.setItem(PRE_EXAM_SYNC_AT_KEY, String(Date.now()));
+    localStorage.setItem(PRE_EXAM_SYNC_META_KEY, JSON.stringify({
+      at: Date.now(),
+      examId: resolvedExamId
+    }));
   } catch (e) {}
 }
 
+function isRecentPreExamSyncForExam(examId) {
+  const targetId = String(examId || "").trim();
+  if (!targetId) return false;
+  try {
+    const raw = localStorage.getItem(PRE_EXAM_SYNC_META_KEY) || "";
+    const meta = raw ? JSON.parse(raw) : null;
+    if (meta && meta.at && meta.examId) {
+      return Date.now() - Number(meta.at) < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS
+        && String(meta.examId) === targetId;
+    }
+  } catch (e) {}
+  return false;
+}
+
 async function fetchCloudBackupJson_(rawUrl, timeoutMs, mergeOptions = {}) {
+  const fetchParams = buildCloudBackupFetchParams(mergeOptions);
+  if (mergeOptions.scope === "exam_start" && fetchParams === null) {
+    return { _fetchFailed: true, code: "exam_required", message: "exam parameter required for exam_start scope" };
+  }
   const fetchUrl = buildArabyaCloudActionUrl(
     rawUrl,
     "get_backup",
-    buildCloudBackupFetchParams(mergeOptions)
+    fetchParams || {}
   );
   if (!fetchUrl) return null;
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -5813,11 +5882,11 @@ async function ensureStudentGateExamReady(examId) {
       silent: true,
       scope: "exam_start",
       examId: targetId,
-      timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS,
+      timeoutMs: Math.min(STUDENT_GATE_SYNC_TIMEOUT_MS * 2, 9000),
       forcePull: true
     });
   }
-  recordPreExamSyncDuration(performance.now() - started);
+  recordPreExamSyncDuration(performance.now() - started, targetId);
   systemState.studentGateExamReady = !!result.ok;
   systemState.studentGateSyncedExamId = targetId;
   return result;
@@ -5828,21 +5897,17 @@ function prefetchStudentExamGateData(options = {}) {
   if (getArabyaWebAppUrls().length === 0) return Promise.resolve({ ok: false, reason: "no_url" });
   const forcePull = !!options.forcePull;
   const targetId = String(options.examId || resolveStudentExamScopeId() || "").trim();
+  if (!targetId) return Promise.resolve({ ok: false, reason: "no_exam" });
   if (
     !forcePull &&
     systemState.studentGateExamReady &&
     systemState.studentGateSyncedExamId &&
-    (!targetId || systemState.studentGateSyncedExamId === targetId)
+    systemState.studentGateSyncedExamId === targetId
   ) {
     return Promise.resolve({ ok: true, reason: "ready" });
   }
-  if (!forcePull) {
-    try {
-      const lastAt = parseInt(localStorage.getItem(PRE_EXAM_SYNC_AT_KEY) || "0", 10);
-      if (Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS) {
-        return Promise.resolve({ ok: true, reason: "recent" });
-      }
-    } catch (e) {}
+  if (!forcePull && isRecentPreExamSyncForExam(targetId)) {
+    return Promise.resolve({ ok: true, reason: "recent" });
   }
   if (studentExamGatePrefetchPromise) return studentExamGatePrefetchPromise;
   const started = performance.now();
@@ -5853,7 +5918,7 @@ function prefetchStudentExamGateData(options = {}) {
     timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS,
     forcePull: !!options.forcePull
   }).then(result => {
-    recordPreExamSyncDuration(performance.now() - started);
+    recordPreExamSyncDuration(performance.now() - started, targetId);
     if (result?.ok && targetId) {
       systemState.studentGateExamReady = true;
       systemState.studentGateSyncedExamId = targetId;
@@ -5970,6 +6035,12 @@ async function syncDatabaseFromCloud(options = {}) {
     markCloudSyncLocalOnly("لا يوجد رابط Web App");
     return { ok: false };
   }
+  if (scope === "exam_start") {
+    const scopedExamId = String(options.examId || resolveStudentExamScopeId() || "").trim();
+    if (!scopedExamId) {
+      return { ok: false, reason: "no_exam_id" };
+    }
+  }
   if (!silent) refreshCloudSyncStatusUI("جاري جلب البيانات من Google Sheets...", "syncing");
 
   const mergeOpts = scope === "exam_start"
@@ -5996,6 +6067,8 @@ async function syncDatabaseFromCloud(options = {}) {
         localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
         if (isTeacherSessionActive() && Array.isArray(systemState.exams)) {
           syncTeacherExamsVaultFromState();
+        } else if (scope === "exam_start") {
+          persistStudentGateExamsToLocalStorage();
         }
       } catch (storageErr) {
         console.warn("[ARABYA] syncDatabaseFromCloud localStorage:", storageErr);
@@ -6736,6 +6809,8 @@ async function checkUrlParameters() {
       const matchedExam = systemState.exams.find(e => e.id.toLowerCase() === lastSegment.toLowerCase());
       if (matchedExam) {
         examId = matchedExam.id;
+      } else if (getArabyaWebAppUrls().length > 0 || hasStudentGateCloudContext()) {
+        examId = lastSegment;
       }
     }
   }
@@ -6756,31 +6831,32 @@ async function checkUrlParameters() {
     const targetExam = systemState.exams.find(e => e.id.toLowerCase() === cleanRoute.toLowerCase());
     if (targetExam) {
       examId = targetExam.id;
-      
-      // تحليل معامل المعلم من داخل الهاش إن وجد
-      if (queryInHash) {
-        const hashParams = new URLSearchParams(queryInHash);
-        const teacherVal = hashParams.get("teacher");
-        if (teacherVal) {
-          systemState.targetTeacherUsername = String(teacherVal).trim();
-          const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-          const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
-          if (matchedTeacher) {
-            const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
-            systemState.config = {
-              googleFormUrl: teacherSyncUrl,
-              apiSecret: matchedTeacher.integrationConfig?.apiSecret || "",
-              entryName: matchedTeacher.integrationConfig?.entryName || "",
-              entryId: matchedTeacher.integrationConfig?.entryId || "",
-              entryCode: matchedTeacher.integrationConfig?.entryCode || "",
-              entryScore: matchedTeacher.integrationConfig?.entryScore || "",
-              entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
-              autoEntryCode: matchedTeacher.autoEntryCode || ""
-            };
-            systemState.targetTeacherUsername = matchedTeacher.username;
-            if (isValidCloudSyncUrl(teacherSyncUrl)) {
-              saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
-            }
+    } else if (getArabyaWebAppUrls().length > 0 || hasStudentGateCloudContext()) {
+      examId = cleanRoute;
+    }
+
+    if (queryInHash) {
+      const hashParams = new URLSearchParams(queryInHash);
+      const teacherVal = hashParams.get("teacher");
+      if (teacherVal) {
+        systemState.targetTeacherUsername = String(teacherVal).trim();
+        const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+        const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
+        if (matchedTeacher) {
+          const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
+          systemState.config = {
+            googleFormUrl: teacherSyncUrl,
+            apiSecret: matchedTeacher.integrationConfig?.apiSecret || "",
+            entryName: matchedTeacher.integrationConfig?.entryName || "",
+            entryId: matchedTeacher.integrationConfig?.entryId || "",
+            entryCode: matchedTeacher.integrationConfig?.entryCode || "",
+            entryScore: matchedTeacher.integrationConfig?.entryScore || "",
+            entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
+            autoEntryCode: matchedTeacher.autoEntryCode || ""
+          };
+          systemState.targetTeacherUsername = matchedTeacher.username;
+          if (isValidCloudSyncUrl(teacherSyncUrl)) {
+            saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
           }
         }
       }
@@ -6818,7 +6894,10 @@ async function checkUrlParameters() {
     }, 100);
     redirected = true;
   } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
-    void prefetchStudentExamGateData();
+    const prefetchExamId = String(resolveStudentExamScopeId() || "").trim();
+    if (prefetchExamId) {
+      void prefetchStudentExamGateData({ examId: prefetchExamId });
+    }
   }
 
   return redirected;
@@ -9080,7 +9159,7 @@ function populateExamSelectionList() {
 }
 
 async function validateStudentAndStart() {
-  reloadSystemStateFromLocalStorage();
+  reloadSystemStateFromLocalStorage({ preserveGateExams: true });
   const startBtn = document.getElementById("student-start-exam-btn");
   const prevBtnText = startBtn ? startBtn.innerHTML : "";
 
@@ -9192,11 +9271,7 @@ async function validateStudentAndStart() {
       startBtn.disabled = true;
       startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري التجهيز...`;
     }
-    let recentGateSync = false;
-    try {
-      const lastAt = parseInt(localStorage.getItem(PRE_EXAM_SYNC_AT_KEY) || "0", 10);
-      recentGateSync = Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS;
-    } catch (e) {}
+    const recentGateSync = isRecentPreExamSyncForExam(examId);
     const syncStarted = performance.now();
     const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
       silent: true,
@@ -9218,9 +9293,9 @@ async function validateStudentAndStart() {
         overlay.close();
       }
     }
-    recordPreExamSyncDuration(performance.now() - syncStarted);
+    recordPreExamSyncDuration(performance.now() - syncStarted, examId);
     studentExamGatePrefetchPromise = null;
-    reloadSystemStateFromLocalStorage();
+    reloadSystemStateFromLocalStorage({ preserveGateExams: true });
     saveStudentsToLocalStorage();
 
     selectedExam = systemState.exams.find(e => e.id === examId);
@@ -9286,10 +9361,6 @@ async function validateStudentAndStart() {
       }
     } catch (attemptErr) {
       console.warn("[ARABYA] register_exam_attempt failed:", attemptErr);
-      if (getExamResultSyncUrl(selectedExam) || getUnifiedTeacherSyncUrl(selectedExam)) {
-        alert(attemptErr.message || "تعذر تسجيل محاولة الامتحان على الخادم. تحقق من الاتصال ثم أعد المحاولة.");
-        return;
-      }
       systemState.examAttemptToken = "";
     }
     saveStudentsToLocalStorage();
@@ -11790,7 +11861,13 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
     clientIp: profile?.clientIp || "",
     deviceMeta: profile?.deviceMeta || buildResultDeviceFields(profile).deviceMeta || {}
   };
-  const response = await postToArabyaWebApp(syncUrl, payload);
+  let response;
+  try {
+    response = await postToArabyaWebApp(syncUrl, payload);
+  } catch (err) {
+    console.warn("[ARABYA] register_exam_attempt network failed:", err);
+    return { ok: true, attemptToken: "", advisory: "network_error" };
+  }
   if (response?.status === "error") {
     const code = String(response.code || "").trim();
     const advisoryCodes = new Set(["device_conflict", "device_registry_conflict"]);
