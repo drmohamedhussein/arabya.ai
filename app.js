@@ -28,7 +28,7 @@ function pickLatestAppVersion(...candidates) {
 }
 
 function resolveEmbeddedAppBuildVersion(fallbackVersion) {
-  const fallback = String(fallbackVersion || "2026.06.06.18").trim();
+  const fallback = String(fallbackVersion || "2026.06.06.19").trim();
   try {
     const fromMeta = document.querySelector('meta[name="arabya-app-version"]')?.content
       || document.documentElement?.getAttribute("data-arabya-build")
@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.18");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.19");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2591,7 +2591,7 @@ function snapshotExamAnswerKeys_(exams) {
     const keys = {};
     (exam.questions || []).forEach(q => {
       if (q && q.id != null && q.correctAnswer !== undefined) {
-        keys[q.id] = q.correctAnswer;
+        keys[String(q.id)] = q.correctAnswer;
       }
     });
     if (Object.keys(keys).length) map.set(String(exam.id), keys);
@@ -2612,7 +2612,7 @@ function restoreAnswerKeysToExam_(exam, keySnapshot) {
     ...exam,
     questions: (exam.questions || []).map(q => {
       if (!q || q.correctAnswer !== undefined) return q;
-      const preserved = keys[q.id];
+      const preserved = keys[String(q.id)] ?? keys[q.id];
       return preserved !== undefined ? { ...q, correctAnswer: preserved } : q;
     })
   };
@@ -2668,7 +2668,7 @@ function captureExamAnswerKeyVault(exam) {
   const keyMap = {};
   (fullExam.questions || []).forEach(q => {
     if (q && q.id != null && q.correctAnswer !== undefined) {
-      keyMap[q.id] = q.correctAnswer;
+      keyMap[String(q.id)] = q.correctAnswer;
     }
   });
   if (!Object.keys(keyMap).length) return;
@@ -2706,22 +2706,38 @@ function loadExamAnswerKeyVaultFromStorage() {
   }
 }
 
-function hasClientGradingKeysForExam(examId) {
+function getStudentAnswerForQuestion(answers, questionId) {
+  if (!answers || questionId == null) return undefined;
+  if (answers[questionId] !== undefined) return answers[questionId];
+  const strId = String(questionId);
+  if (answers[strId] !== undefined) return answers[strId];
+  const numId = Number(questionId);
+  if (Number.isFinite(numId) && answers[numId] !== undefined) return answers[numId];
+  return undefined;
+}
+
+function hasClientGradingKeysForExam(examId, presentedQuestions) {
   const targetId = String(examId || "").trim();
   if (!targetId) return false;
-  const vault = systemState._examAnswerKeyVault?.[targetId];
-  if (vault && Object.keys(vault).length > 0) return true;
-  const fullExam = getFullExamById(targetId);
-  return (fullExam?.questions || []).some(
-    q => q && q.type !== "essay" && q.correctAnswer !== undefined
-  );
+  const questions = Array.isArray(presentedQuestions) && presentedQuestions.length
+    ? presentedQuestions
+    : (systemState.shuffledQuestions || []);
+  const objective = questions.filter(q => q && q.type !== "essay");
+  if (!objective.length) return true;
+  return objective.every(q => getQuestionCorrectAnswer(targetId, q.id) !== undefined);
 }
 
 function getQuestionCorrectAnswer(examId, questionId) {
-  const vault = systemState._examAnswerKeyVault?.[examId];
-  if (vault && vault[questionId] !== undefined) return vault[questionId];
-  const exam = getFullExamById(examId);
-  const question = exam?.questions?.find(q => String(q.id) === String(questionId));
+  const targetExamId = String(examId || "").trim();
+  const targetQuestionId = String(questionId ?? "");
+  const vault = systemState._examAnswerKeyVault?.[targetExamId]
+    || systemState._examAnswerKeyVault?.[examId];
+  if (vault) {
+    if (vault[targetQuestionId] !== undefined) return vault[targetQuestionId];
+    if (vault[questionId] !== undefined) return vault[questionId];
+  }
+  const exam = getFullExamById(targetExamId || examId);
+  const question = exam?.questions?.find(q => String(q.id) === targetQuestionId);
   return question?.correctAnswer;
 }
 
@@ -2828,26 +2844,31 @@ function gradeStudentExamAnswers(exam, presentedQuestions, studentAnswers, optio
   const gradingQuestions = resolveClientQuestionsForGrading_(exam, presentedQuestions);
   gradingQuestions.forEach(q => {
     if (!q) return;
-    const studentAns = answers[q.id];
+    const studentAns = getStudentAnswerForQuestion(answers, q.id);
     const qPoints = q.points !== undefined ? q.points : 10;
     if (q.type === "essay") {
       hasEssay = true;
       totalEssayPoints += qPoints;
       const ansText = studentAns || (isCanceled ? "(ملغي - غش)" : "(لم يكتب الطالب إجابة)");
       detailsLog.push(`س مقالي (وزنها ${qPoints} نقاط): ${q.question} \n إجابة الطالب: ${ansText}\n-----------------`);
-      questionScoresMap[q.id] = 0;
+      questionScoresMap[String(q.id)] = 0;
       return;
     }
     objectiveQuestionsCount++;
     totalObjectivePoints += qPoints;
     const correctAnswer = getQuestionCorrectAnswer(examId, q.id);
-    const isCorrect = !isCanceled && studentAns !== undefined && studentAns !== -1 && studentAns !== -2 && studentAns === correctAnswer;
+    const isCorrect = !isCanceled
+      && studentAns !== undefined
+      && studentAns !== -1
+      && studentAns !== -2
+      && correctAnswer !== undefined
+      && Number(studentAns) === Number(correctAnswer);
     if (isCorrect) {
       correctObjectiveCount++;
       totalEarnedPoints += qPoints;
-      questionScoresMap[q.id] = qPoints;
+      questionScoresMap[String(q.id)] = qPoints;
     } else {
-      questionScoresMap[q.id] = 0;
+      questionScoresMap[String(q.id)] = 0;
     }
     let studentAnsText = "لم تتم الإجابة";
     if (studentAns === -1) studentAnsText = "انتهى الوقت";
@@ -9942,9 +9963,23 @@ async function submitFinishedExam() {
   localStorage.removeItem("arabya_active_student_session");
 
   const studentAnswersMap = { ...systemState.studentAnswers };
-  const gradedLocal = gradeStudentExamAnswers(systemState.currentExam, systemState.shuffledQuestions, studentAnswersMap, {
-    status: "completed"
-  });
+  const canGradeLocally = hasClientGradingKeysForExam(
+    systemState.currentExam?.id,
+    systemState.shuffledQuestions
+  );
+  const gradedLocal = canGradeLocally
+    ? gradeStudentExamAnswers(systemState.currentExam, systemState.shuffledQuestions, studentAnswersMap, {
+      status: "completed"
+    })
+    : {
+      scoreString: "",
+      detailsFormatted: "",
+      questionScoresMap: {},
+      scaledScore: null,
+      hasEssay: (systemState.shuffledQuestions || []).some(q => q && q.type === "essay"),
+      correctObjectiveCount: 0,
+      objectiveQuestionsCount: (systemState.shuffledQuestions || []).filter(q => q && q.type !== "essay").length
+    };
   const {
     scoreString,
     detailsFormatted,
@@ -9959,11 +9994,12 @@ async function submitFinishedExam() {
     hasEssay: gradedLocal.hasEssay
   };
   const examTotalScore = getCurrentExamTotalScore();
+  const savedAttemptToken = systemState.examAttemptToken || "";
   const resultObj = {
     recordId: createRecordId("result"),
     savedAt: Date.now(),
     name: systemState.currentStudent.name,
-    id: systemState.currentStudent.id,
+    id: systemState.currentStudent.id || "",
     accessCode: systemState.currentStudent.accessCode || "",
     studentLookupKey,
     email: systemState.currentStudent.email || "",
@@ -9974,14 +10010,15 @@ async function submitFinishedExam() {
     faculty: systemState.currentExam.faculty,
     level: systemState.currentExam.level,
     examType: systemState.currentExam.examType,
-    score: scoreString,
-    details: detailsFormatted,
+    score: canGradeLocally ? scoreString : "",
+    details: canGradeLocally ? detailsFormatted : "",
     timestamp: new Date().toLocaleString("ar-EG"),
     studentAnswers: studentAnswersMap,
     questionScores: questionScoresMap,
     maxScore: examTotalScore,
     presentedQuestions: JSON.parse(JSON.stringify(systemState.shuffledQuestions)),
     status: "completed",
+    examAttemptToken: savedAttemptToken,
     ...buildResultDeviceFields(systemState.examDeviceProfile),
     ...buildCheatTrackingFields(),
     allowRetake: false
@@ -10000,26 +10037,36 @@ async function submitFinishedExam() {
   }
   systemState.lastCompletedExamId = systemState.currentExam.id;
   systemState.examAttemptToken = "";
-  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
-    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
-  }
   // إظهار رابط الملف الشخصي في شريط التنقل
   const navProfileLi = document.getElementById("nav-student-profile-link");
   if (navProfileLi) navProfileLi.classList.remove("hidden");
   saveSystemState(false);
   systemState.currentExamRuntime = null;
-  const canGradeLocally = hasClientGradingKeysForExam(systemState.currentExam.id);
   if (canGradeLocally) {
     showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
   } else {
     showStudentResultView("جاري التصحيح على الخادم...", hasEssay, "…", examTotalScore, { pending: true });
   }
 
-  const syncOutcome = await sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  const syncOutcome = await sendResultToGoogleSheets(
+    canGradeLocally ? scoreString : "",
+    canGradeLocally ? detailsFormatted : "",
+    resultObj.recordId,
+    resultObj
+  );
+  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
+    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
+  }
   const displayScaled = getDisplayScaledScoreFromResult(resultObj, scaledScore);
   const displayScoreString = resultObj.score || scoreString;
   const displayHasEssay = /مقالي|مقالية/i.test(displayScoreString) || hasEssay;
-  showStudentResultView(displayScoreString, displayHasEssay, displayScaled, resultObj.maxScore || examTotalScore);
+  showStudentResultView(
+    displayScoreString,
+    displayHasEssay,
+    displayScaled,
+    resultObj.maxScore || examTotalScore,
+    { preserveSyncStatus: true }
+  );
 
   if (archivedAttempts && archivedAttempts.length) {
     syncRetakeAffectedResultsToCloud(archivedAttempts);
@@ -10033,7 +10080,7 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   navigateToView("student-result-view");
 
   const syncEl = document.getElementById("runner-res-sync-status");
-  if (syncEl) {
+  if (syncEl && !options.preserveSyncStatus) {
     syncEl.innerHTML = `<span class="material-icons" style="color:var(--secondary); vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري حفظ ومزامنة نتيجتك مع Google Sheets...`;
   }
   
@@ -10096,7 +10143,7 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
     presentedQuestions: compactPresentedQuestionsForCloud(
       resultObj?.presentedQuestions || systemState.shuffledQuestions || []
     ),
-    attemptToken: systemState.examAttemptToken || resultObj?.attemptToken || "",
+    attemptToken: resultObj?.examAttemptToken || systemState.examAttemptToken || resultObj?.attemptToken || "",
     ...buildResultCloudRetakeFields(resultObj),
     ...buildResultDeviceFields(resultObj || systemState.examDeviceProfile),
     ...(resultObj ? buildResultCloudIpReleaseFields(resultObj) : {}),

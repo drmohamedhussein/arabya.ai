@@ -35,8 +35,10 @@ assert.strictEqual(
 );
 
 const appSource = require("fs").readFileSync(require("path").join(__dirname, "../app.js"), "utf8");
-assert.ok(appSource.includes("function resolveEmbeddedAppBuildVersion"));
-assert.ok(appSource.includes('meta[name="arabya-app-version"]'));
-assert.ok(appSource.includes("2026.06.06.18"));
+assert.ok(appSource.includes("function getStudentAnswerForQuestion"));
+assert.ok(appSource.includes("function hasClientGradingKeysForExam(examId, presentedQuestions)"));
+assert.ok(appSource.includes("Number(studentAns) === Number(correctAnswer)"));
+assert.ok(appSource.includes("preserveSyncStatus"));
+assert.ok(appSource.includes("2026.06.06.19"));
 
 console.log("App version tests passed.");
