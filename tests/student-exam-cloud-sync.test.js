@@ -26,12 +26,10 @@ test("student exam: silent cloud pull does not toast students", () => {
 });
 
 test("student exam: direct link waits for cloud exam before showing title", () => {
-  const block = appSource.slice(
-    appSource.indexOf("if (examId) {"),
-    appSource.indexOf("} else if (hasStudentGateCloudContext()")
-  );
-  assert.ok(block.includes("await ensureStudentGateExamReady"));
-  assert.ok(block.includes("navigateToView(\"student-login-view\")"));
+  assert.ok(appSource.includes("function bootstrapStudentDirectLinkViewEarly"));
+  assert.ok(appSource.includes("waitPreExamCountdownAndSync"));
+  assert.ok(appSource.includes("ensureStudentGateExamReady"));
+  assert.ok(appSource.includes("navigateToView(\"student-login-view\")"));
   assert.ok(appSource.includes("function mergeRemoteExamsForStudentGate_"));
   assert.ok(appSource.includes("جاري تحميل بيانات الامتحان من السحابة"));
 });

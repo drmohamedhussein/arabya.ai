@@ -1201,6 +1201,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   initDatabase();
+  bootstrapStudentDirectLinkViewEarly();
   void migrateAllTeacherPasswordsToHash();
   bootstrapPlatformAppVersionFromLocal();
   applyUnifiedCloudSyncModel();
@@ -5869,6 +5870,109 @@ function isRecentPreExamSyncForExam(examId) {
   return false;
 }
 
+const PRE_EXAM_DEVICE_ESTIMATE_KEY = "arabya_pre_exam_device_estimate_ms";
+const DEFAULT_PRE_EXAM_DEVICE_MS = 3000;
+const MIN_PRE_EXAM_DEVICE_MS = 0;
+const MAX_PRE_EXAM_DEVICE_MS = 8000;
+
+function getDeviceCheckEstimateMs() {
+  try {
+    const stored = parseInt(localStorage.getItem(PRE_EXAM_DEVICE_ESTIMATE_KEY) || "", 10);
+    if (Number.isFinite(stored) && stored >= MIN_PRE_EXAM_DEVICE_MS) {
+      return Math.min(MAX_PRE_EXAM_DEVICE_MS, stored);
+    }
+  } catch (e) {}
+  return DEFAULT_PRE_EXAM_DEVICE_MS;
+}
+
+function recordDeviceCheckDuration(durationMs) {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+  const prev = getDeviceCheckEstimateMs();
+  const blended = Math.round(prev * 0.65 + durationMs * 0.35);
+  const clamped = Math.max(MIN_PRE_EXAM_DEVICE_MS, Math.min(MAX_PRE_EXAM_DEVICE_MS, blended));
+  try { localStorage.setItem(PRE_EXAM_DEVICE_ESTIMATE_KEY, String(clamped)); } catch (e) {}
+}
+
+function parseStudentDirectLinkExamIdSync() {
+  let examId = getUrlParameter("exam");
+  if (!examId) {
+    const pathName = window.location.pathname;
+    const pathSegments = pathName.split("/").filter(s => s.length > 0 && s !== "index.html" && s !== "online_exam_portal");
+    if (pathSegments.length > 0) {
+      const lastSegment = pathSegments[pathSegments.length - 1];
+      const matchedExam = (systemState.exams || []).find(e => e.id.toLowerCase() === lastSegment.toLowerCase());
+      if (matchedExam) examId = matchedExam.id;
+      else if (getArabyaWebAppUrls().length > 0 || hasStudentGateCloudContext()) examId = lastSegment;
+    }
+  }
+  const hash = window.location.hash;
+  if (!examId && hash && hash.startsWith("#/")) {
+    const route = hash.substring(2);
+    const cleanRoute = route.includes("?") ? route.split("?")[0] : route;
+    const targetExam = (systemState.exams || []).find(e => e.id.toLowerCase() === cleanRoute.toLowerCase());
+    if (targetExam) examId = targetExam.id;
+    else if (getArabyaWebAppUrls().length > 0 || hasStudentGateCloudContext()) examId = cleanRoute;
+  }
+  return examId ? String(examId).trim() : "";
+}
+
+function bootstrapStudentGateTeacherFromUrlSync() {
+  const teacherUser = getUrlParameter("teacher");
+  if (teacherUser) {
+    systemState.targetTeacherUsername = String(teacherUser).trim();
+    const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+    const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
+    if (matchedTeacher) {
+      const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
+      systemState.config = {
+        googleFormUrl: teacherSyncUrl,
+        apiSecret: matchedTeacher.integrationConfig?.apiSecret || "",
+        entryName: matchedTeacher.integrationConfig?.entryName || "",
+        entryId: matchedTeacher.integrationConfig?.entryId || "",
+        entryCode: matchedTeacher.integrationConfig?.entryCode || "",
+        entryScore: matchedTeacher.integrationConfig?.entryScore || "",
+        entryDetails: matchedTeacher.integrationConfig?.entryDetails || "",
+        autoEntryCode: matchedTeacher.autoEntryCode || ""
+      };
+      systemState.targetTeacherUsername = matchedTeacher.username;
+      if (isValidCloudSyncUrl(teacherSyncUrl)) saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
+    }
+  }
+  bootstrapStudentGateSyncConfig();
+}
+
+function lockStudentDirectExamSelect() {
+  try { populateExamSelectionList(); } catch (e) {}
+  const select = document.getElementById("student-exam-select");
+  if (select && systemState.lockedExamId) {
+    select.value = systemState.lockedExamId;
+    select.disabled = true;
+    select.setAttribute("aria-describedby", "direct-exam-lock-note");
+  }
+}
+
+function bootstrapStudentDirectLinkViewEarly() {
+  const examId = parseStudentDirectLinkExamIdSync();
+  if (!examId) return false;
+  bootstrapStudentGateTeacherFromUrlSync();
+  systemState.lockedExamId = examId;
+  systemState.studentGateExamReady = false;
+  systemState._studentDirectLinkBootstrapped = true;
+  navigateToView("student-login-view");
+  lockStudentDirectExamSelect();
+  if (getArabyaWebAppUrls().length > 0) {
+    const estimateMs = getPreExamSyncEstimateMs();
+    const overlay = showStudentExamPrepareOverlay(estimateMs, {
+      title: "جاري تحميل الامتحان",
+      message: "جاري جلب بيانات الامتحان، يرجى الانتظار..."
+    });
+    void waitPreExamCountdownAndSync(overlay, ensureStudentGateExamReady(examId), estimateMs).finally(() => {
+      lockStudentDirectExamSelect();
+    });
+  }
+  return true;
+}
+
 async function fetchCloudBackupJson_(rawUrl, timeoutMs, mergeOptions = {}) {
   const fetchParams = buildCloudBackupFetchParams(mergeOptions);
   if (mergeOptions.scope === "exam_start" && fetchParams === null) {
@@ -6009,17 +6113,21 @@ function getStudentExamPrepareOverlay() {
   return document.getElementById("student-exam-prepare-overlay");
 }
 
-function showStudentExamPrepareOverlay(estimatedMs) {
+function showStudentExamPrepareOverlay(estimatedMs, options = {}) {
   const overlay = getStudentExamPrepareOverlay();
   if (!overlay) return { close() {} };
   const countdownEl = document.getElementById("student-exam-prepare-countdown");
   const messageEl = document.getElementById("student-exam-prepare-message");
+  const titleEl = document.getElementById("student-exam-prepare-title");
   const progressEl = document.getElementById("student-exam-prepare-progress-bar");
-  const totalMs = Math.max(MIN_PRE_EXAM_SYNC_MS, estimatedMs || DEFAULT_PRE_EXAM_SYNC_MS);
+  const minMs = options.useDeviceEstimate ? MIN_PRE_EXAM_DEVICE_MS : MIN_PRE_EXAM_SYNC_MS;
+  const defaultMs = options.useDeviceEstimate ? DEFAULT_PRE_EXAM_DEVICE_MS : DEFAULT_PRE_EXAM_SYNC_MS;
+  const totalMs = Math.max(minMs, estimatedMs || defaultMs);
   const initialSecs = Math.max(1, Math.ceil(totalMs / 1000));
   if (countdownEl) countdownEl.textContent = String(initialSecs);
+  if (titleEl && options.title) titleEl.textContent = options.title;
   if (messageEl) {
-    messageEl.textContent = "جاري تجهيز الامتحان، يرجى الانتظار...";
+    messageEl.textContent = options.message || "جاري تجهيز الامتحان، يرجى الانتظار...";
   }
   if (progressEl) progressEl.style.width = "0%";
   overlay.classList.remove("hidden");
@@ -6940,33 +7048,36 @@ async function checkUrlParameters() {
 
   if (examId) {
     systemState.lockedExamId = String(examId).trim();
-    systemState.studentGateExamReady = false;
-    if (getArabyaWebAppUrls().length > 0) {
-      try {
-        const syncResult = await ensureStudentGateExamReady(systemState.lockedExamId);
-        if (!syncResult?.ok) {
-          console.warn("[ARABYA] student direct-link gate sync failed:", syncResult);
-        }
-      } catch (syncErr) {
-        console.warn("[ARABYA] student direct-link gate sync error:", syncErr);
-      }
-    }
     const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
     if (targetExam && isExamPastDeadline(targetExam)) {
       alert(getExamDeadlineBlockMessage(targetExam));
       systemState.lockedExamId = "";
       return redirected;
     }
-    navigateToView("student-login-view");
-    setTimeout(() => {
-      try { populateExamSelectionList(); } catch (e) {}
-      const select = document.getElementById("student-exam-select");
-      if (select && systemState.lockedExamId) {
-        select.value = systemState.lockedExamId;
-        select.disabled = true;
-        select.setAttribute("aria-describedby", "direct-exam-lock-note");
+    if (!systemState._studentDirectLinkBootstrapped) {
+      systemState.studentGateExamReady = false;
+      navigateToView("student-login-view");
+      lockStudentDirectExamSelect();
+      if (getArabyaWebAppUrls().length > 0) {
+        const estimateMs = getPreExamSyncEstimateMs();
+        const overlay = showStudentExamPrepareOverlay(estimateMs, {
+          title: "جاري تحميل الامتحان",
+          message: "جاري جلب بيانات الامتحان، يرجى الانتظار..."
+        });
+        try {
+          await waitPreExamCountdownAndSync(
+            overlay,
+            ensureStudentGateExamReady(systemState.lockedExamId),
+            estimateMs
+          );
+        } catch (syncErr) {
+          console.warn("[ARABYA] student direct-link gate sync error:", syncErr);
+          overlay.close();
+        } finally {
+          lockStudentDirectExamSelect();
+        }
       }
-    }, 100);
+    }
     redirected = true;
   } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
     const prefetchExamId = String(resolveStudentExamScopeId() || "").trim();
@@ -9346,7 +9457,6 @@ async function validateStudentAndStart() {
       startBtn.disabled = true;
       startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري التجهيز...`;
     }
-    const recentGateSync = isRecentPreExamSyncForExam(examId);
     const syncStarted = performance.now();
     const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
       silent: true,
@@ -9354,19 +9464,16 @@ async function validateStudentAndStart() {
       examId,
       timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
     });
-    if (recentGateSync) {
-      try { await syncPromise; } catch (prepErr) {
-        console.warn("[ARABYA] quick pre-exam sync failed:", prepErr);
-      }
-    } else {
-      const estimateMs = getPreExamSyncEstimateMs();
-      const overlay = showStudentExamPrepareOverlay(estimateMs);
-      try {
-        await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
-      } catch (prepErr) {
-        console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
-        overlay.close();
-      }
+    const estimateMs = getPreExamSyncEstimateMs();
+    const overlay = showStudentExamPrepareOverlay(estimateMs, {
+      title: "جاري تجهيز الامتحان",
+      message: "جاري مزامنة بيانات الامتحان قبل البدء..."
+    });
+    try {
+      await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
+    } catch (prepErr) {
+      console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
+      overlay.close();
     }
     recordPreExamSyncDuration(performance.now() - syncStarted, examId);
     studentExamGatePrefetchPromise = null;
@@ -9416,10 +9523,23 @@ async function validateStudentAndStart() {
   }
 
   let deviceProfile = null;
+  const deviceEstimateMs = getDeviceCheckEstimateMs();
+  const deviceStarted = performance.now();
+  const deviceOverlay = showStudentExamPrepareOverlay(deviceEstimateMs, {
+    title: "جاري التحقق من الجهاز",
+    message: "جاري التحقق من بصمة الجهاز وتسجيل محاولة الامتحان...",
+    useDeviceEstimate: true
+  });
+  let deviceCheck = null;
+  const deviceTask = (async () => {
+    deviceCheck = await enforceExamDeviceBinding(studentLookupKey, systemState.currentStudent.name, examId, studentMatchContext);
+    return deviceCheck;
+  })();
   try {
-    const deviceCheck = await enforceExamDeviceBinding(studentLookupKey, systemState.currentStudent.name, examId, studentMatchContext);
-    if (!deviceCheck.ok) {
-      alert(deviceCheck.message);
+    await waitPreExamCountdownAndSync(deviceOverlay, deviceTask.then(r => ({ ok: !!(r && r.ok) })), deviceEstimateMs);
+    recordDeviceCheckDuration(performance.now() - deviceStarted);
+    if (!deviceCheck?.ok) {
+      alert(deviceCheck?.message || "تعذر التحقق من الجهاز.");
       return;
     }
     deviceProfile = deviceCheck.profile;
@@ -9445,6 +9565,7 @@ async function validateStudentAndStart() {
     alert("تعذر التحقق من بصمة الجهاز. تحقق من الاتصال بالإنترنت ثم أعد المحاولة.");
     return;
   } finally {
+    deviceOverlay.close();
     if (startBtn) {
       startBtn.disabled = false;
       startBtn.innerHTML = prevBtnText || `الانتقال لبدء الامتحان`;
@@ -9841,7 +9962,7 @@ async function submitFinishedExam() {
   if (canGradeLocally) {
     showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
   } else {
-    showStudentResultView("جاري التصحيح على الخادم...", hasEssay, "…", examTotalScore);
+    showStudentResultView("جاري التصحيح على الخادم...", hasEssay, "…", examTotalScore, { pending: true });
   }
 
   const syncOutcome = await sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
@@ -9858,7 +9979,7 @@ async function submitFinishedExam() {
   }
 }
 
-function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore) {
+function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore, options = {}) {
   navigateToView("student-result-view");
 
   const syncEl = document.getElementById("runner-res-sync-status");
@@ -9869,7 +9990,8 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   const scoreNumEl = document.getElementById("runner-res-score");
   const totalEl = document.getElementById("runner-res-total");
   
-  scoreNumEl.innerText = scaledScore;
+  const isPending = !!options.pending || scaledScore === "…" || scaledScore === "...";
+  scoreNumEl.innerText = isPending ? "…" : scaledScore;
   totalEl.innerText = examTotalScore;
 
   document.getElementById("runner-res-name").innerText = systemState.currentStudent.name;
@@ -9877,6 +9999,11 @@ function showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScor
   document.getElementById("runner-res-title").innerText = `${systemState.currentExam.title} [${systemState.currentExam.examType}]`;
 
   const statusEl = document.getElementById("runner-res-status");
+  if (isPending) {
+    statusEl.innerText = "جاري تصحيح إجاباتك ومزامنة النتيجة، يرجى الانتظار...";
+    statusEl.style.color = "var(--accent)";
+    return;
+  }
   if (hasEssay) {
     statusEl.innerText = `تم حفظ إجابتك بنجاح! نتيجتك في الأسئلة الموضوعية هي: ${scaledScore} من ${examTotalScore}. بانتظار مراجعة وتصحيح المعلم للأسئلة المقالية المتبقية.`;
     statusEl.style.color = "var(--accent)";
