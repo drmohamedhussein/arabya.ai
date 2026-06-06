@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.13";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.14";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -3989,7 +3989,8 @@ function normalizeTeacherTabId(tabId) {
   return TEACHER_TAB_IDS.includes(id) ? id : "home";
 }
 
-function recordCloudSyncOutcome(ok, detail) {
+function recordCloudSyncOutcome(ok, detail, options = {}) {
+  const silent = !!options.silent;
   const now = new Date().toISOString();
   try {
     if (ok) {
@@ -4000,8 +4001,8 @@ function recordCloudSyncOutcome(ok, detail) {
       localStorage.setItem(CLOUD_SYNC_LAST_FAIL_KEY, JSON.stringify({ at: now, detail: detail || "" }));
     }
   } catch (e) {}
-  refreshCloudSyncStatusUI(detail, ok ? "ok" : "fail");
-  if (window.ArabyaToast && detail) {
+  if (!silent) refreshCloudSyncStatusUI(detail, ok ? "ok" : "fail");
+  if (!silent && window.ArabyaToast && detail) {
     const msg = String(detail);
     if (/بنك|question/i.test(msg) && window.ArabyaPlatformSync) {
       window.ArabyaPlatformSync.recordQuestionBankSync(ok, msg);
@@ -4213,6 +4214,106 @@ function getArabyaWebAppUrls() {
   return getGeneralTeacherSyncUrls();
 }
 
+function loadTeacherSyncRegistry() {
+  try {
+    const raw = localStorage.getItem(ARABYA_TEACHER_SYNC_REGISTRY_KEY) || "{}";
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveTeacherSyncRegistryEntry(username, url) {
+  const user = String(username || "").trim();
+  const clean = isValidCloudSyncUrl(url) ? normalizeArabyaWebAppUrl(String(url).trim()) : "";
+  if (!user || !clean) return;
+  const registry = loadTeacherSyncRegistry();
+  registry[user] = clean;
+  try {
+    localStorage.setItem(ARABYA_TEACHER_SYNC_REGISTRY_KEY, JSON.stringify(registry));
+  } catch (e) {}
+}
+
+function resolveSyncUrlForTeacherUsername(username) {
+  const user = String(username || "").trim();
+  if (!user) return "";
+  try {
+    const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+    const matched = teachers.find(t => t && (t.username === user || t.name === user));
+    const fromTeacher = matched?.integrationConfig?.googleFormUrl || "";
+    if (isValidCloudSyncUrl(fromTeacher)) return normalizeArabyaWebAppUrl(fromTeacher.trim());
+  } catch (e) {}
+  const registry = loadTeacherSyncRegistry();
+  const fromRegistry = registry[user] || "";
+  if (isValidCloudSyncUrl(fromRegistry)) return normalizeArabyaWebAppUrl(fromRegistry.trim());
+  return "";
+}
+
+function stripSensitiveUrlParamsFromBrowser() {
+  try {
+    const url = new URL(window.location.href);
+    let changed = false;
+    ["s", "apiSecret"].forEach(param => {
+      if (url.searchParams.has(param)) {
+        url.searchParams.delete(param);
+        changed = true;
+      }
+    });
+    if (!changed) return;
+    const next = url.pathname + (url.search ? url.search : "") + (url.hash || "");
+    window.history.replaceState({}, document.title, next);
+  } catch (e) {}
+}
+
+function applyStudentGateSyncUrl(syncUrl, teacherUsername) {
+  const clean = isValidCloudSyncUrl(syncUrl) ? normalizeArabyaWebAppUrl(String(syncUrl).trim()) : "";
+  if (!clean) return false;
+  systemState.config = systemState.config || {};
+  systemState.config.googleFormUrl = clean;
+  try {
+    localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
+    localStorage.setItem("arabya_pending_cloud_sync_url", clean);
+  } catch (e) {}
+  if (teacherUsername) saveTeacherSyncRegistryEntry(teacherUsername, clean);
+  return true;
+}
+
+function bootstrapStudentGateSyncConfig() {
+  const teacherUser = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
+  if (teacherUser && !systemState.targetTeacherUsername) {
+    systemState.targetTeacherUsername = String(teacherUser).trim();
+  }
+  const syncParam = getUrlParameter("s");
+  if (syncParam && isValidCloudSyncUrl(syncParam)) {
+    applyStudentGateSyncUrl(syncParam, systemState.targetTeacherUsername || teacherUser);
+    return true;
+  }
+  const fromTeacher = resolveSyncUrlForTeacherUsername(teacherUser);
+  if (fromTeacher) {
+    applyStudentGateSyncUrl(fromTeacher, systemState.targetTeacherUsername || teacherUser);
+    return true;
+  }
+  try {
+    const pending = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+    if (isValidCloudSyncUrl(pending)) {
+      applyStudentGateSyncUrl(pending, systemState.targetTeacherUsername || teacherUser);
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+function hasStudentGateCloudContext() {
+  return !!(
+    systemState.targetTeacherUsername ||
+    systemState.lockedExamId ||
+    getUrlParameter("teacher") ||
+    getUrlParameter("exam") ||
+    getUrlParameter("s")
+  );
+}
+
 function getGeneralTeacherSyncUrls() {
   const urls = new Set();
   const vault = loadTeacherSyncCredentials();
@@ -4230,11 +4331,21 @@ function getGeneralTeacherSyncUrls() {
     if (isValidCloudSyncUrl(cfg.googleFormUrl)) urls.add(normalizeArabyaWebAppUrl(cfg.googleFormUrl.trim()));
   } catch (e) {}
   try {
+    const pending = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+    if (isValidCloudSyncUrl(pending)) urls.add(normalizeArabyaWebAppUrl(pending.trim()));
+  } catch (e) {}
+  try {
     const teacherUrlInput = document.getElementById("teacher-config-url");
     if (teacherUrlInput && isValidCloudSyncUrl(teacherUrlInput.value)) {
       urls.add(normalizeArabyaWebAppUrl(teacherUrlInput.value.trim()));
     }
   } catch (e) {}
+  const teacherParam = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
+  const fromTeacherParam = resolveSyncUrlForTeacherUsername(teacherParam);
+  if (fromTeacherParam) urls.add(fromTeacherParam);
+  Object.values(loadTeacherSyncRegistry()).forEach(url => {
+    if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(String(url).trim()));
+  });
   return Array.from(urls).filter(Boolean);
 }
 
@@ -4805,6 +4916,7 @@ function normalizeArabyaWebAppUrl(rawUrl) {
 
 const ARABYA_API_SECRET_QUERY = "apiSecret";
 const ARABYA_TEACHER_SYNC_CREDENTIALS_KEY = "arabya_teacher_sync_credentials";
+const ARABYA_TEACHER_SYNC_REGISTRY_KEY = "arabya_teacher_sync_registry";
 
 function loadTeacherSyncCredentials() {
   try {
@@ -5573,12 +5685,13 @@ async function fetchAndMergeAllCloudBackups(mergeOptions = {}, timeoutMs = 0) {
 }
 
 function prefetchStudentExamGateData() {
-  if (getArabyaWebAppUrls().length === 0) return;
+  bootstrapStudentGateSyncConfig();
+  if (getArabyaWebAppUrls().length === 0) return Promise.resolve({ ok: false, reason: "no_url" });
   try {
     const lastAt = parseInt(localStorage.getItem(PRE_EXAM_SYNC_AT_KEY) || "0", 10);
-    if (Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS) return;
+    if (Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS) return Promise.resolve({ ok: true, reason: "recent" });
   } catch (e) {}
-  if (studentExamGatePrefetchPromise) return;
+  if (studentExamGatePrefetchPromise) return studentExamGatePrefetchPromise;
   const started = performance.now();
   studentExamGatePrefetchPromise = syncDatabaseFromCloud({
     silent: true,
@@ -5591,6 +5704,7 @@ function prefetchStudentExamGateData() {
   }).finally(() => {
     studentExamGatePrefetchPromise = null;
   });
+  return studentExamGatePrefetchPromise;
 }
 
 function getStudentExamPrepareOverlay() {
@@ -5707,7 +5821,7 @@ async function syncDatabaseFromCloud(options = {}) {
   const response = pullResult.lastResponse;
 
   if (!pullResult.ok && response && response._fetchFailed) {
-    recordCloudSyncOutcome(false, response.message || "تعذّر الجلب من السحابة");
+    recordCloudSyncOutcome(false, response.message || "تعذّر الجلب من السحابة", { silent });
     return {
       ok: false,
       code: response.code || "",
@@ -5722,11 +5836,14 @@ async function syncDatabaseFromCloud(options = {}) {
       try {
         localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
         localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+        if (Array.isArray(systemState.exams)) {
+          localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+        }
       } catch (storageErr) {
         console.warn("[ARABYA] syncDatabaseFromCloud localStorage:", storageErr);
       }
       saveSystemState(false);
-      recordCloudSyncOutcome(true, "جلب من السحابة");
+      recordCloudSyncOutcome(true, "جلب من السحابة", { silent });
       if (systemState.activeView === "teacher-dashboard-view" && typeof refreshTeacherDashboardViews === "function") {
         refreshTeacherDashboardViews({ all: true });
       }
@@ -5750,7 +5867,7 @@ async function syncDatabaseFromCloud(options = {}) {
       console.warn("syncDatabaseFromCloud merge failed:", err);
     }
   }
-  recordCloudSyncOutcome(false, "تعذّر الجلب من السحابة");
+  recordCloudSyncOutcome(false, "تعذّر الجلب من السحابة", { silent });
   return { ok: false };
 }
 
@@ -5881,7 +5998,7 @@ function persistTeacherLoginCloudSettings(syncUrl, apiSecret) {
 
 function persistCloudSyncUrlForTeacher(url) {
   if (!isValidCloudSyncUrl(url) || !systemState.activeTeacher) return;
-  const clean = url.trim();
+  const clean = normalizeArabyaWebAppUrl(url.trim());
   systemState.activeTeacher.integrationConfig = systemState.activeTeacher.integrationConfig || {};
   systemState.activeTeacher.integrationConfig.googleFormUrl = clean;
   systemState.config = systemState.config || {};
@@ -5893,6 +6010,7 @@ function persistCloudSyncUrlForTeacher(url) {
   saveTeachersToLocalStorage();
   localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config));
   localStorage.setItem("arabya_pending_cloud_sync_url", clean);
+  saveTeacherSyncRegistryEntry(systemState.activeTeacher.username, clean);
 }
 
 async function prefetchTeacherAccountsFromCloud(syncUrl, apiSecret) {
@@ -6298,8 +6416,14 @@ function navigateToView(viewId) {
   if (viewId === "student-profile-after-exam") {
     renderStudentPostExamProfile();
   } else if (viewId === "student-login-view") {
+    bootstrapStudentGateSyncConfig();
     populateExamSelectionList();
-    prefetchStudentExamGateData();
+    const gatePrefetch = prefetchStudentExamGateData();
+    if (gatePrefetch && typeof gatePrefetch.then === "function") {
+      gatePrefetch.finally(() => {
+        try { populateExamSelectionList(); } catch (e) {}
+      });
+    }
     // تحديث شريط الامتحانات بعد السماح بإعادة التقديم إذا تغيرت البيانات
     if (systemState.lastCompletedExamId) {
       populateExamSelectionList();
@@ -6408,11 +6532,13 @@ async function checkUrlParameters() {
   // 3. التحقق من وجود المعلم وتجهيز الإعدادات لتصفية الامتحانات ومزامنة الدرجات
   const teacherUser = getUrlParameter("teacher");
   if (teacherUser) {
+    systemState.targetTeacherUsername = String(teacherUser).trim();
     const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
     const matchedTeacher = teachers.find(t => t.username === teacherUser || t.name === teacherUser);
     if (matchedTeacher) {
+      const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
       systemState.config = {
-        googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+        googleFormUrl: teacherSyncUrl,
         entryName: matchedTeacher.integrationConfig?.entryName || "",
         entryId: matchedTeacher.integrationConfig?.entryId || "",
         entryCode: matchedTeacher.integrationConfig?.entryCode || "",
@@ -6421,33 +6547,16 @@ async function checkUrlParameters() {
         autoEntryCode: matchedTeacher.autoEntryCode || ""
       };
       systemState.targetTeacherUsername = matchedTeacher.username;
+      if (isValidCloudSyncUrl(teacherSyncUrl)) {
+        saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
+      }
     }
   }
 
-  // 3.b رابط المزامنة المضمّن في الرابط المباشر (يعمل عبر الأجهزة المختلفة)
-  const syncParam = getUrlParameter("s");
-  if (syncParam && (syncParam.includes("/macros/s/") || syncParam.endsWith("/exec"))) {
-    systemState.config = systemState.config || {};
-    systemState.config.googleFormUrl = syncParam;
-    try { localStorage.setItem("arabya_teacher_config", JSON.stringify(systemState.config)); } catch (e) {}
-    setTimeout(function() {
-      if (typeof syncDatabaseFromCloud === "function") {
-        syncDatabaseFromCloud({
-          silent: true,
-          scope: "exam_start",
-          examId: systemState.lockedExamId || resolveStudentExamScopeId()
-        }).then(function(ok) {
-          if (ok) {
-            try { populateExamSelectionList(); } catch (e) {}
-            if (systemState.lockedExamId) {
-              const sel = document.getElementById("student-exam-select");
-              if (sel) { sel.value = systemState.lockedExamId; sel.disabled = true; }
-            }
-          }
-        });
-      }
-    }, 50);
-  }
+  // 3.b رابط المزامنة المضمّن في الرابط المباشر (يُستهلك داخلياً ثم يُزال من شريط العنوان)
+  const hadSyncParam = !!(getUrlParameter("s") && isValidCloudSyncUrl(getUrlParameter("s")));
+  bootstrapStudentGateSyncConfig();
+  if (hadSyncParam) stripSensitiveUrlParamsFromBrowser();
 
   // 4. فتح امتحان مخصص للطالب (عبر البارامتر ?exam=... أو عبر المسار الفرعي الحقيقي في pathname)
   let examId = getUrlParameter("exam");
@@ -6487,11 +6596,13 @@ async function checkUrlParameters() {
         const hashParams = new URLSearchParams(queryInHash);
         const teacherVal = hashParams.get("teacher");
         if (teacherVal) {
+          systemState.targetTeacherUsername = String(teacherVal).trim();
           const teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
           const matchedTeacher = teachers.find(t => t.username === teacherVal || t.name === teacherVal);
           if (matchedTeacher) {
+            const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
             systemState.config = {
-              googleFormUrl: matchedTeacher.integrationConfig?.googleFormUrl || "",
+              googleFormUrl: teacherSyncUrl,
               entryName: matchedTeacher.integrationConfig?.entryName || "",
               entryId: matchedTeacher.integrationConfig?.entryId || "",
               entryCode: matchedTeacher.integrationConfig?.entryCode || "",
@@ -6500,6 +6611,9 @@ async function checkUrlParameters() {
               autoEntryCode: matchedTeacher.autoEntryCode || ""
             };
             systemState.targetTeacherUsername = matchedTeacher.username;
+            if (isValidCloudSyncUrl(teacherSyncUrl)) {
+              saveTeacherSyncRegistryEntry(matchedTeacher.username, teacherSyncUrl);
+            }
           }
         }
       }
@@ -6507,15 +6621,33 @@ async function checkUrlParameters() {
   }
 
   if (examId) {
+    systemState.lockedExamId = String(examId).trim();
+    if (getArabyaWebAppUrls().length > 0) {
+      try {
+        const syncResult = await syncDatabaseFromCloud({
+          silent: true,
+          scope: "exam_start",
+          examId: systemState.lockedExamId,
+          timeoutMs: 10000,
+          forcePull: true
+        });
+        if (!syncResult.ok) {
+          console.warn("[ARABYA] student direct-link cloud sync failed:", syncResult);
+        }
+      } catch (syncErr) {
+        console.warn("[ARABYA] student direct-link cloud sync error:", syncErr);
+      }
+    }
     const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
     if (targetExam) {
       if (isExamPastDeadline(targetExam)) {
         alert(getExamDeadlineBlockMessage(targetExam));
+        systemState.lockedExamId = "";
         return redirected;
       }
-      systemState.lockedExamId = targetExam.id;
       navigateToView("student-login-view");
       setTimeout(() => {
+        try { populateExamSelectionList(); } catch (e) {}
         const select = document.getElementById("student-exam-select");
         if (select) {
           select.value = targetExam.id;
@@ -6524,6 +6656,19 @@ async function checkUrlParameters() {
         }
       }, 100);
       redirected = true;
+    } else {
+      systemState.lockedExamId = "";
+    }
+  } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
+    try {
+      await syncDatabaseFromCloud({
+        silent: true,
+        scope: "exam_start",
+        examId: resolveStudentExamScopeId(),
+        timeoutMs: 8000
+      });
+    } catch (gateErr) {
+      console.warn("[ARABYA] student gate prefetch failed:", gateErr);
     }
   }
 
@@ -8713,7 +8858,15 @@ function populateExamSelectionList() {
   // 1. الامتحانات الظاهرة للطالب: مقيّدة بالمعلم / الرابط المباشر
   let filteredExams = systemState.exams;
   if (systemState.targetTeacherUsername) {
-    filteredExams = systemState.exams.filter(exam => exam.teacher === systemState.targetTeacherUsername || !exam.teacher);
+    const teacherExams = systemState.exams.filter(exam => exam.teacher === systemState.targetTeacherUsername);
+    filteredExams = teacherExams.length ? teacherExams : systemState.exams.filter(exam => !exam.teacher);
+  } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
+    filteredExams = systemState.exams.filter(exam => !!exam.teacher);
+    if (!filteredExams.length) {
+      select.innerHTML = `<option value="" disabled selected>جاري تحميل الامتحانات من السحابة...</option>`;
+      select.disabled = true;
+      return;
+    }
   }
   if (systemState.lockedExamId) {
     filteredExams = filteredExams.filter(exam => exam.id === systemState.lockedExamId);

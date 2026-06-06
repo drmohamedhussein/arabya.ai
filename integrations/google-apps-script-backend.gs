@@ -185,12 +185,10 @@ function doPost(e) {
 function doGet(e) {
   try {
     var action = e && e.parameter ? e.parameter.action : "";
-    if (action === "get_sync_meta" || action === "get_backup") {
+    if (action === "get_sync_meta") {
       if (!isArabyaApiAuthorized_(e, null)) {
         return unauthorizedArabya_();
       }
-    }
-    if (action === "get_sync_meta") {
       if (!checkArabyaRateLimit_(e, null, "get_sync_meta", "")) {
         return rateLimitedArabya_();
       }
@@ -201,6 +199,9 @@ function doGet(e) {
     if (action === "get_backup") {
       var scope = e && e.parameter ? String(e.parameter.scope || "").trim() : "";
       var examId = e && e.parameter ? String(e.parameter.exam || e.parameter.examId || "").trim() : "";
+      if (!isArabyaGetBackupAuthorized_(e, scope)) {
+        return unauthorizedArabya_();
+      }
       if (!checkArabyaRateLimit_(e, null, "get_backup", scope)) {
         return rateLimitedArabya_();
       }
@@ -261,6 +262,12 @@ function isArabyaApiAuthorized_(e, data) {
   var expected = getArabyaApiSecret_();
   if (!expected) return true;
   return extractClientApiSecret_(e, data) === expected;
+}
+
+/** جلب بيانات بدء الامتحان للطلاب — عام دون سر API حتى يعمل الرابط عبر الأجهزة. */
+function isArabyaGetBackupAuthorized_(e, scope) {
+  if (scope === "exam_start") return true;
+  return isArabyaApiAuthorized_(e, null);
 }
 
 function unauthorizedArabya_(message) {

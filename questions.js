@@ -493,17 +493,7 @@ function getArabyaBaseUrl() {
 }
 
 function patchArabyaDirectLinks() {
-  window.getExamDirectLink = function(exam) {
-    var params = new URLSearchParams();
-    params.set("exam", exam.id);
-    try {
-      var teachers = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
-      var activeUsername = localStorage.getItem("arabya_active_teacher_username");
-      var teacher = teachers.find(function(t) { return t.username === activeUsername; });
-      if (teacher && teacher.username) params.set("teacher", teacher.username);
-    } catch(e) {}
-    return getArabyaBaseUrl() + "?" + params.toString();
-  };
+  // يُبقي توليد الرابط على app.js (يتضمن teacher و s للمزامنة السحابية عبر الأجهزة).
 }
 
 function arabyaEscape(value) {
