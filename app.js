@@ -1167,6 +1167,10 @@ let systemState = {
   isExamActive: false,
   isCheatingSuspended: false,
   cheatViolations: 0,
+  examFocusLostAt: null,
+  lastScreenshotAttemptAt: 0,
+  examHiddenTabViolationSent: false,
+  examFocusViolationSent: false,
   examDeadlineTimerId: null,
   
   // إعدادات التكامل مع جوجل شيت
@@ -9584,6 +9588,10 @@ async function validateStudentAndStart() {
   systemState.isCheatingSuspended = false;
   systemState.cheatViolations = 0;
   systemState.cheatAttemptLog = [];
+  systemState.examFocusLostAt = null;
+  systemState.examFocusViolationSent = false;
+  systemState.examHiddenTabViolationSent = false;
+  systemState.lastScreenshotAttemptAt = 0;
   systemState.examMaxCheatAttemptsAllowed = getExamMaxCheatAttempts(selectedExam);
   markExamAntiCheatStarted();
 
@@ -12417,6 +12425,7 @@ function handleExamTabVisibilityChange(reason) {
     clearExamHiddenTabTimer();
     const hiddenAt = systemState.examTabHiddenAt;
     systemState.examTabHiddenAt = null;
+    systemState.examHiddenTabViolationSent = false;
     if (hiddenAt) {
       const awayMs = Date.now() - hiddenAt;
       hideExamSecurityShield();
@@ -12431,6 +12440,7 @@ function handleExamTabVisibilityChange(reason) {
 
   if (!systemState.examTabHiddenAt) {
     systemState.examTabHiddenAt = Date.now();
+    systemState.examHiddenTabViolationSent = false;
   }
   showExamSecurityShield("تم إخفاء تبويب الامتحان — العودة فوراً! مغادرة المتصفح أو التبويب تُسجَّل كمحاولة غش.");
 
@@ -12440,6 +12450,8 @@ function handleExamTabVisibilityChange(reason) {
     if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
     if (!document.hidden) return;
     if (isInExamClickGrace()) return;
+    if (systemState.examHiddenTabViolationSent) return;
+    systemState.examHiddenTabViolationSent = true;
     recordAntiCheatViolation(reason || "visibility");
   }, delayMs);
 }
@@ -12465,20 +12477,55 @@ function recordAntiCheatViolation(reason) {
   triggerRunnerCheatPenalty(reason);
 }
 
+function recordScreenshotAttempt() {
+  if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
+  const now = Date.now();
+  if (now - (systemState.lastScreenshotAttemptAt || 0) < 1200) return;
+  systemState.lastScreenshotAttemptAt = now;
+  recordAntiCheatViolation("screenshot");
+}
+
 function startExamSecurityWatchdog() {
   stopExamSecurityWatchdog();
+  systemState.examFocusLostAt = null;
+  systemState.examFocusViolationSent = false;
   systemState.examSecurityWatchInterval = setInterval(() => {
     if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
-    if (!document.hidden) return;
-    if (!systemState.examTabHiddenAt) {
-      systemState.examTabHiddenAt = Date.now();
-      showExamSecurityShield("تم إخفاء تبويب الامتحان — العودة فوراً! مغادرة المتصفح أو التبويب تُسجَّل كمحاولة غش.");
+    if (document.hidden) {
+      if (!systemState.examTabHiddenAt) {
+        systemState.examTabHiddenAt = Date.now();
+        systemState.examHiddenTabViolationSent = false;
+        showExamSecurityShield("تم إخفاء تبويب الامتحان — العودة فوراً! مغادرة المتصفح أو التبويب تُسجَّل كمحاولة غش.");
+        return;
+      }
+      const awayMs = Date.now() - systemState.examTabHiddenAt;
+      const threshold = getExamDeviceCategory() === "mobile" ? 900 : 700;
+      if (awayMs >= threshold && !isInExamClickGrace() && !systemState.examHiddenTabViolationSent) {
+        systemState.examHiddenTabViolationSent = true;
+        recordAntiCheatViolation("visibility-watchdog");
+      }
+      systemState.examFocusLostAt = null;
+      systemState.examFocusViolationSent = false;
       return;
     }
-    const awayMs = Date.now() - systemState.examTabHiddenAt;
-    const threshold = getExamDeviceCategory() === "mobile" ? 900 : 700;
-    if (awayMs >= threshold && !isInExamClickGrace()) {
-      recordAntiCheatViolation("visibility-watchdog");
+    systemState.examTabHiddenAt = null;
+    systemState.examHiddenTabViolationSent = false;
+    hideExamSecurityShield();
+    if (!document.hasFocus() && !isInExamClickGrace()) {
+      if (!systemState.examFocusLostAt) {
+        systemState.examFocusLostAt = Date.now();
+        systemState.examFocusViolationSent = false;
+      } else {
+        const focusAwayMs = Date.now() - systemState.examFocusLostAt;
+        const focusThreshold = getExamDeviceCategory() === "mobile" ? 900 : 700;
+        if (focusAwayMs >= focusThreshold && !systemState.examFocusViolationSent) {
+          systemState.examFocusViolationSent = true;
+          recordAntiCheatViolation("focus-watchdog");
+        }
+      }
+    } else {
+      systemState.examFocusLostAt = null;
+      systemState.examFocusViolationSent = false;
     }
   }, 450);
 }
@@ -12500,6 +12547,7 @@ function getCheatReasonLabel(reason) {
     pagehide: "محاولة مغادرة صفحة الامتحان",
     freeze: "تعليق صفحة الامتحان أثناء التبديل",
     screenshot: "محاولة التقاط لقطة شاشة",
+    contextmenu: "النقر بزر الفأرة الأيمن",
     copy: "محاولة النسخ",
     cut: "محاولة القص",
     paste: "محاولة اللصق",
@@ -12640,11 +12688,17 @@ function getCheatPenaltyMessage(reason, isExamCanceled) {
 function preventExamClipboardAction(e) {
   if (!systemState.isExamActive) return;
   e.preventDefault();
+  if (systemState.isCheatingSuspended) return;
+  const reason = e.type === "cut" ? "cut" : e.type === "paste" ? "paste" : "copy";
+  recordAntiCheatViolation(reason);
 }
 
 function blockExamRightClick(e) {
   if (!systemState.isExamActive) return;
-  if (e.button === 2) e.preventDefault();
+  if (e.button === 2) {
+    e.preventDefault();
+    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("contextmenu");
+  }
 }
 
 function setupAntiCheatHandlers() {
@@ -12688,7 +12742,9 @@ function setupAntiCheatHandlers() {
   });
 
   document.addEventListener("contextmenu", e => {
-    if (systemState.isExamActive) e.preventDefault();
+    if (!systemState.isExamActive) return;
+    e.preventDefault();
+    if (!systemState.isCheatingSuspended) recordAntiCheatViolation("contextmenu");
   });
   document.addEventListener("mousedown", blockExamRightClick);
   document.addEventListener("auxclick", blockExamRightClick);
@@ -12719,6 +12775,7 @@ function setupAntiCheatHandlers() {
       (commandKey && /[us]/i.test(e.key))
     ) {
       e.preventDefault();
+      if (!systemState.isCheatingSuspended) recordAntiCheatViolation("keyboard-shortcut");
       alert("حظر: غير مسموح بفتح أدوات المطور أو حفظ الصفحة أثناء الامتحان!");
       return false;
     }
@@ -12728,12 +12785,18 @@ function setupAntiCheatHandlers() {
     }
     if (commandKey && /p/i.test(e.key)) {
       e.preventDefault();
+      if (!systemState.isCheatingSuspended) recordAntiCheatViolation("keyboard-shortcut");
       alert("حظر: غير مسموح بالطباعة لحماية سرية الأسئلة!");
       return false;
     }
     if (e.key === "PrintScreen" || e.keyCode === 44) {
       e.preventDefault();
-      if (!systemState.isCheatingSuspended) recordAntiCheatViolation("screenshot");
+      recordScreenshotAttempt();
+      return false;
+    }
+    if (e.metaKey && e.shiftKey && /s/i.test(e.key) && !e.ctrlKey) {
+      e.preventDefault();
+      recordScreenshotAttempt();
       return false;
     }
     if (e.key === "Meta" || e.key === "OS") {
@@ -12745,7 +12808,7 @@ function setupAntiCheatHandlers() {
   document.addEventListener("keyup", e => {
     if (!systemState.isExamActive || systemState.isCheatingSuspended) return;
     if (e.key === "PrintScreen" || e.keyCode === 44) {
-      recordAntiCheatViolation("screenshot");
+      recordScreenshotAttempt();
     }
   });
 }
