@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.15";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.16";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -2553,6 +2553,41 @@ function stripAnswerKeysFromExam(exam) {
   };
 }
 
+function snapshotExamAnswerKeys_(exams) {
+  const map = new Map();
+  (exams || []).forEach(exam => {
+    if (!exam?.id) return;
+    const keys = {};
+    (exam.questions || []).forEach(q => {
+      if (q && q.id != null && q.correctAnswer !== undefined) {
+        keys[q.id] = q.correctAnswer;
+      }
+    });
+    if (Object.keys(keys).length) map.set(String(exam.id), keys);
+  });
+  return map;
+}
+
+function restoreAnswerKeysToExam_(exam, keySnapshot) {
+  if (!exam || !keySnapshot || !keySnapshot.size) return exam;
+  const keys = keySnapshot.get(String(exam.id));
+  if (!keys) return exam;
+  return {
+    ...exam,
+    questions: (exam.questions || []).map(q => {
+      if (!q || q.correctAnswer !== undefined) return q;
+      const preserved = keys[q.id];
+      return preserved !== undefined ? { ...q, correctAnswer: preserved } : q;
+    })
+  };
+}
+
+function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey, label) {
+  const keySnapshot = snapshotExamAnswerKeys_(localExams);
+  const merged = mergeRemoteCollection_(localExams, remoteExams, mergeKey, label);
+  return merged.map(exam => restoreAnswerKeysToExam_(exam, keySnapshot));
+}
+
 function isTeacherSessionActive() {
   return !!(systemState.activeTeacher && systemState.activeView === "teacher-dashboard-view");
 }
@@ -2586,6 +2621,17 @@ function getQuestionCorrectAnswer(examId, questionId) {
   const exam = getFullExamById(examId);
   const question = exam?.questions?.find(q => String(q.id) === String(questionId));
   return question?.correctAnswer;
+}
+
+function resolveClientQuestionsForGrading_(exam, presentedQuestions) {
+  const fullExam = getFullExamById(exam?.id) || exam;
+  const bank = Array.isArray(fullExam?.questions) ? fullExam.questions : [];
+  const byId = new Map(bank.map(q => [String(q.id), q]));
+  const ordered = (presentedQuestions || []).map(pq => {
+    if (!pq) return pq;
+    return byId.get(String(pq.id)) || pq;
+  }).filter(Boolean);
+  return ordered.length ? ordered : bank;
 }
 
 function loadExamsForCurrentSession(savedExamsJson) {
@@ -2646,7 +2692,8 @@ function gradeStudentExamAnswers(exam, presentedQuestions, studentAnswers, optio
   const questionScoresMap = {};
   const answers = studentAnswers && typeof studentAnswers === "object" ? studentAnswers : {};
 
-  (presentedQuestions || []).forEach(q => {
+  const gradingQuestions = resolveClientQuestionsForGrading_(exam, presentedQuestions);
+  gradingQuestions.forEach(q => {
     if (!q) return;
     const studentAns = answers[q.id];
     const qPoints = q.points !== undefined ? q.points : 10;
@@ -2707,6 +2754,16 @@ function applyServerGradedResult(resultObj, graded) {
   if (graded.maxScore !== undefined && graded.maxScore !== null) resultObj.maxScore = graded.maxScore;
   if (graded.cheatViolations !== undefined) resultObj.cheatViolations = graded.cheatViolations;
   if (graded.maxCheatAttemptsAllowed !== undefined) resultObj.maxCheatAttemptsAllowed = graded.maxCheatAttemptsAllowed;
+}
+
+function getDisplayScaledScoreFromResult(resultObj, fallbackScaled = 0) {
+  const parsed = parseGradeFromScoreText_(resultObj?.score || "", resultObj?.maxScore);
+  if (parsed && parsed.includes("/")) {
+    const parts = parsed.split("/").map(s => s.trim());
+    const scaled = parseFloat(String(parts[0] || "").replace(",", "."));
+    if (Number.isFinite(scaled)) return scaled;
+  }
+  return fallbackScaled;
 }
 
 
@@ -4191,8 +4248,7 @@ function reloadSystemStateFromLocalStorage() {
     if (teachers) systemState.teachers = JSON.parse(teachers);
   } catch (e) { console.error("reloadSystemStateFromLocalStorage: teachers", e); }
   try {
-    const exams = localStorage.getItem("arabya_exams_db");
-    if (exams) systemState.exams = JSON.parse(exams);
+    loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
   } catch (e) { console.error("reloadSystemStateFromLocalStorage: exams", e); }
   try {
     const students = localStorage.getItem("arabya_students_db");
@@ -4862,8 +4918,10 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
       systemState.exams = mergeRemoteCollection_(systemState.exams, remoteData.exams, mergeExamKey, "امتحان");
     } else {
       const vaultBase = systemState._teacherExamsVault || systemState.exams || [];
-      systemState._teacherExamsVault = mergeRemoteCollection_(vaultBase, remoteData.exams, mergeExamKey, "امتحان");
+      systemState._teacherExamsVault = mergeRemoteExamsPreservingAnswerKeys_(vaultBase, remoteData.exams, mergeExamKey, "امتحان");
       systemState.exams = (systemState._teacherExamsVault || []).map(stripAnswerKeysFromExam);
+      const lockedId = systemState.lockedExamId || resolveStudentExamScopeId();
+      if (lockedId) captureExamAnswerKeyVault({ id: lockedId });
     }
   }
   if (Array.isArray(remoteData.results)) {
@@ -5614,10 +5672,11 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
 
 const PRE_EXAM_SYNC_ESTIMATE_KEY = "arabya_pre_exam_sync_estimate_ms";
 const PRE_EXAM_SYNC_AT_KEY = "arabya_pre_exam_sync_at";
-const DEFAULT_PRE_EXAM_SYNC_MS = 6000;
-const MIN_PRE_EXAM_SYNC_MS = 3000;
-const MAX_PRE_EXAM_SYNC_MS = 15000;
-const PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS = 25000;
+const DEFAULT_PRE_EXAM_SYNC_MS = 2000;
+const MIN_PRE_EXAM_SYNC_MS = 0;
+const MAX_PRE_EXAM_SYNC_MS = 8000;
+const PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS = 45000;
+const STUDENT_GATE_SYNC_TIMEOUT_MS = 4500;
 let studentExamGatePrefetchPromise = null;
 
 function getPreExamSyncEstimateMs() {
@@ -5718,7 +5777,7 @@ function prefetchStudentExamGateData() {
     silent: true,
     scope: "exam_start",
     examId: resolveStudentExamScopeId(),
-    timeoutMs: 8000
+    timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
   }).then(result => {
     recordPreExamSyncDuration(performance.now() - started);
     return result;
@@ -5779,8 +5838,8 @@ function waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs) {
     const tick = () => {
       const elapsed = performance.now() - startedAt;
       let remainingMs = Math.max(0, totalMs - elapsed);
-      if (syncFinished && remainingMs > 1200) {
-        remainingMs = Math.max(0, remainingMs - 900);
+      if (syncFinished) {
+        remainingMs = 0;
       }
       const remainingSecs = Math.ceil(remainingMs / 1000);
       const progress = Math.min(100, (elapsed / totalMs) * 100);
@@ -5857,8 +5916,8 @@ async function syncDatabaseFromCloud(options = {}) {
       try {
         localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
         localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
-        if (Array.isArray(systemState.exams)) {
-          localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+        if (isTeacherSessionActive() && Array.isArray(systemState.exams)) {
+          syncTeacherExamsVaultFromState();
         }
       } catch (storageErr) {
         console.warn("[ARABYA] syncDatabaseFromCloud localStorage:", storageErr);
@@ -6646,53 +6705,38 @@ async function checkUrlParameters() {
   if (examId) {
     systemState.lockedExamId = String(examId).trim();
     if (getArabyaWebAppUrls().length > 0) {
-      try {
-        const syncResult = await syncDatabaseFromCloud({
-          silent: true,
-          scope: "exam_start",
-          examId: systemState.lockedExamId,
-          timeoutMs: 10000,
-          forcePull: true
-        });
-        if (!syncResult.ok) {
-          console.warn("[ARABYA] student direct-link cloud sync failed:", syncResult);
+      void prefetchStudentExamGateData().then(syncResult => {
+        if (!syncResult?.ok) {
+          console.warn("[ARABYA] student direct-link background sync:", syncResult);
         }
-      } catch (syncErr) {
-        console.warn("[ARABYA] student direct-link cloud sync error:", syncErr);
-      }
-    }
-    const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
-    if (targetExam) {
-      if (isExamPastDeadline(targetExam)) {
-        alert(getExamDeadlineBlockMessage(targetExam));
-        systemState.lockedExamId = "";
-        return redirected;
-      }
-      navigateToView("student-login-view");
-      setTimeout(() => {
         try { populateExamSelectionList(); } catch (e) {}
         const select = document.getElementById("student-exam-select");
-        if (select) {
-          select.value = targetExam.id;
+        if (select && systemState.lockedExamId) {
+          select.value = systemState.lockedExamId;
           select.disabled = true;
           select.setAttribute("aria-describedby", "direct-exam-lock-note");
         }
-      }, 100);
-      redirected = true;
-    } else {
-      systemState.lockedExamId = "";
-    }
-  } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
-    try {
-      await syncDatabaseFromCloud({
-        silent: true,
-        scope: "exam_start",
-        examId: resolveStudentExamScopeId(),
-        timeoutMs: 8000
       });
-    } catch (gateErr) {
-      console.warn("[ARABYA] student gate prefetch failed:", gateErr);
     }
+    const targetExam = systemState.exams.find(e => String(e.id).toLowerCase() === String(examId).toLowerCase());
+    if (targetExam && isExamPastDeadline(targetExam)) {
+      alert(getExamDeadlineBlockMessage(targetExam));
+      systemState.lockedExamId = "";
+      return redirected;
+    }
+    navigateToView("student-login-view");
+    setTimeout(() => {
+      try { populateExamSelectionList(); } catch (e) {}
+      const select = document.getElementById("student-exam-select");
+      if (select && systemState.lockedExamId) {
+        select.value = systemState.lockedExamId;
+        select.disabled = true;
+        select.setAttribute("aria-describedby", "direct-exam-lock-note");
+      }
+    }, 100);
+    redirected = true;
+  } else if (hasStudentGateCloudContext() && getArabyaWebAppUrls().length > 0) {
+    void prefetchStudentExamGateData();
   }
 
   return redirected;
@@ -9022,6 +9066,11 @@ async function validateStudentAndStart() {
     email,
     mobile
   });
+  if (!studentRecord) {
+    alert("تعذّر حفظ بيانات الطالب. أعد المحاولة.");
+    return;
+  }
+  saveStudentsToLocalStorage();
 
   systemState.currentStudent = {
     name: studentRecord.name,
@@ -9051,24 +9100,36 @@ async function validateStudentAndStart() {
       startBtn.disabled = true;
       startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري التجهيز...`;
     }
-    const estimateMs = getPreExamSyncEstimateMs();
-    const overlay = showStudentExamPrepareOverlay(estimateMs);
+    let recentGateSync = false;
+    try {
+      const lastAt = parseInt(localStorage.getItem(PRE_EXAM_SYNC_AT_KEY) || "0", 10);
+      recentGateSync = Date.now() - lastAt < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS;
+    } catch (e) {}
     const syncStarted = performance.now();
     const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
       silent: true,
       scope: "exam_start",
       examId,
-      timeoutMs: 8000
+      timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
     });
-    try {
-      await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
-    } catch (prepErr) {
-      console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
-      overlay.close();
+    if (recentGateSync) {
+      try { await syncPromise; } catch (prepErr) {
+        console.warn("[ARABYA] quick pre-exam sync failed:", prepErr);
+      }
+    } else {
+      const estimateMs = getPreExamSyncEstimateMs();
+      const overlay = showStudentExamPrepareOverlay(estimateMs);
+      try {
+        await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
+      } catch (prepErr) {
+        console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
+        overlay.close();
+      }
     }
     recordPreExamSyncDuration(performance.now() - syncStarted);
     studentExamGatePrefetchPromise = null;
     reloadSystemStateFromLocalStorage();
+    saveStudentsToLocalStorage();
 
     selectedExam = systemState.exams.find(e => e.id === examId);
     if (!selectedExam) {
@@ -9451,7 +9512,7 @@ function runnerNextQuestion(isAuto = false) {
 }
 
 // حساب وتوثيق النتيجة مع هيكل الدرجات النسبية المطور
-function submitFinishedExam() {
+async function submitFinishedExam() {
   systemState.isExamActive = false;
   stopExamDeadlineWatcher();
   releaseSecureExamMode();
@@ -9538,13 +9599,19 @@ function submitFinishedExam() {
   if (navProfileLi) navProfileLi.classList.remove("hidden");
   saveSystemState(false);
   systemState.currentExamRuntime = null;
-  showStudentResultView(scoreString, hasEssay, scaledScore, examTotalScore);
+  showStudentResultView("جاري حفظ النتيجة...", hasEssay, "…", examTotalScore);
+
+  const syncOutcome = await sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
+  const displayScaled = getDisplayScaledScoreFromResult(resultObj, scaledScore);
+  const displayScoreString = resultObj.score || scoreString;
+  const displayHasEssay = /مقالي|مقالية/i.test(displayScoreString) || hasEssay;
+  showStudentResultView(displayScoreString, displayHasEssay, displayScaled, resultObj.maxScore || examTotalScore);
+
   if (archivedAttempts && archivedAttempts.length) {
     syncRetakeAffectedResultsToCloud(archivedAttempts);
   }
-  void sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
-  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
-    scheduleCloudBackupPush.immediate("exam_submit");
+  if (!syncOutcome?.ok && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    scheduleCloudBackupPush.immediate("exam_submit_retry");
   }
 }
 
@@ -9646,6 +9713,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
   const statusEl = document.getElementById("runner-res-sync-status");
   const syncUrl = getExamResultSyncUrl(exam);
   const urlList = syncUrl ? [syncUrl] : [];
+  const syncOutcome = { ok: false, graded: null };
 
   if (urlList.length === 0) {
     const traditionalUrl = getUnifiedTeacherSyncUrl(exam) || (systemState.config ? systemState.config.googleFormUrl || "" : "");
@@ -9669,7 +9737,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
     } else if (statusEl) {
       statusEl.innerHTML = `<span class="material-icons" style="color:var(--warning); vertical-align:middle;">warning</span> تم حفظ النتيجة محلياً ✓ (لم يتم ربط Google Sheets بعد)`;
     }
-    return;
+    return syncOutcome;
   }
 
   if (statusEl) {
@@ -9679,23 +9747,17 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
   const slimPayload = buildAddResultCloudPayload(scoreString, details, resultRecordId, resultObj);
 
   try {
-    const [postResult, backupOk] = await Promise.all([
-      postAddResultToCloudUrls(urlList, slimPayload),
-      pushCloudBackupNow("exam_submit")
-    ]);
+    const postResult = await postAddResultToCloudUrls(urlList, slimPayload);
+    const backupOk = isTeacherSessionActive()
+      ? await pushCloudBackupNow("exam_submit")
+      : false;
+    syncOutcome.ok = !!(postResult.ok || backupOk);
+    syncOutcome.graded = postResult.graded || null;
     if (postResult.graded && resultObj) {
       applyServerGradedResult(resultObj, postResult.graded);
       saveSystemState(false);
-      const parsedScaled = parseGradeFromScoreText_(resultObj.score, resultObj.maxScore);
-      const scoreNumEl = document.getElementById("runner-res-score");
-      const totalEl = document.getElementById("runner-res-total");
-      if (scoreNumEl && parsedScaled.includes("/")) {
-        const parts = parsedScaled.split("/").map(s => s.trim());
-        scoreNumEl.innerText = parts[0] || scoreNumEl.innerText;
-        if (totalEl && parts[1]) totalEl.innerText = parts[1];
-      }
     }
-    if (!statusEl) return;
+    if (!statusEl) return syncOutcome;
     if (postResult.ok || backupOk) {
       statusEl.innerHTML = `<span class="material-icons" style="color:var(--success); vertical-align:middle;">check_circle</span> تم حفظ نتيجتك ومزامنتها مع Google Sheets بنجاح ✓`;
     } else if (postResult.successCount > 0) {
@@ -9706,6 +9768,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
         urlList.forEach(url => window.ArabyaOfflineQueue.enqueue(normalizeArabyaWebAppUrl(url), slimPayload));
       }
     }
+    return syncOutcome;
   } catch (syncErr) {
     console.error("[ARABYA] sendResultToGoogleSheets:", syncErr);
     if (statusEl) {
@@ -9717,6 +9780,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
     if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
       scheduleCloudBackupPush.immediate("exam_submit_retry");
     }
+    return syncOutcome;
   }
 }
 

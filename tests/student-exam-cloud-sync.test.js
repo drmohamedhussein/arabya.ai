@@ -25,14 +25,22 @@ test("student exam: silent cloud pull does not toast students", () => {
   assert.ok(appSource.includes('recordCloudSyncOutcome(true, "جلب من السحابة", { silent })'));
 });
 
-test("student exam: direct link awaits cloud sync before showing exam", () => {
+test("student exam: direct link opens immediately with background sync", () => {
   const block = appSource.slice(
     appSource.indexOf("if (examId) {"),
     appSource.indexOf("} else if (hasStudentGateCloudContext()")
   );
-  assert.ok(block.includes("await syncDatabaseFromCloud"));
-  assert.ok(block.includes('scope: "exam_start"'));
-  assert.ok(block.includes("forcePull: true"));
+  assert.ok(block.includes("void prefetchStudentExamGateData"));
+  assert.ok(!block.includes("forcePull: true"));
+  assert.ok(block.includes("navigateToView(\"student-login-view\")"));
+});
+
+test("student exam: preserves answer keys and waits for server grading", () => {
+  assert.ok(appSource.includes("function mergeRemoteExamsPreservingAnswerKeys_"));
+  assert.ok(appSource.includes("function resolveClientQuestionsForGrading_"));
+  assert.ok(appSource.includes("async function submitFinishedExam"));
+  assert.ok(appSource.includes("await sendResultToGoogleSheets"));
+  assert.ok(appSource.includes("saveStudentsToLocalStorage();"));
 });
 
 test("student exam: GAS allows public exam_start backup without API secret", () => {
