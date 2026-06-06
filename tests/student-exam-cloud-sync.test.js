@@ -40,4 +40,17 @@ test("student exam: GAS allows public exam_start backup without API secret", () 
   assert.ok(gasSource.includes('if (scope === "exam_start") return true'));
 });
 
+test("student exam: GAS allows student post actions without API secret", () => {
+  assert.ok(gasSource.includes("function isArabyaPostActionAuthorized_"));
+  assert.ok(gasSource.includes('"register_exam_attempt": true'));
+  assert.ok(gasSource.includes('"log_cheat_event": true'));
+  assert.ok(gasSource.includes('"add_result": true'));
+});
+
+test("student exam: sync URL list is scoped to target teacher only", () => {
+  assert.ok(appSource.includes("if (!isTeacherSessionActive() && hasStudentGateCloudContext())"));
+  assert.ok(appSource.includes("return Array.from(urls).filter(Boolean).slice(0, 1);"));
+  assert.ok(appSource.includes("if (isTeacherSessionActive()) {"));
+});
+
 console.log("Student exam cloud sync tests passed.");

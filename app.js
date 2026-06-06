@@ -5,7 +5,7 @@
  */
 
 // كائن الحالة العامة للنظام
-const ARABYA_APP_BUILD_VERSION = "2026.06.06.14";
+const ARABYA_APP_BUILD_VERSION = "2026.06.06.15";
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
@@ -1507,6 +1507,7 @@ function initDatabase() {
 }
 
 async function fetchPlatformAppVersionFromCloudMeta() {
+  if (!isTeacherSessionActive()) return false;
   const urls = getGeneralTeacherSyncUrls();
   for (const rawUrl of urls) {
     const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_sync_meta");
@@ -4316,6 +4317,26 @@ function hasStudentGateCloudContext() {
 
 function getGeneralTeacherSyncUrls() {
   const urls = new Set();
+  const teacherParam = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
+  const syncParam = getUrlParameter("s") || "";
+  const fromTeacherParam = resolveSyncUrlForTeacherUsername(teacherParam);
+
+  // في بوابة الطالب: استخدم رابط المعلم المستهدف فقط لتقليل زمن الجلب.
+  if (!isTeacherSessionActive() && hasStudentGateCloudContext()) {
+    if (isValidCloudSyncUrl(syncParam)) {
+      urls.add(normalizeArabyaWebAppUrl(String(syncParam).trim()));
+    }
+    if (fromTeacherParam) urls.add(fromTeacherParam);
+    if (systemState.config && isValidCloudSyncUrl(systemState.config.googleFormUrl)) {
+      urls.add(normalizeArabyaWebAppUrl(systemState.config.googleFormUrl.trim()));
+    }
+    try {
+      const pending = localStorage.getItem("arabya_pending_cloud_sync_url") || "";
+      if (isValidCloudSyncUrl(pending)) urls.add(normalizeArabyaWebAppUrl(pending.trim()));
+    } catch (e) {}
+    return Array.from(urls).filter(Boolean).slice(0, 1);
+  }
+
   const vault = loadTeacherSyncCredentials();
   if (isValidCloudSyncUrl(vault.googleFormUrl)) {
     urls.add(normalizeArabyaWebAppUrl(String(vault.googleFormUrl).trim()));
@@ -4340,12 +4361,12 @@ function getGeneralTeacherSyncUrls() {
       urls.add(normalizeArabyaWebAppUrl(teacherUrlInput.value.trim()));
     }
   } catch (e) {}
-  const teacherParam = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
-  const fromTeacherParam = resolveSyncUrlForTeacherUsername(teacherParam);
   if (fromTeacherParam) urls.add(fromTeacherParam);
-  Object.values(loadTeacherSyncRegistry()).forEach(url => {
-    if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(String(url).trim()));
-  });
+  if (isTeacherSessionActive()) {
+    Object.values(loadTeacherSyncRegistry()).forEach(url => {
+      if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(String(url).trim()));
+    });
+  }
   return Array.from(urls).filter(Boolean);
 }
 
@@ -6539,6 +6560,7 @@ async function checkUrlParameters() {
       const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
       systemState.config = {
         googleFormUrl: teacherSyncUrl,
+        apiSecret: matchedTeacher.integrationConfig?.apiSecret || "",
         entryName: matchedTeacher.integrationConfig?.entryName || "",
         entryId: matchedTeacher.integrationConfig?.entryId || "",
         entryCode: matchedTeacher.integrationConfig?.entryCode || "",
@@ -6603,6 +6625,7 @@ async function checkUrlParameters() {
             const teacherSyncUrl = matchedTeacher.integrationConfig?.googleFormUrl || "";
             systemState.config = {
               googleFormUrl: teacherSyncUrl,
+              apiSecret: matchedTeacher.integrationConfig?.apiSecret || "",
               entryName: matchedTeacher.integrationConfig?.entryName || "",
               entryId: matchedTeacher.integrationConfig?.entryId || "",
               entryCode: matchedTeacher.integrationConfig?.entryCode || "",

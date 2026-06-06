@@ -17,9 +17,10 @@ test("phase4: GAS protects get_backup and POST with API secret", () => {
   assert.ok(gasSource.includes("sanitizeArabyaDbForClient_"));
   const doGetBlock = gasSource.slice(gasSource.indexOf("function doGet"), gasSource.indexOf("function parseArabyaPayload_"));
   assert.ok(doGetBlock.includes('action === "get_backup"'));
-  assert.ok(doGetBlock.includes("isArabyaApiAuthorized_(e, null)"));
+  assert.ok(doGetBlock.includes("isArabyaGetBackupAuthorized_(e, scope)"));
   const doPostBlock = gasSource.slice(gasSource.indexOf("function doPost"), gasSource.indexOf("function doGet"));
-  assert.ok(doPostBlock.includes("isArabyaApiAuthorized_(e, data)"));
+  assert.ok(doPostBlock.includes("isArabyaPostActionAuthorized_(action, e, data)"));
+  assert.ok(gasSource.includes("function isArabyaPostActionAuthorized_"));
 });
 
 test("phase4: client has API secret helpers wired to cloud calls", () => {

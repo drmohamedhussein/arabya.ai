@@ -73,7 +73,7 @@ function doPost(e) {
   try {
     var data = parseArabyaPayload_(e);
     var action = data.action || "save_backup";
-    if (!isArabyaApiAuthorized_(e, data)) {
+    if (!isArabyaPostActionAuthorized_(action, e, data)) {
       return unauthorizedArabya_();
     }
     if (!checkArabyaRateLimit_(e, data, action, "")) {
@@ -262,6 +262,20 @@ function isArabyaApiAuthorized_(e, data) {
   var expected = getArabyaApiSecret_();
   if (!expected) return true;
   return extractClientApiSecret_(e, data) === expected;
+}
+
+/**
+ * إجراءات الطالب أثناء الامتحان يجب أن تعمل من أي جهاز بدون سر API.
+ * الإجراءات الإدارية (نسخ احتياطي/حذف/سحب بيانات) تبقى محمية بالسر.
+ */
+function isArabyaPostActionAuthorized_(action, e, data) {
+  var publicStudentActions = {
+    "register_exam_attempt": true,
+    "log_cheat_event": true,
+    "add_result": true
+  };
+  if (publicStudentActions[String(action || "").trim()]) return true;
+  return isArabyaApiAuthorized_(e, data);
 }
 
 /** جلب بيانات بدء الامتحان للطلاب — عام دون سر API حتى يعمل الرابط عبر الأجهزة. */
