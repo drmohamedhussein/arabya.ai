@@ -104,20 +104,20 @@
 
   function buildFullCloudBackupData() {
     const state = global.systemState || {};
-    return {
+    const isTeacher = typeof global.isTeacherSessionActive === "function" && global.isTeacherSessionActive();
+    const payload = {
       schemaVersion: 2,
       exportedAt: new Date().toISOString(),
       appVersion: typeof global.getPlatformAppVersion === "function"
         ? global.getPlatformAppVersion()
         : (global.ARABYA_APP_VERSION || ""),
-      teachers: sanitizeTeachersForCloud(state.teachers),
+      teachers: isTeacher ? sanitizeTeachersForCloud(state.teachers) : [],
       students: state.students || [],
-      exams: state.exams || [],
       results: state.results || [],
       examDeviceRegistry: typeof global.loadExamDeviceRegistry === "function"
         ? global.loadExamDeviceRegistry()
         : { bindings: [] },
-      questionBanks: collectAllQuestionBanksForCloud(),
+      questionBanks: isTeacher ? collectAllQuestionBanksForCloud() : {},
       deletedStudentKeys: Array.isArray(state.deletedStudentKeys) ? state.deletedStudentKeys : [],
       deletedResultKeys: Array.isArray(state.deletedResultKeys) ? state.deletedResultKeys : [],
       config: state.config
@@ -134,6 +134,10 @@
             : (global.ARABYA_APP_VERSION || "")
         }
     };
+    if (isTeacher) {
+      payload.exams = state._teacherExamsVault || state.exams || [];
+    }
+    return payload;
   }
 
   function getCloudWebAppUrls() {
