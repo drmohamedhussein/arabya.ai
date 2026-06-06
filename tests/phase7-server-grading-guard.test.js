@@ -30,4 +30,25 @@ test("phase7: client hides answer keys from student runtime", () => {
   assert.ok(appSource.includes("applyServerGradedResult"));
 });
 
+test("phase7: cloud attempt registration failures block exam start", () => {
+  const registerBlock = appSource.slice(
+    appSource.indexOf("async function registerExamAttemptWithCloud"),
+    appSource.indexOf("async function logCheatEventToCloud")
+  );
+  assert.ok(registerBlock.includes("code: \"network_error\""));
+  assert.ok(registerBlock.includes("code: \"queued\""));
+  assert.ok(registerBlock.includes("تعذر تسجيل محاولة الامتحان"));
+  assert.ok(registerBlock.includes("تعذر تأكيد تسجيل محاولة الامتحان"));
+});
+
+test("phase7: GAS blocks duplicate results even without attempt token", () => {
+  const processBlock = gasSource.slice(
+    gasSource.indexOf("function processArabyaAddResult_"),
+    gasSource.indexOf("function checkArabyaRateLimit_")
+  );
+  assert.ok(processBlock.includes("var blockingResult = findBlockingArabyaResult_(db, studentLookupKey, examId);"));
+  assert.ok(processBlock.indexOf("var blockingResult = findBlockingArabyaResult_") < processBlock.indexOf("if (attemptToken)"));
+  assert.ok(processBlock.includes('code: "blocked_attempt"'));
+});
+
 console.log("Phase 7 server grading guard tests passed.");

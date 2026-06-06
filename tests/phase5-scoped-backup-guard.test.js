@@ -37,6 +37,16 @@ test("phase5: exam_start backup strips correctAnswer on server", () => {
   assert.ok(gasSource.includes("stripCorrectAnswersFromExams_"));
 });
 
+test("phase5: save_backup merges students and results instead of replacing them", () => {
+  const mergeBlock = gasSource.slice(
+    gasSource.indexOf("function mergeArabyaDatabase_"),
+    gasSource.indexOf("function sanitizeArabyaDbForGetBackup_")
+  );
+  assert.ok(!mergeBlock.includes("db.students = patch.students.map"));
+  assert.ok(!mergeBlock.includes("db.results = patch.results.map"));
+  assert.ok(mergeBlock.includes('db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection)'));
+});
+
 test("phase5: no first-run admin credential alert on public site", () => {
   assert.ok(!appSource.includes("_pendingFirstRunCredentials"));
   assert.ok(!appSource.includes("تم إنشاء حساب مدير المنصة لأول مرة"));

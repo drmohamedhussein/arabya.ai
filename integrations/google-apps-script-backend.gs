@@ -812,6 +812,10 @@ function processArabyaAddResult_(data, db) {
 
   var attempt = null;
   var attemptToken = String(data.attemptToken || "").trim();
+  var blockingResult = findBlockingArabyaResult_(db, studentLookupKey, examId);
+  if (blockingResult) {
+    return { error: "تم رفض التسليم: يوجد محاولة سابقة مسجّلة.", code: "blocked_attempt" };
+  }
   if (attemptToken) {
     attempt = loadExamAttempt_(attemptToken);
     if (!attempt) {
@@ -825,9 +829,6 @@ function processArabyaAddResult_(data, db) {
     }
     if (String(data.deviceFingerprint || "") && String(data.deviceFingerprint || "") !== String(attempt.deviceFingerprint || "")) {
       return { error: "بصمة الجهاز لا تطابق جلسة المحاولة.", code: "device_mismatch" };
-    }
-    if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
-      return { error: "تم رفض التسليم: يوجد محاولة سابقة مسجّلة.", code: "blocked_attempt" };
     }
   }
 
@@ -1148,24 +1149,10 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
     if (!Array.isArray(patch[collection])) return;
     if (collection === "exams" && shouldSkipExamMetaMerge_(clientReason)) return;
-    if (reason === "save_backup" && collection === "students") {
-      db.students = patch.students.map(function(item) {
-        return JSON.parse(JSON.stringify(item || {}));
-      });
-    } else if (reason === "save_backup" && collection === "results") {
-      db.results = patch.results.map(function(item) {
-        return JSON.parse(JSON.stringify(item || {}));
-      });
-    } else if (collection === "exams") {
-      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
-    } else if (collection === "exams") {
+    if (collection === "exams") {
       db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
     } else {
-      if (collection === "exams") {
-        db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
-      } else {
-        db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
-      }
+      db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
     }
   });
   if (db.deletedStudentKeys.length) {
