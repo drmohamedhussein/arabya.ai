@@ -14,6 +14,8 @@ test("phase7: GAS grades add_result server-side", () => {
   assert.ok(gasSource.includes("processArabyaAddResult_"));
   assert.ok(gasSource.includes("gradeArabyaExamResult_"));
   assert.ok(gasSource.includes("graded:"));
+  assert.ok(gasSource.includes("get_exam_grading_keys"));
+  assert.ok(gasSource.includes("buildArabyaExamGradingKeys_"));
 });
 
 test("phase7: GAS supports register_exam_attempt and log_cheat_event", () => {

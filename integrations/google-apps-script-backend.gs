@@ -80,6 +80,19 @@ function doPost(e) {
       return rateLimitedArabya_();
     }
 
+    if (action === "get_exam_grading_keys") {
+      var keysExamId = String(data.examId || data.exam || "").trim();
+      if (!keysExamId) {
+        return jsonArabya_({ status: "error", code: "exam_required", message: "examId required" });
+      }
+      var keysDb = readArabyaDatabase_();
+      var keysPayload = buildArabyaExamGradingKeys_(keysDb, keysExamId);
+      if (!keysPayload) {
+        return jsonArabya_({ status: "error", code: "exam_not_found", message: "Exam not found" });
+      }
+      return jsonArabya_(Object.assign({ status: "success", action: action }, keysPayload));
+    }
+
     if (action === "register_exam_attempt") {
       var attemptResult = registerArabyaExamAttempt_(data);
       if (attemptResult.error) {
@@ -196,6 +209,22 @@ function doGet(e) {
       return jsonArabya_(Object.assign({ status: "success", service: "ARABYA.NET backend bridge" }, stats));
     }
 
+    if (action === "get_exam_grading_keys") {
+      var gradingExamId = e && e.parameter ? String(e.parameter.exam || e.parameter.examId || "").trim() : "";
+      if (!gradingExamId) {
+        return jsonArabya_({ status: "error", code: "exam_required", message: "examId required" });
+      }
+      if (!checkArabyaRateLimit_(e, null, "get_exam_grading_keys", "exam_start")) {
+        return rateLimitedArabya_();
+      }
+      var gradingDb = readArabyaDatabase_();
+      var gradingPayload = buildArabyaExamGradingKeys_(gradingDb, gradingExamId);
+      if (!gradingPayload) {
+        return jsonArabya_({ status: "error", code: "exam_not_found", message: "Exam not found" });
+      }
+      return jsonArabya_(Object.assign({ status: "success", action: action }, gradingPayload));
+    }
+
     if (action === "get_backup") {
       var scope = e && e.parameter ? String(e.parameter.scope || "").trim() : "";
       var examId = e && e.parameter ? String(e.parameter.exam || e.parameter.examId || "").trim() : "";
@@ -204,9 +233,6 @@ function doGet(e) {
       }
       if (!checkArabyaRateLimit_(e, null, "get_backup", scope)) {
         return rateLimitedArabya_();
-      }
-      if (scope === "exam_start" && !examId) {
-        return jsonArabya_({ status: "error", code: "exam_required", message: "exam parameter required for exam_start scope" });
       }
       var db = readArabyaDatabase_();
       var sheetRowCount = readArabyaResultsFromSheet_().length;
@@ -275,13 +301,10 @@ function isArabyaPostActionAuthorized_(action, e, data) {
   var publicStudentActions = {
     "register_exam_attempt": true,
     "log_cheat_event": true,
-    "add_result": true
+    "add_result": true,
+    "get_exam_grading_keys": true
   };
-  var normalizedAction = String(action || "").trim();
-  if (publicStudentActions[normalizedAction]) return true;
-  if (normalizedAction === "save_entity" && String(data.collection || "").trim() === "students") {
-    return !!(data.record && String(data.record.name || "").trim());
-  }
+  if (publicStudentActions[String(action || "").trim()]) return true;
   return isArabyaApiAuthorized_(e, data);
 }
 
@@ -371,6 +394,22 @@ function slimArabyaResultForExamStart_(result) {
     staffIpReleasedAt: result.staffIpReleasedAt,
     timestamp: result.timestamp || "",
     score: result.score || ""
+  };
+}
+
+function buildArabyaExamGradingKeys_(db, examId) {
+  var targetExamId = String(examId || "").trim();
+  if (!targetExamId) return null;
+  var exam = findArabyaExamInDb_(db, targetExamId);
+  if (!exam) return null;
+  var gradingKeys = {};
+  (exam.questions || []).forEach(function(q) {
+    if (!q || q.id == null || q.correctAnswer === undefined) return;
+    gradingKeys[String(q.id)] = q.correctAnswer;
+  });
+  return {
+    examId: targetExamId,
+    gradingKeys: gradingKeys
   };
 }
 
@@ -661,12 +700,6 @@ function registerArabyaExamAttempt_(data) {
   };
   db.examDeviceRegistry = mergeArabyaExamDeviceRegistry_(db.examDeviceRegistry, { bindings: [binding] });
   mergeArabyaDatabase_({ examDeviceRegistry: db.examDeviceRegistry }, "register_exam_attempt");
-  if (data.studentRecord && typeof data.studentRecord === "object") {
-    var studentPatch = normalizeArabyaStudentRecordForMerge_(data.studentRecord);
-    if (studentPatch && studentPatch.name) {
-      mergeArabyaDatabase_({ students: [studentPatch] }, "register_exam_attempt:student");
-    }
-  }
   return { attemptToken: token, expiresIn: 14400 };
 }
 
@@ -1166,16 +1199,8 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
       db.results = patch.results.map(function(item) {
         return JSON.parse(JSON.stringify(item || {}));
       });
-    } else if (collection === "exams") {
-      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
-    } else if (collection === "exams") {
-      db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
     } else {
-      if (collection === "exams") {
-        db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
-      } else {
-        db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
-      }
+      db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
     }
   });
   if (db.deletedStudentKeys.length) {
@@ -1309,28 +1334,6 @@ function getArabyaStudentLookupKey_(student) {
   if (id) return "id:" + id;
   var name = String(student.name || "").trim().replace(/\s+/g, " ").toLowerCase();
   return name ? "name:" + name : String(student.studentKey || "");
-}
-
-function normalizeArabyaStudentRecordForMerge_(record) {
-  if (!record || typeof record !== "object") return null;
-  var name = String(record.name || "").trim();
-  if (!name) return null;
-  var code = sanitizeArabyaStudentCode_(record.code || record.accessCode || "");
-  var id = normalizeArabyaStudentId_(record.id || "");
-  var studentKey = String(record.studentKey || "").trim() || getArabyaStudentLookupKey_({
-    name: name,
-    id: id,
-    code: code
-  }) || Utilities.getUuid();
-  return {
-    name: name,
-    id: id,
-    code: code,
-    email: String(record.email || "").trim(),
-    mobile: String(record.mobile || "").trim(),
-    studentKey: studentKey,
-    timestamp: String(record.timestamp || "").trim() || new Date().toLocaleDateString("ar-EG")
-  };
 }
 
 function isArabyaStudentDeleted_(student, deletedKeys) {
@@ -1499,44 +1502,6 @@ function buildArabyaStudentsForClient_(db, sheetResults) {
     if (!duplicate) out.push(JSON.parse(JSON.stringify(backupRow)));
   }
   return out;
-}
-
-
-function mergeArabyaExamQuestionsPreservingAnswerKeys_(baseQuestions, patchQuestions) {
-  var byId = {};
-  (baseQuestions || []).forEach(function(q) {
-    if (q && q.id !== undefined && q.id !== null) byId[String(q.id)] = q;
-  });
-  (patchQuestions || []).forEach(function(pq) {
-    if (!pq || pq.id === undefined || pq.id === null) return;
-    var id = String(pq.id);
-    var base = byId[id] || {};
-    var merged = deepMergeArabyaObjects_(base, pq);
-    if ((merged.correctAnswer === undefined || merged.correctAnswer === null || merged.correctAnswer === "")
-      && base.correctAnswer !== undefined && base.correctAnswer !== null && base.correctAnswer !== "") {
-      merged.correctAnswer = base.correctAnswer;
-    }
-    byId[id] = merged;
-  });
-  return Object.keys(byId).map(function(key) { return byId[key]; });
-}
-
-function mergeArabyaExamsPreservingAnswerKeys_(current, incoming) {
-  var map = {};
-  (current || []).forEach(function(item) {
-    map[getArabyaRecordKey_(item, "exams")] = item;
-  });
-  (incoming || []).forEach(function(item) {
-    if (!item) return;
-    var key = getArabyaRecordKey_(item, "exams");
-    var merged = deepMergeArabyaObjects_(map[key] || {}, item);
-    merged.questions = mergeArabyaExamQuestionsPreservingAnswerKeys_(
-      (map[key] && map[key].questions) || [],
-      (item && item.questions) || []
-    );
-    map[key] = merged;
-  });
-  return Object.keys(map).map(function(key) { return map[key]; });
 }
 
 function mergeArabyaCollection_(current, incoming, collection) {

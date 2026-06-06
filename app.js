@@ -28,7 +28,7 @@ function pickLatestAppVersion(...candidates) {
 }
 
 function resolveEmbeddedAppBuildVersion(fallbackVersion) {
-  const fallback = String(fallbackVersion || "2026.06.06.19").trim();
+  const fallback = String(fallbackVersion || "2026.06.06.20").trim();
   try {
     const fromMeta = document.querySelector('meta[name="arabya-app-version"]')?.content
       || document.documentElement?.getAttribute("data-arabya-build")
@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.19");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.20");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2706,6 +2706,51 @@ function loadExamAnswerKeyVaultFromStorage() {
   }
 }
 
+function applyExamGradingKeysToVault(examId, gradingKeys) {
+  const targetId = String(examId || "").trim();
+  if (!targetId || !gradingKeys || typeof gradingKeys !== "object") return false;
+  const normalizedKeys = {};
+  Object.keys(gradingKeys).forEach(key => {
+    if (gradingKeys[key] !== undefined) normalizedKeys[String(key)] = gradingKeys[key];
+  });
+  if (!Object.keys(normalizedKeys).length) return false;
+  systemState._examAnswerKeyVault = systemState._examAnswerKeyVault || {};
+  systemState._examAnswerKeyVault[targetId] = {
+    ...(systemState._examAnswerKeyVault[targetId] || {}),
+    ...normalizedKeys
+  };
+  persistExamAnswerKeyVaultToStorage();
+  if (Array.isArray(systemState._teacherExamsVault)) {
+    const idx = systemState._teacherExamsVault.findIndex(exam => String(exam?.id) === targetId);
+    if (idx >= 0) {
+      const keySnapshot = new Map([[targetId, normalizedKeys]]);
+      systemState._teacherExamsVault[idx] = restoreAnswerKeysToExam_(systemState._teacherExamsVault[idx], keySnapshot);
+    }
+  }
+  return true;
+}
+
+async function fetchExamGradingKeysFromCloud(examId) {
+  const targetId = String(examId || "").trim();
+  if (!targetId) return false;
+  const urlList = getArabyaWebAppUrls();
+  if (!urlList.length) return false;
+  for (const url of urlList) {
+    try {
+      const response = await postToArabyaWebApp(url, {
+        action: "get_exam_grading_keys",
+        examId: targetId
+      });
+      if (applyExamGradingKeysToVault(targetId, response?.gradingKeys)) {
+        return true;
+      }
+    } catch (err) {
+      console.warn("[ARABYA] get_exam_grading_keys failed:", url, err);
+    }
+  }
+  return false;
+}
+
 function getStudentAnswerForQuestion(answers, questionId) {
   if (!answers || questionId == null) return undefined;
   if (answers[questionId] !== undefined) return answers[questionId];
@@ -2799,8 +2844,20 @@ function persistStudentGateExamsToLocalStorage() {
   const vault = systemState._teacherExamsVault;
   if (!Array.isArray(vault) || !vault.length) return;
   try {
-    localStorage.setItem(ARABYA_STUDENT_EXAM_VAULT_KEY, JSON.stringify(vault));
-    localStorage.setItem("arabya_exams_db", JSON.stringify(vault.map(stripAnswerKeysFromExam)));
+    const keySnapshot = new Map();
+    vault.forEach(exam => {
+      if (!exam?.id) return;
+      const keys = systemState._examAnswerKeyVault?.[exam.id]
+        || systemState._examAnswerKeyVault?.[String(exam.id)];
+      if (keys && typeof keys === "object" && Object.keys(keys).length) {
+        keySnapshot.set(String(exam.id), keys);
+      }
+    });
+    const vaultWithKeys = keySnapshot.size
+      ? vault.map(exam => restoreAnswerKeysToExam_(exam, keySnapshot))
+      : vault;
+    localStorage.setItem(ARABYA_STUDENT_EXAM_VAULT_KEY, JSON.stringify(vaultWithKeys));
+    localStorage.setItem("arabya_exams_db", JSON.stringify(vaultWithKeys.map(stripAnswerKeysFromExam)));
     persistExamAnswerKeyVaultToStorage();
   } catch (e) {
     console.warn("[ARABYA] persistStudentGateExamsToLocalStorage:", e);
@@ -2910,6 +2967,24 @@ function applyServerGradedResult(resultObj, graded) {
   if (graded.maxCheatAttemptsAllowed !== undefined) resultObj.maxCheatAttemptsAllowed = graded.maxCheatAttemptsAllowed;
 }
 
+function computeScaledScoreFromQuestionScores_(resultObj) {
+  const scores = resultObj?.questionScores;
+  if (!scores || typeof scores !== "object") return null;
+  const earned = Object.values(scores).reduce((sum, val) => sum + (Number(val) || 0), 0);
+  if (!Number.isFinite(earned) || earned <= 0) return null;
+  const max = Number(resultObj?.maxScore);
+  const presented = Array.isArray(resultObj?.presentedQuestions) ? resultObj.presentedQuestions : [];
+  let objectivePoints = 0;
+  presented.forEach(q => {
+    if (q && q.type !== "essay") objectivePoints += Number(q.points) || 10;
+  });
+  if (objectivePoints > 0 && Number.isFinite(max) && max > 0) {
+    return Math.round((earned / objectivePoints) * max * 100) / 100;
+  }
+  if (Number.isFinite(max) && max > 0 && earned <= max) return earned;
+  return earned;
+}
+
 function getDisplayScaledScoreFromResult(resultObj, fallbackScaled = 0) {
   const parsed = parseGradeFromScoreText_(resultObj?.score || "", resultObj?.maxScore);
   if (parsed && parsed.includes("/")) {
@@ -2917,7 +2992,9 @@ function getDisplayScaledScoreFromResult(resultObj, fallbackScaled = 0) {
     const scaled = parseFloat(String(parts[0] || "").replace(",", "."));
     if (Number.isFinite(scaled)) return scaled;
   }
-  return fallbackScaled;
+  const fromScores = computeScaledScoreFromQuestionScores_(resultObj);
+  if (fromScores !== null && Number.isFinite(fromScores)) return fromScores;
+  return Number.isFinite(fallbackScaled) ? fallbackScaled : 0;
 }
 
 
@@ -6118,6 +6195,11 @@ async function ensureStudentGateExamReady(examId) {
   recordPreExamSyncDuration(performance.now() - started, targetId);
   systemState.studentGateExamReady = !!result.ok;
   systemState.studentGateSyncedExamId = targetId;
+  if (result.ok) {
+    try { await fetchExamGradingKeysFromCloud(targetId); } catch (keysErr) {
+      console.warn("[ARABYA] exam_start grading keys fetch failed:", keysErr);
+    }
+  }
   return result;
 }
 
@@ -9488,11 +9570,9 @@ async function validateStudentAndStart() {
   };
   saveStudentsToLocalStorage();
   if (getArabyaWebAppUrls().length > 0) {
-    try {
-      await syncStudentRecordToCloud(studentRecord);
-    } catch (studentSyncErr) {
+    void syncStudentRecordToCloud(studentRecord).catch(studentSyncErr => {
       console.warn("[ARABYA] exam_start student cloud sync failed:", studentSyncErr);
-    }
+    });
   }
 
   systemState.currentStudent = {
@@ -9524,19 +9604,29 @@ async function validateStudentAndStart() {
       startBtn.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري التجهيز...`;
     }
     const syncStarted = performance.now();
-    const syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
-      silent: true,
-      scope: "exam_start",
-      examId,
-      timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
-    });
     const estimateMs = getPreExamSyncEstimateMs();
     const overlay = showStudentExamPrepareOverlay(estimateMs, {
       title: "جاري تجهيز الامتحان",
       message: "جاري مزامنة بيانات الامتحان قبل البدء..."
     });
+    const gateAlreadyReady = (
+      systemState.studentGateExamReady &&
+      String(systemState.studentGateSyncedExamId || "") === String(examId)
+    ) || isRecentPreExamSyncForExam(examId);
+    let syncPromise;
+    if (gateAlreadyReady) {
+      syncPromise = Promise.resolve({ ok: true, reason: "ready" });
+    } else {
+      syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
+        silent: true,
+        scope: "exam_start",
+        examId,
+        timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
+      });
+    }
     try {
-      await waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs);
+      await waitPreExamCountdownAndSync(overlay, syncPromise, gateAlreadyReady ? Math.min(estimateMs, 1200) : estimateMs);
+      await fetchExamGradingKeysFromCloud(examId);
     } catch (prepErr) {
       console.warn("[ARABYA] pre-exam prepare failed:", prepErr);
       overlay.close();
@@ -9641,6 +9731,10 @@ async function validateStudentAndStart() {
 
   systemState.currentExam = selectedExam;
   captureExamAnswerKeyVault(selectedExam);
+  if (!hasClientGradingKeysForExam(selectedExam.id, selectedExam.questions)) {
+    try { await fetchExamGradingKeysFromCloud(selectedExam.id); } catch (e) {}
+    captureExamAnswerKeyVault(selectedExam);
+  }
 
   systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
   systemState.currentExamRuntime = calculateRuntimeExamMeta(systemState.shuffledQuestions);
@@ -11972,7 +12066,7 @@ async function fetchClientIpAddress() {
   for (const provider of providers) {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 4500);
+      const timer = setTimeout(() => controller.abort(), 2000);
       const res = await fetch(provider.url, {
         signal: controller.signal,
         cache: "no-store",

@@ -25,13 +25,12 @@ test("student exam: silent cloud pull does not toast students", () => {
   assert.ok(appSource.includes('recordCloudSyncOutcome(true, "جلب من السحابة", { silent })'));
 });
 
-test("student exam: direct link waits for cloud exam before showing title", () => {
+test("student exam: direct link bootstraps early with loading overlay", () => {
   assert.ok(appSource.includes("function bootstrapStudentDirectLinkViewEarly"));
-  assert.ok(appSource.includes("bootstrapStudentDirectLinkViewEarly();"));
-  assert.ok(appSource.includes("ensureStudentGateExamReady"));
-  assert.ok(appSource.includes('navigateToView("student-login-view")'));
+  assert.ok(appSource.includes("ensureStudentGateExamReady(examId)"));
+  assert.ok(appSource.includes("navigateToView(\"student-login-view\")"));
   assert.ok(appSource.includes("function mergeRemoteExamsForStudentGate_"));
-  assert.ok(appSource.includes("جاري تحميل بيانات الامتحان من السحابة"));
+  assert.ok(appSource.includes("جاري جلب بيانات الامتحان"));
 });
 
 test("student exam: preserves answer keys and waits for server grading", () => {
@@ -39,6 +38,8 @@ test("student exam: preserves answer keys and waits for server grading", () => {
   assert.ok(appSource.includes("function resolveClientQuestionsForGrading_"));
   assert.ok(appSource.includes("async function submitFinishedExam"));
   assert.ok(appSource.includes("await sendResultToGoogleSheets"));
+  assert.ok(appSource.includes("fetchExamGradingKeysFromCloud"));
+  assert.ok(appSource.includes("get_exam_grading_keys"));
   assert.ok(appSource.includes("saveStudentsToLocalStorage();"));
 });
 
@@ -52,6 +53,7 @@ test("student exam: GAS allows student post actions without API secret", () => {
   assert.ok(gasSource.includes('"register_exam_attempt": true'));
   assert.ok(gasSource.includes('"log_cheat_event": true'));
   assert.ok(gasSource.includes('"add_result": true'));
+  assert.ok(gasSource.includes("get_exam_grading_keys"));
 });
 
 test("student exam: sync URL list is scoped to target teacher only", () => {

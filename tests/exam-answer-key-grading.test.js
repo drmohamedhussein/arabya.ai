@@ -11,6 +11,7 @@ test("grading: student gate vault keeps answer keys locally", () => {
   assert.ok(appSource.includes("ARABYA_EXAM_ANSWER_VAULT_KEY"));
   assert.ok(appSource.includes("persistExamAnswerKeyVaultToStorage"));
   assert.ok(appSource.includes("hasClientGradingKeysForExam"));
+  assert.ok(appSource.includes("fetchExamGradingKeysFromCloud"));
 });
 
 test("grading: student cloud backup must not overwrite teacher exams", () => {
@@ -19,14 +20,15 @@ test("grading: student cloud backup must not overwrite teacher exams", () => {
   assert.ok(cloudSource.includes("isTeacher ? collectAllQuestionBanksForCloud() : {}"));
 });
 
-test("grading: GAS preserves correctAnswer when merging exams", () => {
-  assert.ok(gasSource.includes("mergeArabyaExamsPreservingAnswerKeys_"));
-  assert.ok(gasSource.includes("mergeArabyaExamQuestionsPreservingAnswerKeys_"));
+test("grading: GAS exposes secure grading keys endpoint", () => {
+  assert.ok(gasSource.includes("buildArabyaExamGradingKeys_"));
+  assert.ok(gasSource.includes("get_exam_grading_keys"));
 });
 
 test("grading: submit waits for server when local keys missing", () => {
   assert.ok(appSource.includes("canGradeLocally = hasClientGradingKeysForExam"));
   assert.ok(appSource.includes("جاري التصحيح على الخادم"));
+  assert.ok(appSource.includes("computeScaledScoreFromQuestionScores_"));
 });
 
 console.log("Exam answer key grading tests passed.");
