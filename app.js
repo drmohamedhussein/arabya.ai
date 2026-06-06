@@ -2676,6 +2676,29 @@ function loadExamAnswerKeyVaultFromStorage() {
   }
 }
 
+function discardStudentExamAnswerVault(examId) {
+  const targetId = String(examId || "").trim();
+  if (!targetId || isTeacherSessionActive()) return;
+  if (systemState._examAnswerKeyVault) {
+    delete systemState._examAnswerKeyVault[targetId];
+    persistExamAnswerKeyVaultToStorage();
+  }
+  if (Array.isArray(systemState._teacherExamsVault)) {
+    systemState._teacherExamsVault = systemState._teacherExamsVault.filter(exam => String(exam?.id || "") !== targetId);
+  }
+  try {
+    const raw = localStorage.getItem(ARABYA_STUDENT_EXAM_VAULT_KEY) || "";
+    const exams = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(exams)) {
+      const remaining = exams.filter(exam => String(exam?.id || "") !== targetId);
+      localStorage.setItem(ARABYA_STUDENT_EXAM_VAULT_KEY, JSON.stringify(remaining));
+      localStorage.setItem("arabya_exams_db", JSON.stringify(remaining.map(stripAnswerKeysFromExam)));
+    }
+  } catch (e) {
+    console.warn("[ARABYA] discardStudentExamAnswerVault:", e);
+  }
+}
+
 function hasClientGradingKeysForExam(examId) {
   const targetId = String(examId || "").trim();
   if (!targetId) return false;
@@ -5425,6 +5448,10 @@ function buildSaveBackupPayload(reason) {
     delete fullData.exams;
     delete fullData.teachers;
     delete fullData.questionBanks;
+    delete fullData.students;
+    delete fullData.results;
+    delete fullData.deletedStudentKeys;
+    delete fullData.deletedResultKeys;
   }
   const clientReason = String(reason || "push");
   let data = fullData;
@@ -5546,6 +5573,11 @@ function mergeRemoteExamDeviceRegistry_(localRegistry, remoteRegistry) {
 }
 
 async function pushCloudBackupNow(reason) {
+  if (!isTeacherSessionActive()) {
+    systemState.lastCloudPushError = "النسخ الاحتياطي الكامل متاح للمعلم فقط.";
+    markCloudSyncLocalOnly("تم إيقاف رفع نسخة كاملة من جلسة طالب");
+    return false;
+  }
   if (!systemState.cloudPushInProgress) {
     beginCriticalCloudPush(reason);
   }
@@ -9829,9 +9861,7 @@ async function submitFinishedExam() {
   }
   systemState.lastCompletedExamId = systemState.currentExam.id;
   systemState.examAttemptToken = "";
-  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
-    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
-  }
+  discardStudentExamAnswerVault(systemState.currentExam?.id);
   // إظهار رابط الملف الشخصي في شريط التنقل
   const navProfileLi = document.getElementById("nav-student-profile-link");
   if (navProfileLi) navProfileLi.classList.remove("hidden");
@@ -9853,7 +9883,7 @@ async function submitFinishedExam() {
   if (archivedAttempts && archivedAttempts.length) {
     syncRetakeAffectedResultsToCloud(archivedAttempts);
   }
-  if (!syncOutcome?.ok && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+  if (isTeacherSessionActive() && !syncOutcome?.ok && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
     scheduleCloudBackupPush.immediate("exam_submit_retry");
   }
 }
@@ -10020,7 +10050,7 @@ async function sendResultToGoogleSheets(scoreString, details, resultRecordId = "
     if (window.ArabyaOfflineQueue) {
       urlList.forEach(url => window.ArabyaOfflineQueue.enqueue(normalizeArabyaWebAppUrl(url), slimPayload));
     }
-    if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+    if (isTeacherSessionActive() && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
       scheduleCloudBackupPush.immediate("exam_submit_retry");
     }
     return syncOutcome;
@@ -11946,7 +11976,20 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
     response = await postToArabyaWebApp(syncUrl, payload);
   } catch (err) {
     console.warn("[ARABYA] register_exam_attempt network failed:", err);
-    return { ok: true, attemptToken: "", advisory: "network_error" };
+    return {
+      ok: false,
+      attemptToken: "",
+      code: "network_error",
+      message: "تعذر تسجيل محاولة الامتحان على الخادم. تحقق من الاتصال بالإنترنت ثم أعد المحاولة."
+    };
+  }
+  if (isArabyaCloudPostQueued(response)) {
+    return {
+      ok: false,
+      attemptToken: "",
+      code: "queued",
+      message: "تعذر تأكيد تسجيل محاولة الامتحان الآن. أعد المحاولة عند عودة الاتصال."
+    };
   }
   if (response?.status === "error") {
     const code = String(response.code || "").trim();
@@ -12751,9 +12794,7 @@ function submitCheatedExam() {
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
   systemState.examAttemptToken = "";
-  if (systemState._examAnswerKeyVault && systemState.currentExam?.id) {
-    delete systemState._examAnswerKeyVault[systemState.currentExam.id];
-  }
+  discardStudentExamAnswerVault(systemState.currentExam?.id);
   systemState.currentExamRuntime = null;
   saveSystemState(false);
 
@@ -12776,7 +12817,7 @@ function submitCheatedExam() {
     syncRetakeAffectedResultsToCloud(archivedAttempts);
   }
   void sendResultToGoogleSheets(scoreString, detailsFormatted, resultObj.recordId, resultObj);
-  if (typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
+  if (isTeacherSessionActive() && typeof scheduleCloudBackupPush === "function" && scheduleCloudBackupPush.immediate) {
     scheduleCloudBackupPush.immediate("exam_submit_cheat");
   }
 }
