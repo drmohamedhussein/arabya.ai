@@ -88,6 +88,12 @@
   global.injectArabyaTemplateExamsIfMissing = function (options) {
     const state = global.systemState;
     if (!state) return { added: 0, skipped: 0 };
+    if (!Array.isArray(state.exams)) state.exams = [];
     return injectTemplateExamsIntoState(state, options);
+  };
+
+  /** يُعاد استدعاؤه بعد المزامنة أو إعادة التحميل لضمان بقاء امتحانات القوالب. */
+  global.ensureArabyaTemplateExamsInjected = function (options) {
+    return global.injectArabyaTemplateExamsIfMissing(options);
   };
 })(typeof window !== "undefined" ? window : global);
