@@ -57,6 +57,7 @@ const sandbox = {
   console,
   systemState: { _examAnswerKeyVault: {} },
   localStorage: { getItem: () => "{}" },
+  loadExamAnswerKeyVaultFromStorage: () => {},
   ARABYA_TEACHER_EXAM_KEYS_STORE: "arabya_teacher_exam_grading_keys",
   ARABYA_EXAM_ANSWER_VAULT_KEY: "arabya_exam_answer_vault_db"
 };
