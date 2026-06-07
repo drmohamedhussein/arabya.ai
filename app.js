@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.15");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.16");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -8017,6 +8017,11 @@ function setupUIEventListeners() {
     importExamBtn.addEventListener("click", importExamFromGoogleForm);
   }
 
+  const bulkQTimeApplyBtn = document.getElementById("edit-meta-bulk-q-time-apply-btn");
+  if (bulkQTimeApplyBtn) {
+    bulkQTimeApplyBtn.addEventListener("click", applyBulkQuestionTimeToAll);
+  }
+
   const nextQBtn = document.getElementById("runner-next-btn");
   if (nextQBtn) {
     nextQBtn.addEventListener("click", () => runnerNextQuestion(false));
@@ -9183,10 +9188,51 @@ window.editExamQuestions = async function(examId) {
     linkInput.value = examUrl;
   }
 
+  const bulkTimeEl = document.getElementById("edit-meta-bulk-q-time");
+  if (bulkTimeEl) {
+    const firstQ = Array.isArray(exam.questions) && exam.questions.length ? exam.questions[0] : null;
+    const sampleSeconds = parseInt(firstQ?.timeSeconds, 10);
+    bulkTimeEl.value = Number.isFinite(sampleSeconds) && sampleSeconds >= 5 ? String(sampleSeconds) : "60";
+  }
+
   renderQuestionsForEdit(exam);
   if (window.ArabyaQuestionBank) {
     window.ArabyaQuestionBank.refreshSharedBankSelect(systemState.activeTeacher?.username);
   }
+};
+
+function resolveBulkQuestionTimeSeconds_(rawValue) {
+  const seconds = parseInt(String(rawValue ?? "").trim(), 10);
+  if (!Number.isFinite(seconds) || seconds < 5) return null;
+  return Math.max(5, seconds);
+}
+
+window.applyBulkQuestionTimeToAll = function applyBulkQuestionTimeToAll() {
+  const bulkInput = document.getElementById("edit-meta-bulk-q-time");
+  const seconds = resolveBulkQuestionTimeSeconds_(bulkInput?.value);
+  if (!seconds) {
+    alert("أدخل مدة صالحة (5 ثوانٍ أو أكثر).");
+    return;
+  }
+  const timeInputs = document.querySelectorAll("#editor-questions-list .edit-q-time");
+  if (!timeInputs.length) {
+    alert("لا توجد أسئلة لتطبيق المدة عليها. أضف أسئلة أولاً.");
+    return;
+  }
+  timeInputs.forEach(input => {
+    input.value = String(seconds);
+  });
+  if (currentEditingExamId) {
+    const exam = systemState.exams.find(e => e.id === currentEditingExamId)
+      || (systemState._teacherExamsVault || []).find(e => e.id === currentEditingExamId);
+    if (exam && Array.isArray(exam.questions)) {
+      exam.questions.forEach(question => {
+        if (question) question.timeSeconds = seconds;
+      });
+      touchExamContentRevision(exam);
+    }
+  }
+  alert(`تم تطبيق ${seconds} ثانية على ${timeInputs.length} سؤالاً.\nيمكنك تخصيص أي سؤال يدوياً ثم اضغط «حفظ جميع التعديلات الحالية».`);
 };
 
 window.closeQuestionsEditor = function() {
