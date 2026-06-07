@@ -52,6 +52,16 @@ const mergedRemote = mergeGateExamSnapshot_(
 );
 assert.strictEqual(mergedRemote.questionCount, 7);
 
+const staleStudentVault = mergeGateExamSnapshot_(
+  { id: "nahw_comprehensive_year1", questionCount: "", questions: Array(251).fill({ id: 1 }) },
+  { id: "nahw_comprehensive_year1", questionCount: 20, questions: Array(251).fill({ id: 1 }) }
+);
+assert.strictEqual(
+  staleStudentVault.questionCount,
+  20,
+  "teacher arabya_exams_db must override stale student vault questionCount"
+);
+
 // محاكاة دمج السحابة عندما يكون النسخ المحلي أحدث لكن questionCount فارغاً في القالب
 const newerLocalWipe = { ...merged };
 Object.assign(newerLocalWipe, {
@@ -69,6 +79,16 @@ assert.ok(appSource.includes("getFullExamById(examId) || systemState.exams.find(
 assert.ok(appSource.includes("applyGateExamTeacherSettings_(combined, local, remote)"));
 assert.ok(appSource.includes("shouldForceTeacherSettingsCloudSync_"));
 assert.ok(appSource.includes("studentGateCloudSynced"));
+assert.ok(appSource.includes("refreshStudentExamVaultFromTeacherExams_"));
+assert.ok(appSource.includes("reconcileStudentGateVaultAfterTemplateInjection_"));
+assert.ok(
+  appSource.includes("mergeRemoteExamsForStudentGate_(studentVaultExams, teacherExams)"),
+  "student load must merge teacher arabya_exams_db over stale student vault"
+);
+assert.ok(
+  appSource.includes("gateExamIdsMatch_(e?.id, target)"),
+  "getFullExamById must resolve exams case-insensitively"
+);
 
 // buildRuntimeQuestionsForExam يقتصر على questionCount
 const buildStart = appSource.indexOf("function buildRuntimeQuestionsForExam");

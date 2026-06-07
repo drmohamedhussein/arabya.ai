@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.11");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.12");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2863,13 +2863,13 @@ function isTeacherSessionActive() {
 window.isTeacherSessionActive = isTeacherSessionActive;
 
 function getFullExamById(examId) {
-  const target = String(examId || "").trim();
+  const target = normalizeGateExamId_(examId);
   if (!target) return null;
   if (Array.isArray(systemState._teacherExamsVault)) {
-    const fromVault = systemState._teacherExamsVault.find(e => String(e.id) === target);
+    const fromVault = systemState._teacherExamsVault.find(e => gateExamIdsMatch_(e?.id, target));
     if (fromVault) return fromVault;
   }
-  return (systemState.exams || []).find(e => String(e.id) === target) || null;
+  return (systemState.exams || []).find(e => gateExamIdsMatch_(e?.id, target)) || null;
 }
 
 function captureExamAnswerKeyVault(exam) {
@@ -3092,34 +3092,46 @@ function resolveClientQuestionsForGrading_(exam, presentedQuestions) {
 }
 
 function loadExamsForCurrentSession(savedExamsJson) {
-  let fullExams = [];
-  if (!isTeacherSessionActive()) {
-    loadExamAnswerKeyVaultFromStorage();
+  let teacherExams = [];
+  if (savedExamsJson) {
     try {
-      const vaultRaw = localStorage.getItem(ARABYA_STUDENT_EXAM_VAULT_KEY) || "";
-      if (vaultRaw) {
-        const vaultExams = JSON.parse(vaultRaw);
-        if (Array.isArray(vaultExams) && vaultExams.length) {
-          fullExams = vaultExams;
-        }
-      }
+      teacherExams = JSON.parse(savedExamsJson);
+      if (!Array.isArray(teacherExams)) teacherExams = [];
     } catch (e) {
-      console.warn("[ARABYA] loadExamsForCurrentSession vault:", e);
-    }
-  }
-  if (!fullExams.length && savedExamsJson) {
-    try {
-      fullExams = JSON.parse(savedExamsJson);
-    } catch (e) {
-      fullExams = [];
+      teacherExams = [];
     }
   }
   if (isTeacherSessionActive()) {
-    systemState.exams = fullExams;
+    systemState.exams = teacherExams;
     systemState._teacherExamsVault = null;
     hydrateTeacherExamAnswerKeysFromStores();
     return;
   }
+
+  loadExamAnswerKeyVaultFromStorage();
+  let studentVaultExams = [];
+  try {
+    const vaultRaw = localStorage.getItem(ARABYA_STUDENT_EXAM_VAULT_KEY) || "";
+    if (vaultRaw) {
+      const vaultExams = JSON.parse(vaultRaw);
+      if (Array.isArray(vaultExams) && vaultExams.length) {
+        studentVaultExams = vaultExams;
+      }
+    }
+  } catch (e) {
+    console.warn("[ARABYA] loadExamsForCurrentSession vault:", e);
+  }
+
+  let fullExams = [];
+  if (studentVaultExams.length && teacherExams.length) {
+    // إعدادات المعلم في arabya_exams_db لها أولوية على ذاكرة بوابة الطالب القديمة (questionCount وغيرها).
+    fullExams = mergeRemoteExamsForStudentGate_(studentVaultExams, teacherExams);
+  } else if (studentVaultExams.length) {
+    fullExams = studentVaultExams;
+  } else {
+    fullExams = teacherExams;
+  }
+
   systemState._teacherExamsVault = fullExams;
   systemState.exams = fullExams.map(stripAnswerKeysFromExam);
   fullExams.forEach(exam => {
@@ -3159,10 +3171,43 @@ function persistStudentGateExamsToLocalStorage() {
   }
 }
 
+function refreshStudentExamVaultFromTeacherExams_() {
+  if (!isTeacherSessionActive()) return;
+  const teacherExams = systemState._teacherExamsVault || systemState.exams || [];
+  if (!Array.isArray(teacherExams) || !teacherExams.length) return;
+  try {
+    let studentVault = [];
+    const raw = localStorage.getItem(ARABYA_STUDENT_EXAM_VAULT_KEY) || "";
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) studentVault = parsed;
+    }
+    const merged = studentVault.length
+      ? mergeRemoteExamsForStudentGate_(studentVault, teacherExams)
+      : JSON.parse(JSON.stringify(teacherExams));
+    localStorage.setItem(ARABYA_STUDENT_EXAM_VAULT_KEY, JSON.stringify(merged));
+  } catch (e) {
+    console.warn("[ARABYA] refreshStudentExamVaultFromTeacherExams_:", e);
+  }
+}
+
+function reconcileStudentGateVaultAfterTemplateInjection_() {
+  if (isTeacherSessionActive()) return;
+  const vault = Array.isArray(systemState._teacherExamsVault) ? systemState._teacherExamsVault : [];
+  const runtimeExams = Array.isArray(systemState.exams) ? systemState.exams : [];
+  if (!vault.length && !runtimeExams.length) return;
+  const mergedVault = vault.length && runtimeExams.length
+    ? mergeRemoteExamsForStudentGate_(runtimeExams, vault)
+    : (vault.length ? vault : JSON.parse(JSON.stringify(runtimeExams)));
+  systemState._teacherExamsVault = mergedVault;
+  systemState.exams = mergedVault.map(stripAnswerKeysFromExam);
+}
+
 function syncTeacherExamsVaultFromState() {
   if (!isTeacherSessionActive()) return;
   systemState._teacherExamsVault = JSON.parse(JSON.stringify(systemState.exams || []));
   persistExamsToLocalStorage();
+  refreshStudentExamVaultFromTeacherExams_();
 }
 
 function buildRuntimeQuestionsForExam(exam, options = {}) {
@@ -4822,6 +4867,8 @@ function runTemplateExamInjection(options) {
   }
   if (systemState.activeTeacher) {
     hydrateTeacherExamAnswerKeysFromStores();
+  } else {
+    reconcileStudentGateVaultAfterTemplateInjection_();
   }
   refreshStudentGateReadyAfterInjection(systemState.lockedExamId);
   return result;
