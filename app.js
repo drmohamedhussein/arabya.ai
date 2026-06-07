@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.12");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.13");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -13809,6 +13809,8 @@ function handleStudentRegister() {
   const id = normalizeStudentId(document.getElementById("student-reg-id").value.trim());
   const rawCode = document.getElementById("student-reg-code").value.trim();
   const code = sanitizeStudentCodeInput(rawCode);
+  const email = normalizeContactField(document.getElementById("student-reg-email")?.value);
+  const mobile = normalizeContactField(document.getElementById("student-reg-mobile")?.value);
 
   if (!fullname) {
     alert("يرجى إدخال الاسم للتسجيل!");
@@ -13829,7 +13831,7 @@ function handleStudentRegister() {
     return;
   }
 
-  const newStudent = upsertStudentRecord({ name: fullname, id, code });
+  const newStudent = upsertStudentRecord({ name: fullname, id, code, email, mobile });
   saveSystemState(true);
 
   alert(`تم تسجيل حسابك بنجاح يا ${fullname}! يمكنك الآن تسجيل الدخول مباشرة للبدء.`);
@@ -13839,6 +13841,10 @@ function handleStudentRegister() {
   document.getElementById("student-fullname-input").value = newStudent.name;
   document.getElementById("student-id-input").value = newStudent.id || "";
   document.getElementById("student-access-code").value = newStudent.code || "";
+  const loginEmail = document.getElementById("student-email-input");
+  const loginMobile = document.getElementById("student-mobile-input");
+  if (loginEmail) loginEmail.value = newStudent.email || "";
+  if (loginMobile) loginMobile.value = newStudent.mobile || "";
 }
 
 // إعداد الإكمال والتعبئة التلقائية لبيانات الطالب
