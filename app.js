@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.6");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.7");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -1307,7 +1307,7 @@ document.addEventListener("DOMContentLoaded", () => {
         );
         if (resume) {
           systemState.currentStudent = session.student;
-          const matchedExam = systemState.exams.find(e => e.id === session.examId);
+          const matchedExam = getFullExamById(session.examId) || systemState.exams.find(e => e.id === session.examId);
           const resumeKey = session.student?.studentKey || getStudentLookupKey(session.student || {});
           const resumeContext = buildStudentMatchContext(session.student || { studentKey: resumeKey });
           const blocking = findBlockingExamResult(resumeKey, session.examId, resumeContext);
@@ -2570,6 +2570,42 @@ function getConfiguredQuestionCount(exam) {
   return Math.min(parsed, Array.isArray(exam.questions) ? exam.questions.length : 0);
 }
 
+function resolveGateExamQuestionCount_(localExam, remoteExam) {
+  const localParsed = parseInt(localExam?.questionCount, 10);
+  const remoteParsed = parseInt(remoteExam?.questionCount, 10);
+  if (Number.isFinite(remoteParsed) && remoteParsed > 0) return remoteParsed;
+  if (Number.isFinite(localParsed) && localParsed > 0) return localParsed;
+  return "";
+}
+
+/** يدمج امتحاناً للبوابة مع الحفاظ على إعدادات المعلم (مثل questionCount) وعدم مسحها بالقالب المحلي. */
+function mergeGateExamSnapshot_(localExam, remoteExam) {
+  if (!localExam) return remoteExam ? { ...remoteExam } : null;
+  if (!remoteExam) return { ...localExam };
+  const merged = { ...localExam, ...remoteExam };
+  merged.id = remoteExam.id || localExam.id;
+  merged.questionCount = resolveGateExamQuestionCount_(localExam, remoteExam);
+  if (remoteExam.endsAt) merged.endsAt = remoteExam.endsAt;
+  else if (localExam.endsAt) merged.endsAt = localExam.endsAt;
+  if (remoteExam.timeLimit != null && remoteExam.timeLimit !== "") merged.timeLimit = remoteExam.timeLimit;
+  else if (localExam.timeLimit != null) merged.timeLimit = localExam.timeLimit;
+  if (remoteExam.totalScore != null && remoteExam.totalScore !== "") merged.totalScore = remoteExam.totalScore;
+  else if (localExam.totalScore != null) merged.totalScore = localExam.totalScore;
+  if (Number.isFinite(parseInt(remoteExam.maxCheatAttempts, 10))) {
+    merged.maxCheatAttempts = parseInt(remoteExam.maxCheatAttempts, 10);
+  } else if (Number.isFinite(parseInt(localExam.maxCheatAttempts, 10))) {
+    merged.maxCheatAttempts = parseInt(localExam.maxCheatAttempts, 10);
+  }
+  if (typeof remoteExam.shuffleQuestions === "boolean") merged.shuffleQuestions = remoteExam.shuffleQuestions;
+  else if (typeof localExam.shuffleQuestions === "boolean") merged.shuffleQuestions = localExam.shuffleQuestions;
+  const remoteLen = Array.isArray(remoteExam.questions) ? remoteExam.questions.length : 0;
+  const localLen = Array.isArray(localExam.questions) ? localExam.questions.length : 0;
+  merged.questions = remoteLen >= localLen && remoteLen > 0
+    ? remoteExam.questions
+    : (localLen > 0 ? localExam.questions : remoteExam.questions);
+  return merged;
+}
+
 function stripAnswerKeysFromQuestion(q) {
   if (!q || typeof q !== "object") return q;
   const safe = { ...q };
@@ -2770,7 +2806,7 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
     const key = mergeKey(remote);
     mergedKeys.add(key);
     const local = localMap.get(key);
-    let combined = local ? { ...local, ...remote } : { ...remote };
+    let combined = local ? mergeGateExamSnapshot_(local, remote) : { ...remote };
     if (local && isExamLocalRevisionNewer_(local, remote)) {
       combined = { ...remote, ...local };
     }
@@ -2804,7 +2840,7 @@ function mergeRemoteExamsForStudentGate_(localExams, remoteExams) {
     if (!remote?.id) return remote;
     mergedIds.add(String(remote.id));
     const local = localById.get(String(remote.id));
-    const combined = local ? { ...local, ...remote } : { ...remote };
+    const combined = local ? mergeGateExamSnapshot_(local, remote) : { ...remote };
     return restoreAnswerKeysToExam_(combined, keySnapshot);
   });
   (localExams || []).forEach(local => {
@@ -6391,20 +6427,23 @@ function promoteLockedExamIntoStudentGate(examId, fullExam) {
   if (!targetId || !fullExam || !gateExamIdsMatch_(fullExam.id, targetId)) return false;
   const copy = JSON.parse(JSON.stringify(fullExam));
   copy.id = targetId;
-  if (typeof sanitizeQuestionConfig === "function") {
-    sanitizeQuestionConfig(copy);
-  }
   const vault = Array.isArray(systemState._teacherExamsVault) ? [...systemState._teacherExamsVault] : [];
   const vaultIdx = vault.findIndex(exam => gateExamIdsMatch_(exam?.id, targetId));
+  const existingVault = vaultIdx >= 0 ? vault[vaultIdx] : null;
+  const mergedCopy = existingVault ? mergeGateExamSnapshot_(existingVault, copy) : copy;
+  mergedCopy.id = targetId;
+  if (typeof sanitizeQuestionConfig === "function") {
+    sanitizeQuestionConfig(mergedCopy);
+  }
   if (vaultIdx >= 0) {
-    vault[vaultIdx] = { ...vault[vaultIdx], ...copy, id: targetId, questions: copy.questions };
+    vault[vaultIdx] = mergedCopy;
   } else {
-    vault.push(copy);
+    vault.push(mergedCopy);
   }
   systemState._teacherExamsVault = vault;
   const exams = Array.isArray(systemState.exams) ? [...systemState.exams] : [];
   const examIdx = exams.findIndex(exam => gateExamIdsMatch_(exam?.id, targetId));
-  const stripped = stripAnswerKeysFromExam(copy);
+  const stripped = stripAnswerKeysFromExam(mergedCopy);
   stripped.id = targetId;
   if (examIdx >= 0) {
     exams[examIdx] = stripped;
@@ -10029,7 +10068,7 @@ async function validateStudentAndStart() {
     return;
   }
 
-  let selectedExam = systemState.exams.find(e => e.id === examId);
+  let selectedExam = getFullExamById(examId) || systemState.exams.find(e => gateExamIdsMatch_(e.id, examId));
   if (!selectedExam) {
     alert("الامتحان المختار غير متوفر!");
     return;
@@ -10246,10 +10285,11 @@ async function validateStudentAndStart() {
   }
 
   systemState.currentExam = selectedExam;
-  await ensureExamGradingKeysReady(selectedExam.id, selectedExam.questions || []);
+  const runtimeQuestions = buildRuntimeQuestionsForExam(selectedExam);
+  await ensureExamGradingKeysReady(selectedExam.id, runtimeQuestions);
   captureExamAnswerKeyVault(selectedExam);
 
-  systemState.shuffledQuestions = buildRuntimeQuestionsForExam(selectedExam);
+  systemState.shuffledQuestions = runtimeQuestions;
   systemState.currentExamRuntime = calculateRuntimeExamMeta(systemState.shuffledQuestions);
 
   systemState.currentQuestionIndex = 0;
