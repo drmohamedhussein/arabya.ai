@@ -6,6 +6,12 @@
 
 // كائن الحالة العامة للنظام
 const MAX_CLOUD_BACKUP_JSON_BYTES = 4500000;
+const CLOUD_BACKUP_EXAM_SETTINGS_REASONS = new Set([
+  "save_exam_meta",
+  "save_exam_questions",
+  "integration_config_save",
+  "teacher_profile_save"
+]);
 const ARABYA_CLOUD_BACKUP_SCOPE_GENERAL = "general";
 const ARABYA_CLOUD_BACKUP_SCOPE_ALL = "all";
 const ARABYA_UNIFIED_CLOUD_SYNC_FLAG = "arabya_unified_cloud_sync_v1";
@@ -50,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.16");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.17");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -5940,6 +5946,36 @@ async function fetchCloudRevisionForUrl(rawUrl) {
   }
 }
 
+function buildExamSettingsCloudBackupData(fullData) {
+  if (!fullData || typeof fullData !== "object") return fullData;
+  return {
+    schemaVersion: fullData.schemaVersion,
+    exportedAt: fullData.exportedAt,
+    appVersion: fullData.appVersion,
+    teachers: fullData.teachers,
+    students: fullData.students,
+    exams: fullData.exams,
+    config: fullData.config,
+    deletedStudentKeys: fullData.deletedStudentKeys,
+    deletedResultKeys: fullData.deletedResultKeys,
+    examDeviceRegistry: fullData.examDeviceRegistry
+  };
+}
+
+function slimCloudBackupResultForUpload(res) {
+  const copy = { ...res };
+  delete copy.studentAnswers;
+  delete copy.presentedQuestions;
+  delete copy.questionScores;
+  if (copy.details && String(copy.details).length > 800) {
+    copy.details = String(copy.details).slice(0, 800) + "\n...[مختصر للمزامنة]";
+  }
+  if (Array.isArray(copy.cheatAttemptLog) && copy.cheatAttemptLog.length > 15) {
+    copy.cheatAttemptLog = copy.cheatAttemptLog.slice(0, 15);
+  }
+  return copy;
+}
+
 function slimCloudBackupDataForSize(data) {
   const slim = {
     ...data,
@@ -5948,15 +5984,23 @@ function slimCloudBackupDataForSize(data) {
   };
   if (Array.isArray(slim.results)) {
     slim.results = slim.results.map(res => {
-      const copy = { ...res };
+      const copy = slimCloudBackupResultForUpload(res);
+      if (Array.isArray(res.presentedQuestions) && res.presentedQuestions.length) {
+        copy.presentedQuestions = compactPresentedQuestionsForCloud(res.presentedQuestions);
+      }
       if (copy.details && String(copy.details).length > 1500) {
         copy.details = String(copy.details).slice(0, 1500);
       }
-      if (Array.isArray(copy.presentedQuestions) && copy.presentedQuestions.length) {
-        copy.presentedQuestions = compactPresentedQuestionsForCloud(copy.presentedQuestions);
-      }
       return copy;
     });
+  }
+  return slim;
+}
+
+function slimCloudBackupDataAggressive(data) {
+  const slim = buildExamSettingsCloudBackupData(data);
+  if (Array.isArray(data.results)) {
+    slim.results = data.results.map(slimCloudBackupResultForUpload);
   }
   return slim;
 }
@@ -5979,18 +6023,30 @@ function buildSaveBackupPayload(reason) {
     delete fullData.questionBanks;
   }
   const clientReason = String(reason || "push");
-  let data = fullData;
+  const useExamSettingsScope = CLOUD_BACKUP_EXAM_SETTINGS_REASONS.has(clientReason);
+  let data = useExamSettingsScope ? buildExamSettingsCloudBackupData(fullData) : fullData;
   data._clientReason = clientReason;
   let payload = { action: "save_backup", data, actor };
   let json = JSON.stringify(payload);
   if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
-    data = slimCloudBackupDataForSize(fullData);
+    data = useExamSettingsScope
+      ? buildExamSettingsCloudBackupData(fullData)
+      : slimCloudBackupDataForSize(fullData);
     data._clientReason = clientReason;
     payload = { action: "save_backup", data, actor };
     json = JSON.stringify(payload);
   }
   if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
-    throw new Error(`حجم البيانات كبير جداً للرفع (${Math.round(json.length / 1024)} كيلوبايت). قلّل عدد النتائج أو صدّر قاعدة البيانات يدوياً.`);
+    data = slimCloudBackupDataAggressive(fullData);
+    data._clientReason = clientReason;
+    payload = { action: "save_backup", data, actor };
+    json = JSON.stringify(payload);
+  }
+  if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
+    const hint = useExamSettingsScope
+      ? "جرّب حفظ الامتحان من متصفح أسرع شبكة، أو صدّر نسخة JSON احتياطية يدوياً."
+      : "قلّل حجم النتائج المرسلة أو صدّر قاعدة البيانات يدوياً.";
+    throw new Error(`حجم البيانات كبير جداً للرفع (${Math.round(json.length / 1024)} كيلوبايت). ${hint}`);
   }
   return payload;
 }
