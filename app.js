@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.3");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.4");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2605,17 +2605,20 @@ function snapshotExamAnswerKeys_(exams) {
   return map;
 }
 
-function restoreAnswerKeysToExam_(exam, keySnapshot) {
+function restoreAnswerKeysToExam_(exam, keySnapshot, options) {
   if (!exam || !keySnapshot || !keySnapshot.size) return exam;
   const keys = keySnapshot.get(String(exam.id));
   if (!keys) return exam;
+  const fillOnlyMissing = !options || options.fillOnlyMissing !== false;
   return {
     ...exam,
     questions: (exam.questions || []).map(q => {
       if (!q || q.id == null) return q;
+      if (q.type === "essay") return { ...q, correctAnswer: "" };
+      const hasLocalAnswer = q.correctAnswer !== undefined && q.correctAnswer !== null;
+      if (fillOnlyMissing && hasLocalAnswer) return q;
       const preserved = keys[String(q.id)] ?? keys[q.id];
       if (preserved === undefined) return q;
-      if (q.type === "essay") return { ...q, correctAnswer: "" };
       return { ...q, correctAnswer: preserved };
     })
   };
@@ -2634,12 +2637,31 @@ function mergeExamQuestionsPreservingAnswerKeys_(baseQuestions, patchQuestions) 
     if (!q || q.id == null) return q;
     const existing = byId[String(q.id)] || {};
     const merged = { ...existing, ...q };
-    if ((merged.correctAnswer === undefined || merged.correctAnswer === null) &&
-        existing.correctAnswer !== undefined && existing.correctAnswer !== null) {
+    if (existing.correctAnswer !== undefined && existing.correctAnswer !== null) {
       merged.correctAnswer = existing.correctAnswer;
+    } else if (merged.correctAnswer === undefined || merged.correctAnswer === null) {
+      if (q.correctAnswer !== undefined && q.correctAnswer !== null) {
+        merged.correctAnswer = q.correctAnswer;
+      }
     }
     return merged;
   });
+}
+
+function isExamLocalRevisionNewer_(localExam, remoteExam) {
+  const localRev = Number(localExam?.localRevision)
+    || Date.parse(localExam?.questionsUpdatedAt || "")
+    || 0;
+  const remoteRev = Number(remoteExam?.localRevision)
+    || Date.parse(remoteExam?.questionsUpdatedAt || "")
+    || 0;
+  return localRev > remoteRev;
+}
+
+function examObjectiveAnswersComplete_(exam) {
+  const objective = (exam?.questions || []).filter(q => q && q.type !== "essay");
+  if (!objective.length) return true;
+  return objective.every(q => q.correctAnswer !== undefined && q.correctAnswer !== null);
 }
 
 function loadTeacherExamGradingKeysStore_() {
@@ -2676,7 +2698,7 @@ function hydrateTeacherExamAnswerKeysFromStores() {
   let restored = 0;
   const hydrateList = exams => (exams || []).map(exam => {
     buildSnapshotForExam(exam);
-    const hydrated = restoreAnswerKeysToExam_(exam, snapshot);
+    const hydrated = restoreAnswerKeysToExam_(exam, snapshot, { fillOnlyMissing: true });
     const before = (exam.questions || []).filter(q => q && q.type !== "essay" && q.correctAnswer !== undefined).length;
     const after = (hydrated.questions || []).filter(q => q && q.type !== "essay" && q.correctAnswer !== undefined).length;
     if (after > before) restored++;
@@ -2733,7 +2755,7 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
     const stored = teacherStore[String(exam.id)];
     if (stored && typeof stored === "object") {
       const existing = keySnapshot.get(String(exam.id)) || {};
-      keySnapshot.set(String(exam.id), { ...existing, ...stored });
+      keySnapshot.set(String(exam.id), { ...stored, ...existing });
     }
   });
   const localMap = new Map();
@@ -2749,17 +2771,22 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
     mergedKeys.add(key);
     const local = localMap.get(key);
     let combined = local ? { ...local, ...remote } : { ...remote };
+    if (local && isExamLocalRevisionNewer_(local, remote)) {
+      combined = { ...remote, ...local };
+    }
     if (local && Array.isArray(remote.questions)) {
       combined.questions = mergeExamQuestionsPreservingAnswerKeys_(local.questions, remote.questions);
+    } else if (local && Array.isArray(local.questions)) {
+      combined.questions = local.questions;
     }
-    combined = restoreAnswerKeysToExam_(combined, keySnapshot);
+    combined = restoreAnswerKeysToExam_(combined, keySnapshot, { fillOnlyMissing: true });
     merged.push(combined);
   });
   (localExams || []).forEach(local => {
     if (!local) return;
     const key = mergeKey(local);
     if (mergedKeys.has(key)) return;
-    merged.push(restoreAnswerKeysToExam_(local, keySnapshot));
+    merged.push(restoreAnswerKeysToExam_(local, keySnapshot, { fillOnlyMissing: true }));
   });
   return merged;
 }
@@ -2877,6 +2904,10 @@ function applyExamGradingKeysToVault(examId, gradingKeys) {
   Object.keys(gradingKeys).forEach(key => {
     if (gradingKeys[key] !== undefined) normalizedKeys[String(key)] = gradingKeys[key];
   });
+  const localKeys = snapshotAnswerKeysFromExamQuestions_(getFullExamById(targetId));
+  Object.keys(localKeys).forEach(key => {
+    normalizedKeys[key] = localKeys[key];
+  });
   if (!Object.keys(normalizedKeys).length) return false;
   systemState._examAnswerKeyVault = systemState._examAnswerKeyVault || {};
   systemState._examAnswerKeyVault[targetId] = {
@@ -2888,8 +2919,13 @@ function applyExamGradingKeysToVault(examId, gradingKeys) {
     const idx = systemState._teacherExamsVault.findIndex(exam => String(exam?.id) === targetId);
     if (idx >= 0) {
       const keySnapshot = new Map([[targetId, normalizedKeys]]);
-      systemState._teacherExamsVault[idx] = restoreAnswerKeysToExam_(systemState._teacherExamsVault[idx], keySnapshot);
+      systemState._teacherExamsVault[idx] = restoreAnswerKeysToExam_(systemState._teacherExamsVault[idx], keySnapshot, { fillOnlyMissing: true });
     }
+  }
+  const liveIdx = (systemState.exams || []).findIndex(exam => String(exam?.id) === targetId);
+  if (liveIdx >= 0) {
+    const keySnapshot = new Map([[targetId, normalizedKeys]]);
+    systemState.exams[liveIdx] = restoreAnswerKeysToExam_(systemState.exams[liveIdx], keySnapshot, { fillOnlyMissing: true });
   }
   return true;
 }
@@ -2910,6 +2946,8 @@ async function fetchExamGradingKeysViaGet_(url, examId) {
 async function fetchExamGradingKeysFromCloud(examId) {
   const targetId = String(examId || "").trim();
   if (!targetId) return false;
+  const liveExam = getFullExamById(targetId);
+  if (examObjectiveAnswersComplete_(liveExam)) return true;
   loadExamAnswerKeyVaultFromStorage();
   try {
     const teacherStore = JSON.parse(localStorage.getItem(ARABYA_TEACHER_EXAM_KEYS_STORE) || "{}");
@@ -8321,8 +8359,10 @@ function loadTeacherDashboardData() {
   restoreTeacherActiveTab();
 
   syncDatabaseFromCloud({ silent: true }).then(async synced => {
-    hydrateTeacherExamAnswerKeysFromStores();
-    await hydrateTeacherExamAnswerKeysFromCloud();
+    if (!synced || !synced.skipped) {
+      hydrateTeacherExamAnswerKeysFromStores();
+      await hydrateTeacherExamAnswerKeysFromCloud();
+    }
     applyTeacherSyncCredentialsToState();
     if (systemState.activeTeacher) {
       const urlInput = document.getElementById("teacher-config-url");
@@ -8714,10 +8754,13 @@ window.editExamQuestions = async function(examId) {
   currentEditingExamId = examId;
   window.currentEditingExamId = examId;
   hydrateTeacherExamAnswerKeysFromStores();
-  try {
-    await fetchExamGradingKeysFromCloud(examId);
-  } catch (e) {}
-  hydrateTeacherExamAnswerKeysFromStores();
+  const draftExam = getFullExamById(examId) || systemState.exams.find(e => e.id === examId);
+  if (draftExam && !examObjectiveAnswersComplete_(draftExam)) {
+    try {
+      await fetchExamGradingKeysFromCloud(examId);
+    } catch (e) {}
+    hydrateTeacherExamAnswerKeysFromStores();
+  }
   const exam = getFullExamById(examId) || systemState.exams.find(e => e.id === examId);
   if (!exam) return;
   sanitizeQuestionConfig(exam);
@@ -9094,12 +9137,16 @@ async function saveAllEditedQuestions() {
   touchExamContentRevision(exam);
   syncTeacherExamsVaultFromState();
   persistTeacherExamAnswerKeysFromExam_(exam);
+  captureExamAnswerKeyVault(exam);
   saveSystemState(false);
 
   let cloudOk = false;
   const indicator = document.getElementById("cloud-sync-status-indicator");
   if (indicator) {
     indicator.innerHTML = `<span class="material-icons" style="color:var(--secondary); font-size:1.1rem; vertical-align:middle; animation:spin 1s infinite linear;">sync</span> جاري رفع التعديلات إلى السحابة...`;
+  }
+  if (!systemState.cloudPushInProgress) {
+    beginCriticalCloudPush("save_exam_questions");
   }
   try {
     cloudOk = await pushLocalStateToCloudNow("save_exam_questions");

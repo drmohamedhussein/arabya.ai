@@ -19,10 +19,19 @@ const mergeFn = new Function(`
   return mergeExamQuestionsPreservingAnswerKeys_;
 `)();
 
-const merged = mergeFn(
+let merged = mergeFn(
   [{ id: 1, question: "س1", options: ["أ", "ب"], correctAnswer: 1, type: "multiple" }],
   [{ id: 1, question: "س1", options: ["أ", "ب"], type: "multiple" }]
 );
 assert.strictEqual(merged[0].correctAnswer, 1, "must preserve local correctAnswer when cloud omits it");
+
+merged = mergeFn(
+  [{ id: 1, question: "س1", options: ["أ", "ب"], correctAnswer: 1, type: "multiple" }],
+  [{ id: 1, question: "س1", options: ["أ", "ب"], correctAnswer: 0, type: "multiple" }]
+);
+assert.strictEqual(merged[0].correctAnswer, 1, "local correctAnswer must win over stale cloud value");
+
+assert.ok(appSource.includes("fillOnlyMissing"));
+assert.ok(appSource.includes("isExamLocalRevisionNewer_"));
 
 console.log("exam-answer-key-restore.test.js: all assertions passed");
