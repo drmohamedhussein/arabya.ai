@@ -17,8 +17,10 @@ assertOptionalInput("student-email-input");
 assertOptionalInput("student-mobile-input");
 assertOptionalInput("student-reg-email");
 assertOptionalInput("student-reg-mobile");
+assertOptionalInput("student-entry-login-code");
 
 assert.ok(indexHtml.includes("البريد الإلكتروني (اختياري)"));
+assert.ok(indexHtml.includes("رمز الدخول الكودي (اختياري)"));
 assert.ok(indexHtml.includes("رقم الموبايل (اختياري)"));
 
 console.log("Student gate contact field tests passed.");

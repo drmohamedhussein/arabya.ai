@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.13");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.14");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -3842,7 +3842,8 @@ function upsertStudentRecord(source, fallbackKey = "") {
     id: normalizedId,
     code: hasStudentCode(normalizedCode) ? normalizedCode : "",
     email: normalizeContactField(source.email),
-    mobile: normalizeContactField(source.mobile)
+    mobile: normalizeContactField(source.mobile),
+    entryLoginCode: normalizeContactField(source.entryLoginCode)
   };
 
   let existingStudent = null;
@@ -3868,6 +3869,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
     existingStudent.code = normalizedStudent.code || existingStudent.code || "";
     existingStudent.email = normalizedStudent.email;
     existingStudent.mobile = normalizedStudent.mobile;
+    existingStudent.entryLoginCode = normalizedStudent.entryLoginCode;
     if (source.timestamp) {
       existingStudent.timestamp = pickEarlierStudentTimestamp(existingStudent.timestamp, source.timestamp);
     }
@@ -3881,6 +3883,7 @@ function upsertStudentRecord(source, fallbackKey = "") {
     code: normalizedStudent.code,
     email: normalizedStudent.email,
     mobile: normalizedStudent.mobile,
+    entryLoginCode: normalizedStudent.entryLoginCode,
     timestamp: String(source.timestamp || "").trim() || new Date().toLocaleDateString("ar-EG"),
     studentKey: fallbackKey || getStudentLookupKey(normalizedStudent) || createRecordId("student"),
     accountType: ARABYA_ACCOUNT_ROLES.STUDENT
@@ -10117,6 +10120,7 @@ async function validateStudentAndStart() {
   const rawCode = document.getElementById("student-access-code").value.trim();
   const email = document.getElementById("student-email-input")?.value.trim() || "";
   const mobile = document.getElementById("student-mobile-input")?.value.trim() || "";
+  const entryLoginCode = document.getElementById("student-entry-login-code")?.value.trim() || "";
   const examId = resolveStudentExamIdForStart_(document.getElementById("student-exam-select")?.value);
   const normalizedId = normalizeStudentId(id);
   const inputCode = sanitizeStudentCodeInput(rawCode);
@@ -10184,7 +10188,8 @@ async function validateStudentAndStart() {
     id: normalizedId,
     code: inputCode,
     email,
-    mobile
+    mobile,
+    entryLoginCode
   });
   if (!studentRecord) {
     alert("تعذّر حفظ بيانات الطالب. أعد المحاولة.");
@@ -10196,6 +10201,7 @@ async function validateStudentAndStart() {
     code: studentRecord.code || "",
     email: studentRecord.email || "",
     mobile: studentRecord.mobile || "",
+    entryLoginCode: studentRecord.entryLoginCode || "",
     studentKey: studentRecord.studentKey || getStudentLookupKey(studentRecord),
     timestamp: studentRecord.timestamp || new Date().toLocaleDateString("ar-EG")
   };
@@ -10212,7 +10218,8 @@ async function validateStudentAndStart() {
     accessCode: studentRecord.code || "",
     studentKey: studentRecord.studentKey || getStudentLookupKey(studentRecord),
     email: studentRecord.email || "",
-    mobile: studentRecord.mobile || ""
+    mobile: studentRecord.mobile || "",
+    entryLoginCode: studentRecord.entryLoginCode || ""
   };
 
   const studentLookupKey = systemState.currentStudent.studentKey || getStudentLookupKey(systemState.currentStudent);
