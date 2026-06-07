@@ -81,6 +81,9 @@ assert.ok(appSource.includes("shouldForceTeacherSettingsCloudSync_"));
 assert.ok(appSource.includes("studentGateCloudSynced"));
 assert.ok(appSource.includes("refreshStudentExamVaultFromTeacherExams_"));
 assert.ok(appSource.includes("reconcileStudentGateVaultAfterTemplateInjection_"));
+assert.ok(appSource.includes("ARABYA_GATE_EXAM_SETTINGS_KEY"));
+assert.ok(appSource.includes("applyPersistedGateExamSettings_"));
+assert.ok(appSource.includes("persistGateExamSettingsFromExam_"));
 assert.ok(
   appSource.includes("mergeRemoteExamsForStudentGate_(studentVaultExams, teacherExams)"),
   "student load must merge teacher arabya_exams_db over stale student vault"
@@ -94,18 +97,27 @@ assert.ok(
 const buildStart = appSource.indexOf("function buildRuntimeQuestionsForExam");
 const buildEnd = appSource.indexOf("function gradeStudentExamAnswers");
 const buildBlock = appSource.slice(buildStart, buildEnd);
+const gateSettingsStart = appSource.indexOf("function readGateExamSettingsCache_");
+const gateSettingsEnd = appSource.indexOf("function applyGateExamTeacherSettings_");
+const gateIdStart = appSource.indexOf("function normalizeGateExamId_");
+const gateIdEnd = appSource.indexOf("function tryActivateLocalLockedExamGate");
+const gateSettingsBlock = appSource.slice(gateSettingsStart, gateSettingsEnd);
+const gateIdBlock = appSource.slice(gateIdStart, gateIdEnd);
+
 const buildSandbox = {
   console,
   parseInt,
   Math,
   Array,
   Number,
+  localStorage: { getItem: () => null, setItem: () => {} },
   isTeacherSessionActive: () => false,
   shuffle: arr => arr,
-  stripAnswerKeysFromQuestion: q => q
+  stripAnswerKeysFromQuestion: q => q,
+  ARABYA_GATE_EXAM_SETTINGS_KEY: "arabya_gate_exam_settings_db"
 };
 vm.createContext(buildSandbox);
-vm.runInContext(block + buildBlock, buildSandbox);
+vm.runInContext(block + gateIdBlock + gateSettingsBlock + buildBlock, buildSandbox);
 const runtime = buildSandbox.buildRuntimeQuestionsForExam({
   id: "arabic_comprehensive_year1",
   questionCount: 5,

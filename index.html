@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl" data-arabya-build="2026.06.07.14">
+<html lang="ar" dir="rtl" data-arabya-build="2026.06.07.15">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,14 +11,14 @@
   <!-- تحسينات SEO ومحركات البحث -->
   <meta name="description" content="المنصة العربية الأولى المدعومة بالذكاء الاصطناعي لتعليم فروع اللغة العربية (نحو، بلاغة، أدب)، التدقيق اللغوي والنحوي، والامتحانات الأكاديمية المؤمنة بالكامل ضد الغش.">
   <meta name="keywords" content="اللغة العربية, ذكاء اصطناعي, امتحانات اونلاين, معلم اللغة العربية, تدقيق لغوي, كتب عربية">
-  <meta name="arabya-app-version" content="2026.06.07.14">
+  <meta name="arabya-app-version" content="2026.06.07.15">
   <link rel="canonical" href="https://arabya.net/">
 
   <!-- أيقونات جوجل وخطوط المظهر الفاخر -->
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2026.06.07.14">
+  <link rel="stylesheet" href="style.css?v=2026.06.07.15">
   <link rel="stylesheet" href="style.responsive-dashboard.css">
-  <script src="js/arabya-version-boot.js?v=2026.06.07.14"></script>
+  <script src="js/arabya-version-boot.js?v=2026.06.07.15"></script>
 </head>
 <body>
 
@@ -345,8 +345,11 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; margin-top: 2rem;">
-          <button id="runner-next-btn" class="btn btn-primary" style="min-width: 180px;">
+        <div class="runner-actions-row" style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+          <button type="button" id="runner-submit-now-btn" class="btn runner-submit-now-btn" style="min-width: 180px; background: var(--error); color: #fff; border: none;">
+            تسليم الإجابات الآن <span class="material-icons" aria-hidden="true">send</span>
+          </button>
+          <button type="button" id="runner-next-btn" class="btn btn-primary" style="min-width: 180px;">
             السؤال التالي <span class="material-icons" aria-hidden="true">arrow_back</span>
           </button>
         </div>
@@ -647,7 +650,7 @@
               <span class="material-icons" aria-hidden="true">logout</span> خروج من اللوحة
             </li>
           </ul>
-          <div id="teacher-app-version-label" class="teacher-app-version-label" aria-live="polite" aria-label="إصدار التطبيق الحالي">إصدار التطبيق: 2026.06.07.14</div>
+          <div id="teacher-app-version-label" class="teacher-app-version-label" aria-live="polite" aria-label="إصدار التطبيق الحالي">إصدار التطبيق: 2026.06.07.15</div>
         </aside>
 
         <!-- اللوحة الرئيسية المتغيرة -->
@@ -1888,20 +1891,20 @@ function doGet(e) {
   </footer>
 
   <!-- تحميل بنك الامتحانات وقوانين الملحق البرمجي بالترتيب -->
-  <script src="questions.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-student-codes.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-security.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-toast.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-offline-queue.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-question-bank.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-template-exams-data.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-template-exams.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-analytics.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-platform-sync.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-realtime-bridge.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-cloud-sync.js?v=2026.06.07.14"></script>
-  <script src="app.js?v=2026.06.07.14"></script>
-  <script src="js/arabya-version-boot.js?v=2026.06.07.14"></script>
+  <script src="questions.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-student-codes.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-security.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-toast.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-offline-queue.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-question-bank.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-template-exams-data.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-template-exams.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-analytics.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-platform-sync.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-realtime-bridge.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-cloud-sync.js?v=2026.06.07.15"></script>
+  <script src="app.js?v=2026.06.07.15"></script>
+  <script src="js/arabya-version-boot.js?v=2026.06.07.15"></script>
   <script>
     (function () {
       const sel = document.getElementById("conflict-merge-mode");

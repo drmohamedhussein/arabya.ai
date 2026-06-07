@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.14");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.15");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2579,9 +2579,66 @@ function resolveGateExamQuestionCount_(localExam, remoteExam) {
 }
 
 /** يطبّق إعدادات المعلم المحفوظة (questionCount وغيرها) دون مسحها بقيم القالب الفارغة. */
+function readGateExamSettingsCache_() {
+  try {
+    const raw = localStorage.getItem(ARABYA_GATE_EXAM_SETTINGS_KEY) || "{}";
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function writeGateExamSettingsCache_(cache) {
+  try {
+    localStorage.setItem(ARABYA_GATE_EXAM_SETTINGS_KEY, JSON.stringify(cache));
+  } catch (e) {}
+}
+
+function findGateExamSettingsInCache_(examId) {
+  const cache = readGateExamSettingsCache_();
+  const target = normalizeGateExamId_(examId);
+  if (!target) return null;
+  if (cache[target]) return cache[target];
+  const matchedKey = Object.keys(cache).find(key => gateExamIdsMatch_(key, target));
+  return matchedKey ? cache[matchedKey] : null;
+}
+
+function persistGateExamSettingsFromExam_(exam) {
+  if (!exam?.id) return;
+  const parsed = parseInt(exam.questionCount, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return;
+  const cache = readGateExamSettingsCache_();
+  const id = String(exam.id);
+  cache[id] = {
+    ...(cache[id] || {}),
+    questionCount: parsed,
+    shuffleQuestions: typeof exam.shuffleQuestions === "boolean" ? exam.shuffleQuestions : cache[id]?.shuffleQuestions,
+    updatedAt: Date.now()
+  };
+  writeGateExamSettingsCache_(cache);
+}
+
+function applyPersistedGateExamSettings_(exam) {
+  if (!exam?.id) return exam;
+  const saved = findGateExamSettingsInCache_(exam.id);
+  if (!saved) return exam;
+  const current = parseInt(exam.questionCount, 10);
+  if ((!Number.isFinite(current) || current <= 0) && Number.isFinite(saved.questionCount) && saved.questionCount > 0) {
+    exam.questionCount = saved.questionCount;
+  }
+  if (typeof saved.shuffleQuestions === "boolean" && typeof exam.shuffleQuestions !== "boolean") {
+    exam.shuffleQuestions = saved.shuffleQuestions;
+  }
+  return exam;
+}
+
 function applyGateExamTeacherSettings_(merged, localExam, remoteExam) {
   if (!merged) return merged;
   merged.questionCount = resolveGateExamQuestionCount_(localExam, remoteExam);
+  if (getConfiguredQuestionCount(merged)) {
+    persistGateExamSettingsFromExam_(merged);
+  }
   if (remoteExam?.endsAt) merged.endsAt = remoteExam.endsAt;
   else if (localExam?.endsAt) merged.endsAt = localExam.endsAt;
   if (remoteExam?.timeLimit != null && remoteExam.timeLimit !== "") merged.timeLimit = remoteExam.timeLimit;
@@ -3211,6 +3268,7 @@ function syncTeacherExamsVaultFromState() {
 }
 
 function buildRuntimeQuestionsForExam(exam, options = {}) {
+  if (exam) applyPersistedGateExamSettings_(exam);
   const sourceQuestions = Array.isArray(exam?.questions) ? [...exam.questions] : [];
   if (!sourceQuestions.length) return [];
   const shouldShuffle = exam.shuffleQuestions !== false;
@@ -5628,6 +5686,7 @@ const ARABYA_API_SECRET_QUERY = "apiSecret";
 const ARABYA_TEACHER_SYNC_CREDENTIALS_KEY = "arabya_teacher_sync_credentials";
 const ARABYA_TEACHER_SYNC_REGISTRY_KEY = "arabya_teacher_sync_registry";
 const ARABYA_STUDENT_EXAM_VAULT_KEY = "arabya_student_exam_vault_db";
+const ARABYA_GATE_EXAM_SETTINGS_KEY = "arabya_gate_exam_settings_db";
 const ARABYA_EXAM_ANSWER_VAULT_KEY = "arabya_exam_answer_vault_db";
 const ARABYA_TEACHER_EXAM_KEYS_STORE = "arabya_teacher_exam_grading_keys";
 
@@ -7963,6 +8022,11 @@ function setupUIEventListeners() {
     nextQBtn.addEventListener("click", () => runnerNextQuestion(false));
   }
 
+  const submitNowBtn = document.getElementById("runner-submit-now-btn");
+  if (submitNowBtn) {
+    submitNowBtn.addEventListener("click", submitExamNowFromRunner);
+  }
+
   const restartBtn = document.getElementById("runner-restart-btn");
   if (restartBtn) {
     restartBtn.addEventListener("click", () => navigateToView("student-login-view"));
@@ -9354,6 +9418,7 @@ function applyExamMetaFromEditor(exam, options = {}) {
   exam.ipAccessPolicy = { ...(exam.ipAccessPolicy || {}), maxStudentsPerSharedIp: maxSharedIp };
   if (window.ArabyaPlatformSync) window.ArabyaPlatformSync.saveHallModeToExam(exam);
   sanitizeQuestionConfig(exam);
+  persistGateExamSettingsFromExam_(exam);
   return true;
 }
 
@@ -10285,6 +10350,7 @@ async function validateStudentAndStart() {
       alert("الامتحان المختار غير متوفر بعد المزامنة!");
       return;
     }
+    applyPersistedGateExamSettings_(selectedExam);
     sanitizeQuestionConfig(selectedExam);
     if (selectedExam.questions.length === 0) {
       if (startBtn) {
@@ -10368,6 +10434,8 @@ async function validateStudentAndStart() {
     }
   }
 
+  applyPersistedGateExamSettings_(selectedExam);
+  sanitizeQuestionConfig(selectedExam);
   systemState.currentExam = selectedExam;
   const runtimeQuestions = buildRuntimeQuestionsForExam(selectedExam);
   await ensureExamGradingKeysReady(selectedExam.id, runtimeQuestions);
@@ -10644,6 +10712,26 @@ function announceExamAccessibility(message) {
     live.textContent = "";
     setTimeout(() => { live.textContent = message; }, 30);
   }
+}
+
+function submitExamNowFromRunner() {
+  if (!systemState.isExamActive) return;
+  const submitBtn = document.getElementById("runner-submit-now-btn");
+  const nextBtn = document.getElementById("runner-next-btn");
+  if (submitBtn?.disabled) return;
+  const answeredCount = Object.keys(systemState.studentAnswers || {}).length;
+  const totalCount = systemState.shuffledQuestions?.length || 0;
+  const confirmMessage = answeredCount < totalCount
+    ? `لم تجب على كل الأسئلة بعد (${answeredCount} من ${totalCount}). هل تريد تسليم إجاباتك الآن؟`
+    : "هل تريد تسليم إجاباتك وإنهاء الامتحان الآن؟";
+  if (!confirm(confirmMessage)) return;
+  if (submitBtn) submitBtn.disabled = true;
+  if (nextBtn) nextBtn.disabled = true;
+  clearInterval(systemState.timer.intervalId);
+  saveActiveStudentSession();
+  updateLiveIncompleteResult();
+  announceExamAccessibility("جاري تسليم الامتحان وحساب النتيجة.");
+  void submitFinishedExam();
 }
 
 function runnerNextQuestion(isAuto = false) {
