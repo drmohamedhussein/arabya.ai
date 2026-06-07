@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 
 const appSource = readFileSync(new URL("../app.js", import.meta.url), "utf8");
 const gasSource = readFileSync(new URL("../integrations/google-apps-script-backend.gs", import.meta.url), "utf8");
@@ -35,6 +36,40 @@ test("phase5: student direct-link sync uses exam_start scope", () => {
 test("phase5: exam_start backup strips correctAnswer on server", () => {
   const gasSource = readFileSync(new URL("../integrations/google-apps-script-backend.gs", import.meta.url), "utf8");
   assert.ok(gasSource.includes("stripCorrectAnswersFromExams_"));
+});
+
+test("phase5: public exam_start backup does not expose peer results", () => {
+  const start = gasSource.indexOf("function normalizeArabyaExamIdForMatch_");
+  const end = gasSource.indexOf("function getExamMaxCheatAttempts_");
+  assert.ok(start > 0 && end > start);
+
+  const sandbox = {};
+  vm.createContext(sandbox);
+  vm.runInContext(gasSource.slice(start, end), sandbox);
+
+  const payload = sandbox.buildArabyaExamStartBackup_({
+    schemaVersion: "1",
+    appVersion: "test",
+    exams: [{
+      id: "exam_a",
+      questions: [{ id: 1, correctAnswer: 0 }]
+    }],
+    results: [{
+      examId: "exam_a",
+      name: "Student A",
+      score: "100 / 100",
+      clientIp: "198.51.100.10"
+    }],
+    examDeviceRegistry: {
+      bindings: [{ examId: "exam_a", studentLookupKey: "code:A" }]
+    }
+  }, "EXAM_A");
+
+  assert.strictEqual(payload.exams.length, 1, "exam lookup should be case-insensitive");
+  assert.strictEqual(payload.exams[0].questions[0].correctAnswer, undefined);
+  assert.deepStrictEqual(payload.results, [], "public exam_start must not leak peer result rows");
+  assert.strictEqual(payload.examDeviceRegistry.bindings.length, 1);
+  assert.strictEqual(sandbox.findArabyaExamInDb_({ exams: payload.exams }, "EXAM_A").id, "exam_a");
 });
 
 test("phase5: no first-run admin credential alert on public site", () => {

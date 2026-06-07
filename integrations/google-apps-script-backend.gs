@@ -413,27 +413,31 @@ function buildArabyaExamGradingKeys_(db, examId) {
   };
 }
 
+function normalizeArabyaExamIdForMatch_(examId) {
+  return String(examId || "").trim().toLowerCase();
+}
+
+function arabyaExamIdsMatch_(left, right) {
+  var a = normalizeArabyaExamIdForMatch_(left);
+  var b = normalizeArabyaExamIdForMatch_(right);
+  return !!(a && b && a === b);
+}
+
 function buildArabyaExamStartBackup_(db, examId) {
   var targetExamId = String(examId || "").trim();
   var exams = Array.isArray(db.exams) ? db.exams : [];
   if (targetExamId) {
     exams = exams.filter(function(ex) {
-      return ex && String(ex.id || "") === targetExamId;
+      return ex && arabyaExamIdsMatch_(ex.id, targetExamId);
     });
   }
-  var results = Array.isArray(db.results) ? db.results : [];
-  if (targetExamId) {
-    results = results.filter(function(row) {
-      return row && String(row.examId || "") === targetExamId;
-    });
-  }
-  results = results.map(slimArabyaResultForExamStart_);
+  var results = [];
   var bindings = db.examDeviceRegistry && Array.isArray(db.examDeviceRegistry.bindings)
     ? db.examDeviceRegistry.bindings
     : [];
   if (targetExamId) {
     bindings = bindings.filter(function(binding) {
-      return binding && String(binding.examId || "") === targetExamId;
+      return binding && arabyaExamIdsMatch_(binding.examId, targetExamId);
     });
   }
   exams = stripCorrectAnswersFromExams_(exams);
@@ -475,7 +479,7 @@ function findArabyaExamInDb_(db, examId) {
   if (!target) return null;
   var exams = db && Array.isArray(db.exams) ? db.exams : [];
   for (var i = 0; i < exams.length; i++) {
-    if (exams[i] && String(exams[i].id || "") === target) return exams[i];
+    if (exams[i] && arabyaExamIdsMatch_(exams[i].id, target)) return exams[i];
   }
   return null;
 }
