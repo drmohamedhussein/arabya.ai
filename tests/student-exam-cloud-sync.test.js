@@ -27,10 +27,14 @@ test("student exam: silent cloud pull does not toast students", () => {
 
 test("student exam: direct link bootstraps early with loading overlay", () => {
   assert.ok(appSource.includes("function bootstrapStudentDirectLinkViewEarly"));
-  assert.ok(appSource.includes("ensureStudentGateExamReady(examId)"));
+  assert.ok(appSource.includes("function requestStudentGateExamSync"));
+  assert.ok(appSource.includes("requestStudentGateExamSync(examId)"));
   assert.ok(appSource.includes("navigateToView(\"student-login-view\")"));
   assert.ok(appSource.includes("function mergeRemoteExamsForStudentGate_"));
   assert.ok(appSource.includes("جاري جلب بيانات الامتحان"));
+  assert.ok(appSource.includes("STUDENT_GATE_SYNC_TIMEOUT_MS = 12000"));
+  assert.ok(appSource.includes("function tryActivateLocalLockedExamGate"));
+  assert.ok(appSource.includes("retryStudentGateExamSync"));
 });
 
 test("student exam: preserves answer keys and waits for server grading", () => {
