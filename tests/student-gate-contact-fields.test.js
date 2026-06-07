@@ -29,17 +29,18 @@ const upsertBlock = appSource.slice(
 );
 assert.ok(upsertBlock.includes("function upsertStudentRecord"));
 
+const studentState = {
+  students: [{
+    name: "Ali",
+    id: "S1",
+    code: "ABC123",
+    email: "old@example.com",
+    mobile: "01000000000",
+    studentKey: "code:ABC123"
+  }]
+};
 const sandbox = {
-  systemState: {
-    students: [{
-      name: "Ali",
-      id: "S1",
-      code: "ABC123",
-      email: "old@example.com",
-      mobile: "01000000000",
-      studentKey: "code:ABC123"
-    }]
-  },
+  systemState: studentState,
   isStudentRecordDeleted: () => false,
   getStudentLookupKey: student => student?.studentKey || (student?.code ? `code:${String(student.code).toUpperCase()}` : ""),
   isStudentKeyDeleted: () => false,
@@ -50,13 +51,13 @@ const sandbox = {
   isPrivateStudentCode: value => String(value || "").trim() !== "00000",
   isSharedStudentCode: value => String(value || "").trim() === "00000",
   findStudentByCode(code) {
-    return this.systemState.students.find(student => student.code === code) || null;
+    return studentState.students.find(student => student.code === code) || null;
   },
   findStudentById(id) {
-    return this.systemState.students.find(student => student.id === id) || null;
+    return studentState.students.find(student => student.id === id) || null;
   },
   findStudentsByName(name) {
-    return this.systemState.students.filter(student => student.name === name);
+    return studentState.students.filter(student => student.name === name);
   },
   pickEarlierStudentTimestamp: (existing, incoming) => existing || incoming,
   createRecordId: prefix => `${prefix}_1`,

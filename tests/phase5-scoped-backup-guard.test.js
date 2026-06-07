@@ -67,7 +67,7 @@ test("phase5: public exam_start backup does not expose peer results", () => {
 
   assert.strictEqual(payload.exams.length, 1, "exam lookup should be case-insensitive");
   assert.strictEqual(payload.exams[0].questions[0].correctAnswer, undefined);
-  assert.deepStrictEqual(payload.results, [], "public exam_start must not leak peer result rows");
+  assert.strictEqual(payload.results.length, 0, "public exam_start must not leak peer result rows");
   assert.strictEqual(payload.examDeviceRegistry.bindings.length, 1);
   assert.strictEqual(sandbox.findArabyaExamInDb_({ exams: payload.exams }, "EXAM_A").id, "exam_a");
 });
