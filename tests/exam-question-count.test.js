@@ -67,6 +67,8 @@ assert.strictEqual(newerLocalWipe.questionCount, 5, "must not wipe teacher quest
 assert.ok(appSource.includes("const runtimeQuestions = buildRuntimeQuestionsForExam(selectedExam)"));
 assert.ok(appSource.includes("getFullExamById(examId) || systemState.exams.find(e => gateExamIdsMatch_(e.id, examId))"));
 assert.ok(appSource.includes("applyGateExamTeacherSettings_(combined, local, remote)"));
+assert.ok(appSource.includes("shouldForceTeacherSettingsCloudSync_"));
+assert.ok(appSource.includes("studentGateCloudSynced"));
 
 // buildRuntimeQuestionsForExam يقتصر على questionCount
 const buildStart = appSource.indexOf("function buildRuntimeQuestionsForExam");

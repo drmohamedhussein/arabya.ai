@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.9");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.10");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -5493,6 +5493,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
         if (gateExamLoaded) {
           captureExamAnswerKeyVault({ id: lockedId });
           systemState.studentGateExamReady = true;
+          systemState.studentGateCloudSynced = true;
           systemState.studentGateSyncedExamId = String(lockedId);
         } else {
           systemState.studentGateExamReady = false;
@@ -6281,7 +6282,7 @@ function getPreExamSyncEstimateMs() {
   return DEFAULT_PRE_EXAM_SYNC_MS;
 }
 
-function recordPreExamSyncDuration(durationMs, examId = "") {
+function recordPreExamSyncDuration(durationMs, examId = "", options = {}) {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return;
   const prev = getPreExamSyncEstimateMs();
   const blended = Math.round(prev * 0.65 + durationMs * 0.35);
@@ -6294,23 +6295,36 @@ function recordPreExamSyncDuration(durationMs, examId = "") {
     localStorage.setItem(PRE_EXAM_SYNC_AT_KEY, String(Date.now()));
     localStorage.setItem(PRE_EXAM_SYNC_META_KEY, JSON.stringify({
       at: Date.now(),
-      examId: resolvedExamId
+      examId: resolvedExamId,
+      fromCloud: !!options.fromCloud
     }));
   } catch (e) {}
 }
 
-function isRecentPreExamSyncForExam(examId) {
+function isRecentPreExamSyncForExam(examId, options = {}) {
   const targetId = String(examId || "").trim();
   if (!targetId) return false;
+  const requireCloud = !!options.requireCloud;
   try {
     const raw = localStorage.getItem(PRE_EXAM_SYNC_META_KEY) || "";
     const meta = raw ? JSON.parse(raw) : null;
     if (meta && meta.at && meta.examId) {
+      if (requireCloud && !meta.fromCloud) return false;
       return Date.now() - Number(meta.at) < PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS
         && String(meta.examId) === targetId;
     }
   } catch (e) {}
   return false;
+}
+
+function resolveStudentExamIdForStart_(selectValue) {
+  const fromSelect = String(selectValue || "").trim();
+  if (fromSelect) return fromSelect;
+  return String(systemState.lockedExamId || "").trim();
+}
+
+function shouldForceTeacherSettingsCloudSync_(examId) {
+  return getArabyaWebAppUrls().length > 0 && !!normalizeGateExamId_(examId);
 }
 
 const PRE_EXAM_DEVICE_ESTIMATE_KEY = "arabya_pre_exam_device_estimate_ms";
@@ -6474,6 +6488,7 @@ function tryActivateLocalLockedExamGate(examId) {
   }
   promoteLockedExamIntoStudentGate(targetId, localExam);
   systemState.studentGateExamReady = true;
+  systemState.studentGateCloudSynced = false;
   systemState.studentGateSyncedExamId = targetId;
   systemState.studentGateSyncError = "";
   return true;
@@ -6655,7 +6670,7 @@ async function syncStudentGateExamFromCloud(examId, options = {}) {
       forcePull: true
     });
   }
-  recordPreExamSyncDuration(performance.now() - started, targetId);
+  recordPreExamSyncDuration(performance.now() - started, targetId, { fromCloud: !!result.ok });
   refreshStudentGateReadyAfterInjection(targetId);
   if (result.ok) {
     const loaded = (systemState._teacherExamsVault || []).some(
@@ -6663,6 +6678,7 @@ async function syncStudentGateExamFromCloud(examId, options = {}) {
     );
     if (loaded) {
       systemState.studentGateExamReady = true;
+      systemState.studentGateCloudSynced = true;
       systemState.studentGateSyncedExamId = targetId;
       systemState.studentGateSyncError = "";
       captureExamAnswerKeyVault({ id: targetId });
@@ -6691,8 +6707,9 @@ function requestStudentGateExamSync(examId, options = {}) {
   if (!forcePull && systemState.studentGateExamReady && gateExamIdsMatch_(systemState.studentGateSyncedExamId, targetId)) {
     return Promise.resolve({ ok: true, reason: "ready" });
   }
-  if (!forcePull && isRecentPreExamSyncForExam(targetId) && isLockedGateExamLocallyPlayable(targetId)) {
+  if (!forcePull && isRecentPreExamSyncForExam(targetId, { requireCloud: getArabyaWebAppUrls().length > 0 }) && isLockedGateExamLocallyPlayable(targetId)) {
     systemState.studentGateExamReady = true;
+    systemState.studentGateCloudSynced = true;
     systemState.studentGateSyncedExamId = targetId;
     systemState.studentGateSyncError = "";
     return Promise.resolve({ ok: true, reason: "recent" });
@@ -9950,10 +9967,12 @@ function populateExamSelectionList() {
       tryActivateLocalLockedExamGate(systemState.lockedExamId);
     }
   }
+  const lockedPlayable = systemState.lockedExamId && isLockedGateExamLocallyPlayable(systemState.lockedExamId);
   if (
     systemState.lockedExamId &&
     getArabyaWebAppUrls().length > 0 &&
-    !systemState.studentGateExamReady
+    !systemState.studentGateExamReady &&
+    !lockedPlayable
   ) {
     if (isStudentGateSyncInFlight()) {
       select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
@@ -9967,12 +9986,10 @@ function populateExamSelectionList() {
       updateStudentGateSyncRetryUI();
       return;
     }
-    if (!isLockedGateExamLocallyPlayable(systemState.lockedExamId)) {
-      select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
-      select.disabled = true;
-      updateStudentGateSyncRetryUI();
-      return;
-    }
+    select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
+    select.disabled = true;
+    updateStudentGateSyncRetryUI();
+    return;
   }
   updateStudentGateSyncRetryUI();
 
@@ -10053,7 +10070,7 @@ async function validateStudentAndStart() {
   const rawCode = document.getElementById("student-access-code").value.trim();
   const email = document.getElementById("student-email-input")?.value.trim() || "";
   const mobile = document.getElementById("student-mobile-input")?.value.trim() || "";
-  const examId = document.getElementById("student-exam-select").value;
+  const examId = resolveStudentExamIdForStart_(document.getElementById("student-exam-select")?.value);
   const normalizedId = normalizeStudentId(id);
   const inputCode = sanitizeStudentCodeInput(rawCode);
   const hasCodeInput = rawCode !== "";
@@ -10176,13 +10193,19 @@ async function validateStudentAndStart() {
       title: "جاري تجهيز الامتحان",
       message: "جاري مزامنة بيانات الامتحان قبل البدء..."
     });
-    const gateAlreadyReady = (
-      systemState.studentGateExamReady &&
-      String(systemState.studentGateSyncedExamId || "") === String(examId)
-    ) || isRecentPreExamSyncForExam(examId);
+    const forceTeacherSettingsSync = shouldForceTeacherSettingsCloudSync_(examId);
+    const gateAlreadyReady = !forceTeacherSettingsSync && (
+      (
+        systemState.studentGateExamReady &&
+        systemState.studentGateCloudSynced &&
+        gateExamIdsMatch_(systemState.studentGateSyncedExamId, examId)
+      ) || isRecentPreExamSyncForExam(examId, { requireCloud: true })
+    );
     let syncPromise;
     if (gateAlreadyReady) {
       syncPromise = Promise.resolve({ ok: true, reason: "ready" });
+    } else if (forceTeacherSettingsSync) {
+      syncPromise = requestStudentGateExamSync(examId, { forcePull: true });
     } else {
       syncPromise = requestStudentGateExamSync(examId, { forcePull: false });
     }
