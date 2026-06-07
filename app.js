@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.06.21");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.1");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -1500,6 +1500,9 @@ function initDatabase() {
     localStorage.setItem("arabya_default_exams_seeded", "yes");
   }
   ensureExamsDataShape();
+  if (typeof injectArabyaTemplateExamsIfMissing === "function") {
+    injectArabyaTemplateExamsIfMissing();
+  }
   if (isTeacherSessionActive()) {
     syncTeacherExamsVaultFromState();
   } else if (systemState.exams.length > 0 && !savedExams) {
@@ -7324,6 +7327,9 @@ async function loginTeacherObject(teacher, loginCredential, options = {}) {
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
   loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
+  if (typeof injectArabyaTemplateExamsIfMissing === "function") {
+    injectArabyaTemplateExamsIfMissing();
+  }
   localStorage.setItem("arabya_active_teacher_username", normalized.username || teacher.username);
   if (!options.restoreSession) {
     persistTeacherSessionToken(normalized.username || teacher.username);
