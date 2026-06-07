@@ -6,8 +6,8 @@
     const raw = (code || "").toString().trim();
     if (!raw) return "";
     const compact = raw.replace(/\s+/g, "");
-    const digitsOnly = compact.replace(/\D/g, "");
-    if (digitsOnly && /^0+$/.test(digitsOnly) && digitsOnly.length >= 5) {
+    const clean = compact.replace(/[-_]/g, "");
+    if (/^0{5,}$/.test(clean)) {
       return "00000";
     }
     return compact;

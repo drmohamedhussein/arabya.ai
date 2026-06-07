@@ -8,7 +8,14 @@ function normalizeStudentId(studentId) {
 }
 
 function sanitizeStudentCodeInput(code) {
-  return (code || "").toString().replace(/\D/g, "").slice(0, 5);
+  const raw = (code || "").toString().trim();
+  if (!raw) return "";
+  const compact = raw.replace(/\s+/g, "");
+  const clean = compact.replace(/[-_]/g, "");
+  if (/^0{5,}$/.test(clean)) {
+    return "00000";
+  }
+  return compact;
 }
 
 function isFiveDigitStudentCode(code) {
