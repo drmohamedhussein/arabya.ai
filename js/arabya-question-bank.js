@@ -152,17 +152,133 @@
     }
   }
 
+  function normalizeQuestionType(rawType) {
+    const t = String(rawType || "").trim().toLowerCase();
+    if (!t || t === "mcq" || t === "multiple" || t === "choice" || t === "اختيار") return "multiple";
+    if (t === "boolean" || t === "true_false" || t === "tf" || t === "صواب" || t === "صواب وخطأ") return "boolean";
+    if (t === "essay" || t === "text" || t === "مقالي" || t === "مقالة") return "essay";
+    return "multiple";
+  }
+
+  function parseCsvText(text) {
+    const src = String(text || "").replace(/^\uFEFF/, "");
+    const rows = [];
+    let row = [];
+    let field = "";
+    let inQuotes = false;
+    for (let i = 0; i < src.length; i++) {
+      const ch = src[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (src[i + 1] === '"') {
+            field += '"';
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          field += ch;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = true;
+      } else if (ch === ",") {
+        row.push(field);
+        field = "";
+      } else if (ch === "\r") {
+        if (src[i + 1] === "\n") i++;
+        row.push(field);
+        field = "";
+        if (row.some(cell => String(cell).trim() !== "")) rows.push(row);
+        row = [];
+      } else if (ch === "\n") {
+        row.push(field);
+        field = "";
+        if (row.some(cell => String(cell).trim() !== "")) rows.push(row);
+        row = [];
+      } else {
+        field += ch;
+      }
+    }
+    row.push(field);
+    if (row.some(cell => String(cell).trim() !== "")) rows.push(row);
+    return rows;
+  }
+
+  function parseBankCsv(text) {
+    const rows = parseCsvText(text);
+    if (!rows.length) return [];
+    const header = rows[0].map(h => String(h || "").trim().toLowerCase());
+    const hasHeader = header.includes("question") || header.includes("type");
+    const dataRows = hasHeader ? rows.slice(1) : rows;
+    const col = name => (hasHeader ? header.indexOf(name) : -1);
+
+    const typeIdx = col("type");
+    const questionIdx = col("question");
+    const optionsIdx = col("options");
+    const correctIdx = col("correctanswer");
+    const pointsIdx = col("points");
+    const timeIdx = col("timeseconds");
+
+    return dataRows.map((cells, idx) => {
+      const get = index => (index >= 0 && index < cells.length ? String(cells[index] || "").trim() : "");
+      const type = normalizeQuestionType(typeIdx >= 0 ? get(typeIdx) : "multiple");
+      const question = questionIdx >= 0 ? get(questionIdx) : get(0);
+      const optionsRaw = optionsIdx >= 0 ? get(optionsIdx) : get(2);
+      let options = optionsRaw ? optionsRaw.split(/\s*\|\s*/).map(o => o.trim()).filter(Boolean) : [];
+      if (type === "boolean" && !options.length) options = ["صواب", "خطأ"];
+      const correctRaw = correctIdx >= 0 ? get(correctIdx) : get(3);
+      let correctAnswer = correctRaw;
+      if (type === "essay") {
+        correctAnswer = "";
+      } else if (correctRaw !== "") {
+        const parsed = parseInt(correctRaw, 10);
+        correctAnswer = Number.isFinite(parsed) ? parsed : 0;
+      } else {
+        correctAnswer = 0;
+      }
+      const pointsRaw = pointsIdx >= 0 ? get(pointsIdx) : get(4);
+      const timeRaw = timeIdx >= 0 ? get(timeIdx) : get(5);
+      return {
+        id: idx + 1,
+        type,
+        question,
+        options: type === "essay" ? [] : options,
+        correctAnswer,
+        points: pointsRaw !== "" && Number.isFinite(parseInt(pointsRaw, 10)) ? parseInt(pointsRaw, 10) : 10,
+        timeSeconds: timeRaw !== "" && Number.isFinite(parseInt(timeRaw, 10)) ? parseInt(timeRaw, 10) : 60
+      };
+    }).filter(q => q.question);
+  }
+
   function normalizeQuestions(questions) {
     if (!Array.isArray(questions)) return [];
-    return questions.map((q, idx) => ({
-      id: q.id != null ? q.id : idx + 1,
-      type: q.type || "mcq",
-      question: String(q.question || "").trim(),
-      options: Array.isArray(q.options) ? q.options : [],
-      correctAnswer: q.correctAnswer,
-      points: q.points != null ? q.points : 10,
-      timeSeconds: q.timeSeconds != null ? q.timeSeconds : 60
-    })).filter(q => q.question);
+    return questions.map((q, idx) => {
+      const type = normalizeQuestionType(q.type);
+      let options = Array.isArray(q.options) ? q.options.map(o => String(o || "").trim()).filter(Boolean) : [];
+      if (type === "boolean" && !options.length) options = ["صواب", "خطأ"];
+      let correctAnswer = q.correctAnswer;
+      if (type === "essay") {
+        correctAnswer = "";
+      } else if (correctAnswer === "" || correctAnswer == null) {
+        correctAnswer = 0;
+      } else if (!Number.isFinite(Number(correctAnswer))) {
+        const parsed = parseInt(correctAnswer, 10);
+        correctAnswer = Number.isFinite(parsed) ? parsed : 0;
+      } else {
+        correctAnswer = Number(correctAnswer);
+      }
+      return {
+        id: q.id != null ? q.id : idx + 1,
+        type,
+        question: String(q.question || "").trim(),
+        options: type === "essay" ? [] : options,
+        correctAnswer,
+        points: q.points != null ? q.points : 10,
+        timeSeconds: q.timeSeconds != null ? q.timeSeconds : 60
+      };
+    }).filter(q => q.question);
   }
 
   function renumberQuestions(questions) {
@@ -269,7 +385,7 @@
     const rows = [["type", "question", "options", "correctAnswer", "points", "timeSeconds"]];
     (bank.questions || []).forEach(q => {
       rows.push([
-        q.type || "mcq",
+        normalizeQuestionType(q.type),
         q.question || "",
         (q.options || []).join(" | "),
         q.correctAnswer != null ? String(q.correctAnswer) : "",
@@ -302,6 +418,9 @@
     saveBankFromExam,
     mergeBankIntoExam,
     normalizeQuestions,
+    normalizeQuestionType,
+    parseCsvText,
+    parseBankCsv,
     exportBankJson,
     exportBankCsv
   };
@@ -372,6 +491,88 @@
     }
     const bank = getBankById(select.value, username);
     if (bank) exportBankCsv(bank);
+  };
+
+  function importQuestionsFromCsvText(csvText, fileName, username, options) {
+    const questions = normalizeQuestions(parseBankCsv(csvText));
+    if (!questions.length) {
+      alert("لم يُعثر على أسئلة صالحة في ملف CSV. تأكد من الأعمدة: type, question, options, correctAnswer, points, timeSeconds");
+      return false;
+    }
+    if (options && options.target === "exam") {
+      const examId = global.currentEditingExamId;
+      const state = (requireTeacherSession("استيراد CSV") || {}).state;
+      if (!examId || !state) return false;
+      const exam = state.exams.find(e => e.id === examId);
+      if (!exam) return false;
+      const mode = options.mode || "append";
+      const tempBank = { questions };
+      const count = mergeBankIntoExam(exam, tempBank, mode);
+      if (typeof global.sanitizeQuestionConfig === "function") global.sanitizeQuestionConfig(exam);
+      if (typeof global.saveSystemState === "function") global.saveSystemState(true);
+      if (typeof global.renderQuestionsForEdit === "function") global.renderQuestionsForEdit(exam);
+      alert(mode === "replace"
+        ? `تم استبدال أسئلة الامتحان (${count} سؤال) من ملف CSV.`
+        : `تم دمج ${count} سؤال من ملف CSV في الامتحان.`);
+      return true;
+    }
+    const banks = loadSharedBanks(username);
+    const id = `bank_${Date.now()}`;
+    banks.push({
+      id,
+      name: (options && options.bankName) || fileName.replace(/\.csv$/i, ""),
+      subject: (options && options.subject) || "",
+      teacher: username,
+      questions,
+      updatedAt: new Date().toISOString()
+    });
+    saveSharedBanks(banks, username);
+    refreshSharedBankSelect(username);
+    alert(`تم استيراد بنك الأسئلة (${questions.length} سؤال) — سيُرفع تلقائياً إلى السحابة مع النسخة الاحتياطية.`);
+    return true;
+  }
+
+  global.importCsvIntoCurrentExam = function (event) {
+    const session = requireTeacherSession("استيراد CSV في الامتحان");
+    if (!session) return;
+    const examId = global.currentEditingExamId;
+    if (!examId) {
+      alert("افتح محرر أسئلة امتحان أولاً.");
+      event.target.value = "";
+      return;
+    }
+    const file = event.target.files[0];
+    if (!file) return;
+    const modeEl = document.getElementById("shared-bank-import-mode");
+    const mode = (modeEl && modeEl.value) || "append";
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        importQuestionsFromCsvText(e.target.result, file.name, session.username, { target: "exam", mode });
+      } catch (err) {
+        alert("تعذّر قراءة ملف CSV. تأكد أنه نفس صيغة التصدير من المنصة.");
+      }
+      event.target.value = "";
+    };
+    reader.readAsText(file, "UTF-8");
+  };
+
+  global.importQuestionBankCsvFile = function (event) {
+    const session = requireTeacherSession("استيراد بنك CSV");
+    if (!session) return;
+    const username = session.username;
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      try {
+        importQuestionsFromCsvText(e.target.result, file.name, username);
+      } catch (err) {
+        alert("تعذّر قراءة ملف CSV. تأكد أنه نفس صيغة التصدير من المنصة.");
+      }
+      event.target.value = "";
+    };
+    reader.readAsText(file, "UTF-8");
   };
 
   global.importQuestionBankFile = function (event) {

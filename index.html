@@ -909,7 +909,7 @@
 
                 <div class="exam-builder-card" style="margin-bottom:1.5rem; border-color:rgba(20,184,166,0.25); background:rgba(20,184,166,0.03); text-align:right;">
                   <h4 style="color:var(--secondary); font-weight:700; margin-bottom:0.75rem;">بنك أسئلة مشترك (بين الامتحانات)</h4>
-                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">بنوك الأسئلة <strong>خاصة بكل معلم</strong> — تُزامَن إلى السحابة ضمن <code>questionBanks</code>. احفظ أو ادمج بنكاً مع تصدير JSON/CSV.</p>
+                  <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">بنوك الأسئلة <strong>خاصة بكل معلم</strong> — تُزامَن إلى السحابة ضمن <code>questionBanks</code>. احفظ أو ادمج بنكاً مع تصدير/استيراد JSON أو CSV.</p>
                   <div id="question-bank-sync-status" style="font-size:0.82rem; margin-bottom:0.75rem;" aria-live="polite"></div>
                   <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:0.75rem;">
                     <label for="shared-question-bank-select" class="sr-only">بنك أسئلة محفوظ</label>
@@ -926,7 +926,11 @@
                     <button type="button" class="btn btn-outline btn-sm" onclick="exportSelectedSharedBankJson()">تصدير JSON</button>
                     <button type="button" class="btn btn-outline btn-sm" onclick="exportSelectedSharedBankCsv()">تصدير CSV</button>
                     <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('shared-bank-file-input').click()">استيراد بنك (JSON)</button>
-                    <input type="file" id="shared-bank-file-input" accept=".json" style="display:none" onchange="importQuestionBankFile(event)">
+                    <input type="file" id="shared-bank-file-input" accept=".json,application/json" style="display:none" onchange="importQuestionBankFile(event)">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('shared-bank-csv-input').click()">استيراد بنك (CSV)</button>
+                    <input type="file" id="shared-bank-csv-input" accept=".csv,text/csv" style="display:none" onchange="importQuestionBankCsvFile(event)">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('exam-csv-import-input').click()">استيراد CSV في الامتحان</button>
+                    <input type="file" id="exam-csv-import-input" accept=".csv,text/csv" style="display:none" onchange="importCsvIntoCurrentExam(event)">
                     <button type="button" class="btn btn-outline btn-sm" style="border-color:var(--secondary);color:var(--secondary);" onclick="fixQuestionBankCloudSync()">إصلاح مزامنة بنكي</button>
                   </div>
                   <div data-super-admin-only class="hidden" style="display:flex; flex-wrap:wrap; gap:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid rgba(255,255,255,0.06);">
