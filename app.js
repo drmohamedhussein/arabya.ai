@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.13");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.14");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2690,6 +2690,22 @@ function mergeExamQuestionsPreservingAnswerKeys_(baseQuestions, patchQuestions) 
   });
 }
 
+function getExamContentRevision_(exam) {
+  return Number(exam?.localRevision)
+    || Date.parse(exam?.questionsUpdatedAt || "")
+    || Date.parse(exam?.updatedAt || exam?.syncedAt || exam?.timestamp || "")
+    || 0;
+}
+
+function shouldKeepLocalExamQuestions_(localExam, remoteExam) {
+  const localTs = getExamContentRevision_(localExam);
+  const remoteTs = getExamContentRevision_(remoteExam);
+  if (localTs > remoteTs) return true;
+  const localCount = Array.isArray(localExam?.questions) ? localExam.questions.length : 0;
+  const remoteCount = Array.isArray(remoteExam?.questions) ? remoteExam.questions.length : 0;
+  return localCount !== remoteCount && localTs >= remoteTs && localCount > remoteCount;
+}
+
 function isExamLocalRevisionNewer_(localExam, remoteExam) {
   const localRev = Number(localExam?.localRevision)
     || Date.parse(localExam?.questionsUpdatedAt || "")
@@ -2818,7 +2834,15 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
       applyGateExamTeacherSettings_(combined, local, remote);
     }
     if (local && Array.isArray(remote.questions)) {
-      combined.questions = mergeExamQuestionsPreservingAnswerKeys_(local.questions, remote.questions);
+      const keepLocalQuestions = shouldKeepLocalExamQuestions_(local, remote);
+      combined.questions = mergeExamQuestionsPreservingAnswerKeys_(
+        local.questions,
+        keepLocalQuestions ? combined.questions : remote.questions
+      );
+      if (keepLocalQuestions) {
+        combined.questionsUpdatedAt = local.questionsUpdatedAt || combined.questionsUpdatedAt;
+        combined.localRevision = local.localRevision || combined.localRevision;
+      }
     } else if (local && Array.isArray(local.questions)) {
       combined.questions = local.questions;
     }
@@ -3866,8 +3890,8 @@ function upsertStudentRecord(source, fallbackKey = "") {
     existingStudent.name = normalizedStudent.name || existingStudent.name;
     existingStudent.id = normalizedStudent.id || existingStudent.id || "";
     existingStudent.code = normalizedStudent.code || existingStudent.code || "";
-    existingStudent.email = normalizedStudent.email;
-    existingStudent.mobile = normalizedStudent.mobile;
+    if (normalizedStudent.email) existingStudent.email = normalizedStudent.email;
+    if (normalizedStudent.mobile) existingStudent.mobile = normalizedStudent.mobile;
     if (source.timestamp) {
       existingStudent.timestamp = pickEarlierStudentTimestamp(existingStudent.timestamp, source.timestamp);
     }
