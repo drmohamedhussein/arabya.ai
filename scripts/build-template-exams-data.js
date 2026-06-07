@@ -124,9 +124,65 @@ for (const set of sourceSets) {
   summaries[set.key] = built.summary;
 }
 
+function cloneExamWithMeta(sourceExam, meta) {
+  const copy = JSON.parse(JSON.stringify(sourceExam));
+  Object.assign(copy, meta);
+  copy.totalScore = Array.isArray(copy.questions) ? copy.questions.length : 0;
+  return copy;
+}
+
+function verifyExamIntegrity(exam, label) {
+  const questions = exam.questions || [];
+  const issues = [];
+  if (!questions.length) issues.push(`${label}: no questions`);
+  questions.forEach((q, idx) => {
+    if (!q.question) issues.push(`${label}: empty question at #${idx + 1}`);
+    if (q.correctAnswer === undefined || q.correctAnswer === null) {
+      issues.push(`${label}: missing correctAnswer at #${idx + 1}`);
+    }
+    if (q.type === "multiple" && (!Array.isArray(q.options) || q.options.length < 2)) {
+      issues.push(`${label}: invalid mcq options at #${idx + 1}`);
+    }
+    if (q.type === "boolean" && q.correctAnswer !== 0 && q.correctAnswer !== 1) {
+      issues.push(`${label}: invalid tf answer at #${idx + 1}`);
+    }
+  });
+  if (issues.length) {
+    console.error(issues.join("\n"));
+    process.exit(1);
+  }
+  return {
+    total: questions.length,
+    mcq: questions.filter(q => q.type === "multiple").length,
+    tf: questions.filter(q => q.type === "boolean").length
+  };
+}
+
+const nahwComprehensive = exams.find(e => e.id === "nahw_comprehensive_year1");
+if (!nahwComprehensive) {
+  console.error("Missing nahw_comprehensive_year1 source exam");
+  process.exit(1);
+}
+
+const nahwFinal = cloneExamWithMeta(nahwComprehensive, {
+  id: "nahw_final_year1",
+  title: "امتحان النحو والصرف النهائي للفرقة الأولى",
+  faculty: "الفرقة الأولى — امتحان نهائي",
+  examType: "نهائي",
+  templateRevision: 1
+});
+exams.push(nahwFinal);
+
+summaries.nahw_final = {
+  clonedFrom: "nahw_comprehensive_year1",
+  integrity: verifyExamIntegrity(nahwFinal, "nahw_final_year1"),
+  matchesSourceCount: nahwFinal.questions.length === nahwComprehensive.questions.length
+};
+
 const header =
   "// Generated from imports — regenerate: node scripts/build-template-exams-data.js\n" +
-  "// Nahw: تمبلت-الامتحان.docx + امتحان-اولى-الفصل-الدراسي-الثاني-Copy.docx\n" +
+  "// Nahw comprehensive: تمبلت-الامتحان.docx + امتحان-اولى-الفصل-الدراسي-الثاني-Copy.docx\n" +
+  "// Nahw final: clone of nahw_comprehensive_year1 (251 questions)\n" +
   "// Arabic: adab-semester2-copy.docx + mudhakara.docx (deduped)\n";
 
 let js = header;
