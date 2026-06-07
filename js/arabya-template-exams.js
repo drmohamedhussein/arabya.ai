@@ -65,7 +65,10 @@
       upgraded.maxCheatAttempts = parseInt(existing.maxCheatAttempts, 10);
     }
     if (existing.shuffleQuestions === false) upgraded.shuffleQuestions = false;
-    if (existing.questionCount) upgraded.questionCount = existing.questionCount;
+    const localCount = parseInt(existing.questionCount, 10);
+    if (Number.isFinite(localCount) && localCount > 0) {
+      upgraded.questionCount = localCount;
+    }
     return upgraded;
   }
 

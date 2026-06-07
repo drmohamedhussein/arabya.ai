@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.8");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.9");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -2578,32 +2578,38 @@ function resolveGateExamQuestionCount_(localExam, remoteExam) {
   return "";
 }
 
+/** يطبّق إعدادات المعلم المحفوظة (questionCount وغيرها) دون مسحها بقيم القالب الفارغة. */
+function applyGateExamTeacherSettings_(merged, localExam, remoteExam) {
+  if (!merged) return merged;
+  merged.questionCount = resolveGateExamQuestionCount_(localExam, remoteExam);
+  if (remoteExam?.endsAt) merged.endsAt = remoteExam.endsAt;
+  else if (localExam?.endsAt) merged.endsAt = localExam.endsAt;
+  if (remoteExam?.timeLimit != null && remoteExam.timeLimit !== "") merged.timeLimit = remoteExam.timeLimit;
+  else if (localExam?.timeLimit != null) merged.timeLimit = localExam.timeLimit;
+  if (remoteExam?.totalScore != null && remoteExam.totalScore !== "") merged.totalScore = remoteExam.totalScore;
+  else if (localExam?.totalScore != null) merged.totalScore = localExam.totalScore;
+  if (Number.isFinite(parseInt(remoteExam?.maxCheatAttempts, 10))) {
+    merged.maxCheatAttempts = parseInt(remoteExam.maxCheatAttempts, 10);
+  } else if (Number.isFinite(parseInt(localExam?.maxCheatAttempts, 10))) {
+    merged.maxCheatAttempts = parseInt(localExam.maxCheatAttempts, 10);
+  }
+  if (typeof remoteExam?.shuffleQuestions === "boolean") merged.shuffleQuestions = remoteExam.shuffleQuestions;
+  else if (typeof localExam?.shuffleQuestions === "boolean") merged.shuffleQuestions = localExam.shuffleQuestions;
+  return merged;
+}
+
 /** يدمج امتحاناً للبوابة مع الحفاظ على إعدادات المعلم (مثل questionCount) وعدم مسحها بالقالب المحلي. */
 function mergeGateExamSnapshot_(localExam, remoteExam) {
   if (!localExam) return remoteExam ? { ...remoteExam } : null;
   if (!remoteExam) return { ...localExam };
   const merged = { ...localExam, ...remoteExam };
   merged.id = remoteExam.id || localExam.id;
-  merged.questionCount = resolveGateExamQuestionCount_(localExam, remoteExam);
-  if (remoteExam.endsAt) merged.endsAt = remoteExam.endsAt;
-  else if (localExam.endsAt) merged.endsAt = localExam.endsAt;
-  if (remoteExam.timeLimit != null && remoteExam.timeLimit !== "") merged.timeLimit = remoteExam.timeLimit;
-  else if (localExam.timeLimit != null) merged.timeLimit = localExam.timeLimit;
-  if (remoteExam.totalScore != null && remoteExam.totalScore !== "") merged.totalScore = remoteExam.totalScore;
-  else if (localExam.totalScore != null) merged.totalScore = localExam.totalScore;
-  if (Number.isFinite(parseInt(remoteExam.maxCheatAttempts, 10))) {
-    merged.maxCheatAttempts = parseInt(remoteExam.maxCheatAttempts, 10);
-  } else if (Number.isFinite(parseInt(localExam.maxCheatAttempts, 10))) {
-    merged.maxCheatAttempts = parseInt(localExam.maxCheatAttempts, 10);
-  }
-  if (typeof remoteExam.shuffleQuestions === "boolean") merged.shuffleQuestions = remoteExam.shuffleQuestions;
-  else if (typeof localExam.shuffleQuestions === "boolean") merged.shuffleQuestions = localExam.shuffleQuestions;
   const remoteLen = Array.isArray(remoteExam.questions) ? remoteExam.questions.length : 0;
   const localLen = Array.isArray(localExam.questions) ? localExam.questions.length : 0;
   merged.questions = remoteLen >= localLen && remoteLen > 0
     ? remoteExam.questions
     : (localLen > 0 ? localExam.questions : remoteExam.questions);
-  return merged;
+  return applyGateExamTeacherSettings_(merged, localExam, remoteExam);
 }
 
 function stripAnswerKeysFromQuestion(q) {
@@ -2809,6 +2815,7 @@ function mergeRemoteExamsPreservingAnswerKeys_(localExams, remoteExams, mergeKey
     let combined = local ? mergeGateExamSnapshot_(local, remote) : { ...remote };
     if (local && isExamLocalRevisionNewer_(local, remote)) {
       combined = { ...remote, ...local };
+      applyGateExamTeacherSettings_(combined, local, remote);
     }
     if (local && Array.isArray(remote.questions)) {
       combined.questions = mergeExamQuestionsPreservingAnswerKeys_(local.questions, remote.questions);
@@ -10192,7 +10199,7 @@ async function validateStudentAndStart() {
     upsertStudentRecord(pendingExamStudent, pendingExamStudent.studentKey);
     saveStudentsToLocalStorage();
 
-    selectedExam = systemState.exams.find(e => e.id === examId);
+    selectedExam = getFullExamById(examId) || systemState.exams.find(e => gateExamIdsMatch_(e.id, examId));
     if (!selectedExam) {
       if (startBtn) {
         startBtn.disabled = false;
