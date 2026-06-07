@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.5");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.6");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -4773,13 +4773,14 @@ function reloadSystemStateFromLocalStorage(options = {}) {
 }
 
 function runTemplateExamInjection(options) {
-  let result = { added: 0, skipped: 0 };
+  let result = { added: 0, skipped: 0, upgraded: 0 };
   if (typeof injectArabyaTemplateExamsIfMissing === "function") {
     result = injectArabyaTemplateExamsIfMissing(options) || result;
   }
   if (systemState.activeTeacher) {
     hydrateTeacherExamAnswerKeysFromStores();
   }
+  refreshStudentGateReadyAfterInjection(systemState.lockedExamId);
   return result;
 }
 
@@ -5444,7 +5445,7 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
       const lockedId = systemState.lockedExamId || resolveStudentExamScopeId();
       if (lockedId) {
         const gateExamLoaded = (systemState._teacherExamsVault || []).some(
-          exam => exam && String(exam.id) === String(lockedId)
+          exam => gateExamIdsMatch_(exam?.id, lockedId) && Array.isArray(exam.questions) && exam.questions.length > 0
         );
         if (gateExamLoaded) {
           captureExamAnswerKeyVault({ id: lockedId });
@@ -6218,12 +6219,14 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
 const PRE_EXAM_SYNC_ESTIMATE_KEY = "arabya_pre_exam_sync_estimate_ms";
 const PRE_EXAM_SYNC_AT_KEY = "arabya_pre_exam_sync_at";
 const PRE_EXAM_SYNC_META_KEY = "arabya_pre_exam_sync_meta";
-const DEFAULT_PRE_EXAM_SYNC_MS = 2000;
+const DEFAULT_PRE_EXAM_SYNC_MS = 5000;
 const MIN_PRE_EXAM_SYNC_MS = 0;
-const MAX_PRE_EXAM_SYNC_MS = 8000;
+const MAX_PRE_EXAM_SYNC_MS = 15000;
 const PRE_EXAM_SYNC_PREFETCH_MAX_AGE_MS = 45000;
-const STUDENT_GATE_SYNC_TIMEOUT_MS = 4500;
+const STUDENT_GATE_SYNC_TIMEOUT_MS = 12000;
+const STUDENT_GATE_SYNC_RETRY_TIMEOUT_MS = 18000;
 let studentExamGatePrefetchPromise = null;
+let studentExamGatePrefetchExamId = "";
 
 function getPreExamSyncEstimateMs() {
   try {
@@ -6338,6 +6341,139 @@ function bootstrapStudentGateTeacherFromUrlSync() {
   bootstrapStudentGateSyncConfig();
 }
 
+function normalizeGateExamId_(examId) {
+  return String(examId || "").trim();
+}
+
+function gateExamIdsMatch_(left, right) {
+  const a = normalizeGateExamId_(left);
+  const b = normalizeGateExamId_(right);
+  return !!(a && b && a.toLowerCase() === b.toLowerCase());
+}
+
+function getArabyaTemplateExamList() {
+  if (typeof ArabyaTemplateExams !== "undefined" && typeof ArabyaTemplateExams.getTemplateExams === "function") {
+    return ArabyaTemplateExams.getTemplateExams();
+  }
+  if (Array.isArray(window.arabyaTemplateExams)) return window.arabyaTemplateExams;
+  return [];
+}
+
+function findLockedGateExamSource(examId) {
+  const targetId = normalizeGateExamId_(examId);
+  if (!targetId) return null;
+  const fromVault = (systemState._teacherExamsVault || []).find(exam => gateExamIdsMatch_(exam?.id, targetId));
+  if (fromVault && Array.isArray(fromVault.questions) && fromVault.questions.length) {
+    return fromVault;
+  }
+  const full = getFullExamById(targetId);
+  if (full && Array.isArray(full.questions) && full.questions.length) {
+    return full;
+  }
+  const fromRuntime = (systemState.exams || []).find(exam => gateExamIdsMatch_(exam?.id, targetId));
+  if (fromRuntime && Array.isArray(fromRuntime.questions) && fromRuntime.questions.length) {
+    return getFullExamById(targetId) || fromRuntime;
+  }
+  const template = getArabyaTemplateExamList().find(exam => gateExamIdsMatch_(exam?.id, targetId));
+  if (template && Array.isArray(template.questions) && template.questions.length) {
+    return JSON.parse(JSON.stringify(template));
+  }
+  return null;
+}
+
+function isLockedGateExamLocallyPlayable(examId) {
+  const exam = findLockedGateExamSource(examId);
+  return !!(exam && Array.isArray(exam.questions) && exam.questions.length > 0);
+}
+
+function promoteLockedExamIntoStudentGate(examId, fullExam) {
+  const targetId = normalizeGateExamId_(examId);
+  if (!targetId || !fullExam || !gateExamIdsMatch_(fullExam.id, targetId)) return false;
+  const copy = JSON.parse(JSON.stringify(fullExam));
+  copy.id = targetId;
+  if (typeof sanitizeQuestionConfig === "function") {
+    sanitizeQuestionConfig(copy);
+  }
+  const vault = Array.isArray(systemState._teacherExamsVault) ? [...systemState._teacherExamsVault] : [];
+  const vaultIdx = vault.findIndex(exam => gateExamIdsMatch_(exam?.id, targetId));
+  if (vaultIdx >= 0) {
+    vault[vaultIdx] = { ...vault[vaultIdx], ...copy, id: targetId, questions: copy.questions };
+  } else {
+    vault.push(copy);
+  }
+  systemState._teacherExamsVault = vault;
+  const exams = Array.isArray(systemState.exams) ? [...systemState.exams] : [];
+  const examIdx = exams.findIndex(exam => gateExamIdsMatch_(exam?.id, targetId));
+  const stripped = stripAnswerKeysFromExam(copy);
+  stripped.id = targetId;
+  if (examIdx >= 0) {
+    exams[examIdx] = stripped;
+  } else {
+    exams.push(stripped);
+  }
+  systemState.exams = exams;
+  captureExamAnswerKeyVault({ id: targetId });
+  if (!isTeacherSessionActive()) {
+    persistStudentGateExamsToLocalStorage();
+  }
+  return true;
+}
+
+function tryActivateLocalLockedExamGate(examId) {
+  const targetId = normalizeGateExamId_(examId || systemState.lockedExamId);
+  if (!targetId) return false;
+  const localExam = findLockedGateExamSource(targetId);
+  if (!localExam || !Array.isArray(localExam.questions) || !localExam.questions.length) {
+    return false;
+  }
+  promoteLockedExamIntoStudentGate(targetId, localExam);
+  systemState.studentGateExamReady = true;
+  systemState.studentGateSyncedExamId = targetId;
+  systemState.studentGateSyncError = "";
+  return true;
+}
+
+function refreshStudentGateReadyAfterInjection(examId) {
+  const targetId = normalizeGateExamId_(examId || systemState.lockedExamId);
+  if (!targetId || systemState.studentGateExamReady) return;
+  const cloudLoaded = (systemState._teacherExamsVault || []).some(
+    exam => gateExamIdsMatch_(exam?.id, targetId) && Array.isArray(exam.questions) && exam.questions.length > 0
+  );
+  if (cloudLoaded) {
+    systemState.studentGateExamReady = true;
+    systemState.studentGateSyncedExamId = targetId;
+    systemState.studentGateSyncError = "";
+    captureExamAnswerKeyVault({ id: targetId });
+    return;
+  }
+  tryActivateLocalLockedExamGate(targetId);
+}
+
+function isStudentGateSyncInFlight() {
+  return !!studentExamGatePrefetchPromise;
+}
+
+function updateStudentGateSyncRetryUI() {
+  const box = document.getElementById("student-gate-sync-retry");
+  const errorEl = document.getElementById("student-gate-sync-error");
+  if (!box) return;
+  const showRetry = !!(
+    systemState.lockedExamId &&
+    systemState.studentGateSyncError &&
+    !systemState.studentGateExamReady &&
+    !isStudentGateSyncInFlight()
+  );
+  if (showRetry) {
+    box.classList.remove("hidden");
+    if (errorEl) {
+      errorEl.textContent = "تعذّر جلب بيانات الامتحان من السحابة. يمكنك إعادة المحاولة أو المتابعة إن ظهر الامتحان أدناه.";
+    }
+  } else {
+    box.classList.add("hidden");
+    if (errorEl) errorEl.textContent = "";
+  }
+}
+
 function lockStudentDirectExamSelect() {
   try { populateExamSelectionList(); } catch (e) {}
   const select = document.getElementById("student-exam-select");
@@ -6346,6 +6482,7 @@ function lockStudentDirectExamSelect() {
     select.disabled = true;
     select.setAttribute("aria-describedby", "direct-exam-lock-note");
   }
+  updateStudentGateSyncRetryUI();
 }
 
 function bootstrapStudentDirectLinkViewEarly() {
@@ -6354,18 +6491,25 @@ function bootstrapStudentDirectLinkViewEarly() {
   bootstrapStudentGateTeacherFromUrlSync();
   systemState.lockedExamId = examId;
   systemState.studentGateExamReady = false;
+  systemState.studentGateSyncError = "";
   systemState._studentDirectLinkBootstrapped = true;
+  tryActivateLocalLockedExamGate(examId);
   navigateToView("student-login-view");
   lockStudentDirectExamSelect();
   if (getArabyaWebAppUrls().length > 0) {
     const estimateMs = getPreExamSyncEstimateMs();
     const overlay = showStudentExamPrepareOverlay(estimateMs, {
       title: "جاري تحميل الامتحان",
-      message: "جاري جلب بيانات الامتحان، يرجى الانتظار..."
+      message: systemState.studentGateExamReady
+        ? "تم تحميل الامتحان — جاري تحديث البيانات من السحابة..."
+        : "جاري جلب بيانات الامتحان، يرجى الانتظار..."
     });
-    void waitPreExamCountdownAndSync(overlay, ensureStudentGateExamReady(examId), estimateMs).finally(() => {
+    void waitPreExamCountdownAndSync(overlay, requestStudentGateExamSync(examId), estimateMs).finally(() => {
       lockStudentDirectExamSelect();
     });
+  } else if (!systemState.studentGateExamReady) {
+    tryActivateLocalLockedExamGate(examId);
+    lockStudentDirectExamSelect();
   }
   return true;
 }
@@ -6438,10 +6582,13 @@ async function fetchAndMergeAllCloudBackups(mergeOptions = {}, timeoutMs = 0) {
   return { ok: anyMerged, lastResponse };
 }
 
-async function ensureStudentGateExamReady(examId) {
+async function syncStudentGateExamFromCloud(examId, options = {}) {
   bootstrapStudentGateSyncConfig();
-  const targetId = String(examId || systemState.lockedExamId || resolveStudentExamScopeId() || "").trim();
+  const targetId = normalizeGateExamId_(examId || systemState.lockedExamId || resolveStudentExamScopeId());
   if (!targetId || getArabyaWebAppUrls().length === 0) {
+    if (tryActivateLocalLockedExamGate(targetId)) {
+      return { ok: true, reason: "local_only" };
+    }
     systemState.studentGateExamReady = false;
     return { ok: false, reason: "no_url" };
   }
@@ -6450,7 +6597,7 @@ async function ensureStudentGateExamReady(examId) {
     silent: true,
     scope: "exam_start",
     examId: targetId,
-    timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS,
+    timeoutMs: options.timeoutMs || STUDENT_GATE_SYNC_TIMEOUT_MS,
     forcePull: true
   });
   if (!result.ok) {
@@ -6458,58 +6605,104 @@ async function ensureStudentGateExamReady(examId) {
       silent: true,
       scope: "exam_start",
       examId: targetId,
-      timeoutMs: Math.min(STUDENT_GATE_SYNC_TIMEOUT_MS * 2, 9000),
+      timeoutMs: options.retryTimeoutMs || STUDENT_GATE_SYNC_RETRY_TIMEOUT_MS,
       forcePull: true
     });
   }
   recordPreExamSyncDuration(performance.now() - started, targetId);
-  systemState.studentGateExamReady = !!result.ok;
-  systemState.studentGateSyncedExamId = targetId;
+  refreshStudentGateReadyAfterInjection(targetId);
   if (result.ok) {
-    try { await fetchExamGradingKeysFromCloud(targetId); } catch (keysErr) {
-      console.warn("[ARABYA] exam_start grading keys fetch failed:", keysErr);
+    const loaded = (systemState._teacherExamsVault || []).some(
+      exam => gateExamIdsMatch_(exam?.id, targetId) && Array.isArray(exam.questions) && exam.questions.length > 0
+    );
+    if (loaded) {
+      systemState.studentGateExamReady = true;
+      systemState.studentGateSyncedExamId = targetId;
+      systemState.studentGateSyncError = "";
+      captureExamAnswerKeyVault({ id: targetId });
+      void fetchExamGradingKeysFromCloud(targetId).catch(keysErr => {
+        console.warn("[ARABYA] exam_start grading keys background fetch failed:", keysErr);
+      });
+    } else if (!tryActivateLocalLockedExamGate(targetId)) {
+      systemState.studentGateExamReady = false;
+      systemState.studentGateSyncError = "exam_not_in_cloud";
     }
+  } else if (!tryActivateLocalLockedExamGate(targetId)) {
+    systemState.studentGateExamReady = false;
+    systemState.studentGateSyncError = result.message || result.code || "cloud_sync_failed";
+  } else {
+    systemState.studentGateSyncError = "";
   }
   return result;
 }
 
-function prefetchStudentExamGateData(options = {}) {
+function requestStudentGateExamSync(examId, options = {}) {
   bootstrapStudentGateSyncConfig();
-  if (getArabyaWebAppUrls().length === 0) return Promise.resolve({ ok: false, reason: "no_url" });
-  const forcePull = !!options.forcePull;
-  const targetId = String(options.examId || resolveStudentExamScopeId() || "").trim();
+  const targetId = normalizeGateExamId_(examId || systemState.lockedExamId || resolveStudentExamScopeId());
   if (!targetId) return Promise.resolve({ ok: false, reason: "no_exam" });
-  if (
-    !forcePull &&
-    systemState.studentGateExamReady &&
-    systemState.studentGateSyncedExamId &&
-    systemState.studentGateSyncedExamId === targetId
-  ) {
+  const forcePull = !!options.forcePull;
+
+  if (!forcePull && systemState.studentGateExamReady && gateExamIdsMatch_(systemState.studentGateSyncedExamId, targetId)) {
     return Promise.resolve({ ok: true, reason: "ready" });
   }
-  if (!forcePull && isRecentPreExamSyncForExam(targetId)) {
+  if (!forcePull && isRecentPreExamSyncForExam(targetId) && isLockedGateExamLocallyPlayable(targetId)) {
+    systemState.studentGateExamReady = true;
+    systemState.studentGateSyncedExamId = targetId;
+    systemState.studentGateSyncError = "";
     return Promise.resolve({ ok: true, reason: "recent" });
   }
-  if (studentExamGatePrefetchPromise) return studentExamGatePrefetchPromise;
-  const started = performance.now();
-  studentExamGatePrefetchPromise = syncDatabaseFromCloud({
-    silent: true,
-    scope: "exam_start",
-    examId: targetId,
-    timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS,
-    forcePull: !!options.forcePull
-  }).then(result => {
-    recordPreExamSyncDuration(performance.now() - started, targetId);
-    if (result?.ok && targetId) {
-      systemState.studentGateExamReady = true;
-      systemState.studentGateSyncedExamId = targetId;
-    }
-    return result;
-  }).finally(() => {
-    studentExamGatePrefetchPromise = null;
-  });
+  if (getArabyaWebAppUrls().length === 0) {
+    const localOk = tryActivateLocalLockedExamGate(targetId);
+    return Promise.resolve(localOk ? { ok: true, reason: "local_only" } : { ok: false, reason: "no_url" });
+  }
+  if (!forcePull) {
+    tryActivateLocalLockedExamGate(targetId);
+  }
+  if (studentExamGatePrefetchPromise && gateExamIdsMatch_(studentExamGatePrefetchExamId, targetId) && !forcePull) {
+    return studentExamGatePrefetchPromise;
+  }
+
+  studentExamGatePrefetchExamId = targetId;
+  studentExamGatePrefetchPromise = syncStudentGateExamFromCloud(targetId, options)
+    .finally(() => {
+      studentExamGatePrefetchPromise = null;
+      studentExamGatePrefetchExamId = "";
+      try {
+        populateExamSelectionList();
+        updateStudentGateSyncRetryUI();
+      } catch (uiErr) {
+        console.warn("[ARABYA] student gate UI refresh:", uiErr);
+      }
+    });
   return studentExamGatePrefetchPromise;
 }
+
+async function ensureStudentGateExamReady(examId) {
+  return requestStudentGateExamSync(examId, { forcePull: true });
+}
+
+function prefetchStudentExamGateData(options = {}) {
+  return requestStudentGateExamSync(options.examId, options);
+}
+
+function retryStudentGateExamSync() {
+  const examId = systemState.lockedExamId;
+  if (!examId) return;
+  systemState.studentGateSyncError = "";
+  const retryBtn = document.getElementById("student-gate-sync-retry-btn");
+  if (retryBtn) {
+    retryBtn.disabled = true;
+    retryBtn.textContent = "جاري إعادة التحميل...";
+  }
+  void requestStudentGateExamSync(examId, { forcePull: true }).finally(() => {
+    lockStudentDirectExamSelect();
+    if (retryBtn) {
+      retryBtn.disabled = false;
+      retryBtn.textContent = "إعادة تحميل الامتحان";
+    }
+  });
+}
+window.retryStudentGateExamSync = retryStudentGateExamSync;
 
 function getStudentExamPrepareOverlay() {
   return document.getElementById("student-exam-prepare-overlay");
@@ -6592,7 +6785,7 @@ function waitPreExamCountdownAndSync(overlay, syncPromise, estimateMs) {
         }
         Promise.race([
           syncPromise,
-          new Promise(r => setTimeout(() => r({ ok: false }), 1200))
+          new Promise(r => setTimeout(() => r({ ok: false }), 3000))
         ]).finally(finalize);
         return;
       }
@@ -7242,17 +7435,19 @@ function navigateToView(viewId) {
     renderStudentPostExamProfile();
   } else if (viewId === "student-login-view") {
     bootstrapStudentGateSyncConfig();
+    populateExamSelectionList();
     if (systemState.lockedExamId && getArabyaWebAppUrls().length > 0 && !systemState.studentGateExamReady) {
-      populateExamSelectionList();
-      void ensureStudentGateExamReady(systemState.lockedExamId).finally(() => {
-        try { populateExamSelectionList(); } catch (e) {}
+      void requestStudentGateExamSync(systemState.lockedExamId).finally(() => {
+        try { lockStudentDirectExamSelect(); } catch (e) {}
       });
+    } else if (systemState.lockedExamId && !systemState.studentGateExamReady) {
+      tryActivateLocalLockedExamGate(systemState.lockedExamId);
+      lockStudentDirectExamSelect();
     } else {
-      populateExamSelectionList();
       const gatePrefetch = prefetchStudentExamGateData();
       if (gatePrefetch && typeof gatePrefetch.then === "function") {
         gatePrefetch.finally(() => {
-          try { populateExamSelectionList(); } catch (e) {}
+          try { populateExamSelectionList(); updateStudentGateSyncRetryUI(); } catch (e) {}
         });
       }
     }
@@ -7466,19 +7661,24 @@ async function checkUrlParameters() {
       return redirected;
     }
     if (!systemState._studentDirectLinkBootstrapped) {
-      systemState.studentGateExamReady = false;
+      systemState.studentGateSyncError = "";
+      if (!systemState.studentGateExamReady) {
+        tryActivateLocalLockedExamGate(systemState.lockedExamId);
+      }
       navigateToView("student-login-view");
       lockStudentDirectExamSelect();
       if (getArabyaWebAppUrls().length > 0) {
         const estimateMs = getPreExamSyncEstimateMs();
         const overlay = showStudentExamPrepareOverlay(estimateMs, {
           title: "جاري تحميل الامتحان",
-          message: "جاري جلب بيانات الامتحان، يرجى الانتظار..."
+          message: systemState.studentGateExamReady
+            ? "تم تحميل الامتحان — جاري تحديث البيانات من السحابة..."
+            : "جاري جلب بيانات الامتحان، يرجى الانتظار..."
         });
         try {
           await waitPreExamCountdownAndSync(
             overlay,
-            ensureStudentGateExamReady(systemState.lockedExamId),
+            requestStudentGateExamSync(systemState.lockedExamId),
             estimateMs
           );
         } catch (syncErr) {
@@ -9699,15 +9899,36 @@ function populateExamSelectionList() {
   if (!select) return;
 
   select.disabled = false;
+  if (systemState.lockedExamId && !systemState.studentGateExamReady) {
+    if (!isLockedGateExamLocallyPlayable(systemState.lockedExamId)) {
+      tryActivateLocalLockedExamGate(systemState.lockedExamId);
+    }
+  }
   if (
     systemState.lockedExamId &&
     getArabyaWebAppUrls().length > 0 &&
     !systemState.studentGateExamReady
   ) {
-    select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
-    select.disabled = true;
-    return;
+    if (isStudentGateSyncInFlight()) {
+      select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
+      select.disabled = true;
+      updateStudentGateSyncRetryUI();
+      return;
+    }
+    if (systemState.studentGateSyncError) {
+      select.innerHTML = `<option value="" disabled selected>تعذّر تحميل الامتحان من السحابة — اضغط «إعادة تحميل الامتحان»</option>`;
+      select.disabled = true;
+      updateStudentGateSyncRetryUI();
+      return;
+    }
+    if (!isLockedGateExamLocallyPlayable(systemState.lockedExamId)) {
+      select.innerHTML = `<option value="" disabled selected>جاري تحميل بيانات الامتحان من السحابة...</option>`;
+      select.disabled = true;
+      updateStudentGateSyncRetryUI();
+      return;
+    }
   }
+  updateStudentGateSyncRetryUI();
 
   select.innerHTML = `<option value="" disabled selected>-- اختر الامتحان الذي ترغب في أدائه --</option>`;
 
@@ -9725,7 +9946,7 @@ function populateExamSelectionList() {
     }
   }
   if (systemState.lockedExamId) {
-    filteredExams = filteredExams.filter(exam => exam.id === systemState.lockedExamId);
+    filteredExams = filteredExams.filter(exam => gateExamIdsMatch_(exam.id, systemState.lockedExamId));
   }
 
   // 2. بعد انتهاء الامتحان: يُقيّد العرض بالامتحان الأخير المنجز فقط
@@ -9917,12 +10138,7 @@ async function validateStudentAndStart() {
     if (gateAlreadyReady) {
       syncPromise = Promise.resolve({ ok: true, reason: "ready" });
     } else {
-      syncPromise = studentExamGatePrefetchPromise || syncDatabaseFromCloud({
-        silent: true,
-        scope: "exam_start",
-        examId,
-        timeoutMs: STUDENT_GATE_SYNC_TIMEOUT_MS
-      });
+      syncPromise = requestStudentGateExamSync(examId, { forcePull: false });
     }
     try {
       await waitPreExamCountdownAndSync(overlay, syncPromise, gateAlreadyReady ? Math.min(estimateMs, 1200) : estimateMs);
