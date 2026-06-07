@@ -53,6 +53,9 @@ assert.ok(appSource.includes("function tryActivateLocalLockedExamGate"));
 assert.ok(appSource.includes("function gateExamIdsMatch_"));
 assert.ok(appSource.includes("retryStudentGateExamSync"));
 assert.ok(appSource.includes("student-gate-sync-retry"));
+assert.ok(appSource.includes("resolveStudentExamIdForStart_"));
+assert.ok(appSource.includes("shouldForceTeacherSettingsCloudSync_"));
+assert.ok(appSource.includes("studentGateCloudSynced"));
 
 sandbox.systemState = {
   exams: [
