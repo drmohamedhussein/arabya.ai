@@ -50,7 +50,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.1");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.2");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -1500,9 +1500,7 @@ function initDatabase() {
     localStorage.setItem("arabya_default_exams_seeded", "yes");
   }
   ensureExamsDataShape();
-  if (typeof injectArabyaTemplateExamsIfMissing === "function") {
-    injectArabyaTemplateExamsIfMissing();
-  }
+  runTemplateExamInjection();
   if (isTeacherSessionActive()) {
     syncTeacherExamsVaultFromState();
   } else if (systemState.exams.length > 0 && !savedExams) {
@@ -4594,6 +4592,14 @@ function reloadSystemStateFromLocalStorage(options = {}) {
     systemState.studentGateExamReady = savedGateState.ready;
     systemState.studentGateSyncedExamId = savedGateState.syncedId;
   }
+  runTemplateExamInjection();
+}
+
+function runTemplateExamInjection(options) {
+  if (typeof injectArabyaTemplateExamsIfMissing === "function") {
+    return injectArabyaTemplateExamsIfMissing(options);
+  }
+  return { added: 0, skipped: 0 };
 }
 
 /** كل عمليات السحابة للمعلم الحالي تستخدم رابطاً موحّداً واحداً (الخيار 2). */
@@ -5290,6 +5296,9 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   }
   if (remoteData.examDeviceRegistry) {
     saveExamDeviceRegistry(mergeRemoteExamDeviceRegistry_(loadExamDeviceRegistry(), remoteData.examDeviceRegistry));
+  }
+  if (!examStartOnly) {
+    runTemplateExamInjection();
   }
   if (!examStartOnly && remoteData.questionBanks && typeof remoteData.questionBanks === "object" && window.ArabyaCloudSync) {
     const banks = window.ArabyaCloudSync.normalizeCloudQuestionBanks
@@ -6465,6 +6474,7 @@ async function syncDatabaseFromCloud(options = {}) {
       } catch (storageErr) {
         console.warn("[ARABYA] syncDatabaseFromCloud localStorage:", storageErr);
       }
+      runTemplateExamInjection();
       saveSystemState(false);
       recordCloudSyncOutcome(true, "جلب من السحابة", { silent });
       if (systemState.activeView === "teacher-dashboard-view" && typeof refreshTeacherDashboardViews === "function") {
@@ -6697,8 +6707,14 @@ function applyCloudBackupData(data) {
     mergeDeletedResultKeysFromRemote(data.deletedResultKeys);
   }
   if (data.exams && Array.isArray(data.exams)) {
-    systemState.exams = data.exams;
-    localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+    const mergeExamKey = item => String(item.id || item.title || "");
+    systemState.exams = mergeRemoteCollection_(systemState.exams, data.exams, mergeExamKey, "امتحان");
+    runTemplateExamInjection();
+    if (isTeacherSessionActive()) {
+      syncTeacherExamsVaultFromState();
+    } else {
+      localStorage.setItem("arabya_exams_db", JSON.stringify(systemState.exams));
+    }
   }
   if (data.results && Array.isArray(data.results)) {
     systemState.results = filterOutDeletedResults(
@@ -7327,9 +7343,7 @@ async function loginTeacherObject(teacher, loginCredential, options = {}) {
   systemState.activeTeacher = normalized;
   systemState.activeTeacherLoginCredential = credential || "";
   loadExamsForCurrentSession(localStorage.getItem("arabya_exams_db"));
-  if (typeof injectArabyaTemplateExamsIfMissing === "function") {
-    injectArabyaTemplateExamsIfMissing();
-  }
+  runTemplateExamInjection();
   localStorage.setItem("arabya_active_teacher_username", normalized.username || teacher.username);
   if (!options.restoreSession) {
     persistTeacherSessionToken(normalized.username || teacher.username);
@@ -8369,6 +8383,7 @@ function renderExamsList() {
   const container = document.getElementById("teacher-exams-list");
   container.innerHTML = "";
 
+  runTemplateExamInjection();
   const teacherExams = getTeacherScopedExams();
   const showOwner = isSuperAdminTeacher();
 

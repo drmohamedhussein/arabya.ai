@@ -72,4 +72,9 @@ assert.strictEqual(second.added, 0);
 assert.strictEqual(second.skipped, 1);
 assert.strictEqual(sandbox.window.systemState.exams.length, 2, "must not duplicate template");
 
+assert.ok(
+  fs.readFileSync(path.join(root, "app.js"), "utf8").includes("runTemplateExamInjection"),
+  "app.js should re-run template injection after cloud/reload"
+);
+
 console.log("template-exam-inject.test.js: all assertions passed");
