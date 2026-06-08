@@ -56,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.22");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.23");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -1017,11 +1017,28 @@ window.syncTeacherAccountBySuperAdmin = async function(username) {
   if (!teacher) return;
   const statusEl = document.getElementById("teacher-accounts-sync-status");
   if (statusEl) statusEl.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري مزامنة ${escapeHtml(teacher.name || username)}...`;
+  const teacherUrl = teacher.integrationConfig?.googleFormUrl || "";
+  let pulled = false;
+  if (isValidCloudSyncUrl(teacherUrl)) {
+    try {
+      const data = await fetchCloudBackupFromUrls([teacherUrl], { mergeAll: false });
+      mergeRemoteDatabaseIntoLocal(data, { preferCloudResults: true });
+      try {
+        localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+        localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+        syncTeacherExamsVaultFromState();
+        saveSystemState(false);
+      } catch (e) {}
+      pulled = true;
+      refreshTeacherDashboardViews({ all: true });
+    } catch (e) {}
+  }
   const syncResult = await syncTeacherCredentialsToCloud(teacher);
   await syncLocalDatabaseToCloud();
   if (statusEl) {
-    statusEl.innerHTML = syncResult.ok
-      ? `<span class="material-icons" style="vertical-align:middle;color:var(--success);">cloud_done</span> تمت مزامنة ${escapeHtml(teacher.name || username)}.`
+    const pullNote = pulled ? ` · ${systemState.results.length} نتيجة` : "";
+    statusEl.innerHTML = syncResult.ok || pulled
+      ? `<span class="material-icons" style="vertical-align:middle;color:var(--success);">cloud_done</span> تمت مزامنة ${escapeHtml(teacher.name || username)}${pullNote}.`
       : `<span class="material-icons" style="vertical-align:middle;color:var(--error);">cloud_off</span> فشلت المزامنة — تحقق من إعدادات الربط.`;
   }
 };
@@ -1260,6 +1277,7 @@ document.addEventListener("DOMContentLoaded", () => {
   window.loadExamDeviceRegistry = loadExamDeviceRegistry;
   window.getArabyaWebAppUrls = getArabyaWebAppUrls;
   window.getGeneralTeacherSyncUrls = getGeneralTeacherSyncUrls;
+  window.collectRegisteredTeacherIntegrationUrls = collectRegisteredTeacherIntegrationUrls;
   window.getCloudBackupTargetUrls = getCloudBackupTargetUrls;
   window.getCloudBackupScope = getCloudBackupScope;
   window.getEffectiveExamSyncUrl = getEffectiveExamSyncUrl;
@@ -5097,6 +5115,22 @@ function hasStudentGateCloudContext() {
   );
 }
 
+function collectRegisteredTeacherIntegrationUrls() {
+  const urls = new Set();
+  const addUrl = raw => {
+    if (isValidCloudSyncUrl(raw)) urls.add(normalizeArabyaWebAppUrl(String(raw).trim()));
+  };
+  const teachers = [];
+  if (Array.isArray(systemState.teachers)) teachers.push(...systemState.teachers);
+  try {
+    const saved = JSON.parse(localStorage.getItem("arabya_teachers_db") || "[]");
+    if (Array.isArray(saved)) teachers.push(...saved);
+  } catch (e) {}
+  teachers.forEach(teacher => addUrl(teacher?.integrationConfig?.googleFormUrl));
+  Object.values(loadTeacherSyncRegistry()).forEach(url => addUrl(url));
+  return Array.from(urls).filter(Boolean);
+}
+
 function getGeneralTeacherSyncUrls() {
   const urls = new Set();
   const teacherParam = getUrlParameter("teacher") || systemState.targetTeacherUsername || "";
@@ -5148,6 +5182,9 @@ function getGeneralTeacherSyncUrls() {
     Object.values(loadTeacherSyncRegistry()).forEach(url => {
       if (isValidCloudSyncUrl(url)) urls.add(normalizeArabyaWebAppUrl(String(url).trim()));
     });
+    if (isSuperAdminTeacher()) {
+      collectRegisteredTeacherIntegrationUrls().forEach(url => urls.add(url));
+    }
   }
   return Array.from(urls).filter(Boolean);
 }
@@ -6524,43 +6561,53 @@ window.runArabyaSyncDiagnostic = async function() {
     alert(lines.join("\n"));
     return { ok: false, lines };
   }
-  const url = urls[0];
-  lines.push("", `اختبار: ${url}`);
-  try {
-    const metaUrl = buildArabyaCloudActionUrl(url, "get_sync_meta");
-    const metaRes = await fetch(metaUrl, { method: "GET", headers: { Accept: "application/json" } });
-    const meta = await metaRes.json();
-    if (meta?.status === "success") {
-      lines.push("✓ get_sync_meta: ناجح");
-      if (meta.cloudRevision) lines.push(`  cloudRevision: ${meta.cloudRevision}`);
-    } else {
-      lines.push(`✗ get_sync_meta: ${meta?.code || meta?.message || metaRes.status}`);
-    }
-  } catch (metaErr) {
-    lines.push(`✗ get_sync_meta: ${metaErr?.message || metaErr}`);
+  if (isSuperAdminTeacher()) {
+    lines.push(`سوبر أدمن: ${urls.length} قاعدة بيانات مسجّلة`);
   }
-  try {
-    const backupUrl = buildArabyaCloudActionUrl(url, "get_backup");
-    const backupRes = await fetch(backupUrl, { method: "GET", headers: { Accept: "application/json" } });
-    const backup = await backupRes.json();
-    if (backup?.status === "success" && backup.data) {
-      const resultCount = Array.isArray(backup.data.results) ? backup.data.results.length : 0;
-      lines.push("✓ get_backup: ناجح");
-      lines.push(`  نتائج في الاستجابة: ${resultCount}`);
-      lines.push(`  صفوف الشيت: ${backup.sheetTotalRows ?? "—"}`);
-      lines.push(`  نتائج مستوردة: ${backup.sheetResultRows ?? "—"}`);
-      if (resultCount === 0 && (backup.sheetTotalRows || 0) > 0) {
-        lines.push("", "⚠ الشيت فيه صفوف لكن الاستجابة فارغة — أعد نشر Apps Script");
+  let totalCloudResults = 0;
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
+    lines.push("", `اختبار ${i + 1}/${urls.length}: ${url}`);
+    try {
+      const metaUrl = buildArabyaCloudActionUrl(url, "get_sync_meta");
+      const metaRes = await fetch(metaUrl, { method: "GET", headers: { Accept: "application/json" } });
+      const meta = await metaRes.json();
+      if (meta?.status === "success") {
+        lines.push("✓ get_sync_meta: ناجح");
+        if (meta.cloudRevision) lines.push(`  cloudRevision: ${meta.cloudRevision}`);
+      } else {
+        lines.push(`✗ get_sync_meta: ${meta?.code || meta?.message || metaRes.status}`);
       }
-    } else {
-      lines.push(`✗ get_backup: ${backup?.code || backup?.message || backupRes.status}`);
-      if (backup?.code === "unauthorized") {
-        lines.push("  → طابق ARABYA_API_SECRET بين Script Properties وتبويب الربط");
-      }
+    } catch (metaErr) {
+      lines.push(`✗ get_sync_meta: ${metaErr?.message || metaErr}`);
     }
-  } catch (backupErr) {
-    lines.push(`✗ get_backup: ${backupErr?.message || backupErr}`);
-    lines.push("  → تأكد من نشر Web App كـ Anyone واستخدام رابط /exec");
+    try {
+      const backupUrl = buildArabyaCloudActionUrl(url, "get_backup");
+      const backupRes = await fetch(backupUrl, { method: "GET", headers: { Accept: "application/json" } });
+      const backup = await backupRes.json();
+      if (backup?.status === "success" && backup.data) {
+        const resultCount = Array.isArray(backup.data.results) ? backup.data.results.length : 0;
+        totalCloudResults += resultCount;
+        lines.push("✓ get_backup: ناجح");
+        lines.push(`  نتائج في الاستجابة: ${resultCount}`);
+        lines.push(`  صفوف الشيت: ${backup.sheetTotalRows ?? "—"}`);
+        lines.push(`  نتائج مستوردة: ${backup.sheetResultRows ?? "—"}`);
+        if (resultCount === 0 && (backup.sheetTotalRows || 0) > 0) {
+          lines.push("  ⚠ الشيت فيه صفوف لكن الاستجابة فارغة — أعد نشر Apps Script");
+        }
+      } else {
+        lines.push(`✗ get_backup: ${backup?.code || backup?.message || backupRes.status}`);
+        if (backup?.code === "unauthorized") {
+          lines.push("  → طابق ARABYA_API_SECRET بين Script Properties وتبويب الربط");
+        }
+      }
+    } catch (backupErr) {
+      lines.push(`✗ get_backup: ${backupErr?.message || backupErr}`);
+      lines.push("  → تأكد من نشر Web App كـ Anyone واستخدام رابط /exec");
+    }
+  }
+  if (urls.length > 1) {
+    lines.push("", `إجمالي النتائج في السحابة (قبل الدمج): ${totalCloudResults}`);
   }
   if (domBuild && build && domBuild !== build) {
     lines.push("", "⚠ المتصفح يعرض HTML قديم — اضغط Ctrl+Shift+R");
@@ -6657,7 +6704,9 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
   if (el) {
     if (syncResult.ok) {
       const sheetNote = formatSheetSyncNote(syncResult);
-      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} سجلاً نتائج · ${systemState.students.length} طالب${sheetNote}`;
+      const dbCount = getArabyaWebAppUrls().length;
+      const superNote = isSuperAdminTeacher() && dbCount > 1 ? ` · ${dbCount} قواعد بيانات` : "";
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--success);">cloud_done</span> تمت المزامنة: ${systemState.results.length} سجلاً نتائج · ${systemState.students.length} طالب${superNote}${sheetNote}`;
     } else if (systemState.results.length > 0 && syncResult.skipped) {
       el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--warning);">cloud_queue</span> عرض ${systemState.results.length} نتيجة محلياً — ${escapeHtml(formatCloudPullFailureMessage(syncResult))}`;
     } else {
@@ -7617,14 +7666,58 @@ function applyCloudBackupData(data) {
 function fetchCloudBackupFromUrls(urlList, options = {}) {
   const secretOverride = options.apiSecret !== undefined ? options.apiSecret : undefined;
   const extraParams = options.scope ? { scope: options.scope } : {};
+  const mergeAll = !!options.mergeAll;
+  const uniqueUrls = [...new Set((urlList || []).map(u => normalizeArabyaWebAppUrl(u)).filter(Boolean))];
+  if (!uniqueUrls.length) {
+    return Promise.reject(new Error("No cloud backup found"));
+  }
+  if (mergeAll && uniqueUrls.length > 1) {
+    return (async () => {
+      let merged = null;
+      let anyOk = false;
+      for (const rawUrl of uniqueUrls) {
+        const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup", extraParams, secretOverride);
+        if (!fetchUrl) continue;
+        try {
+          const res = await fetch(fetchUrl, { method: "GET", headers: { Accept: "application/json" } });
+          if (!res.ok) continue;
+          const response = await res.json();
+          if (!(response && response.status === "success" && response.data)) continue;
+          anyOk = true;
+          if (!merged) {
+            merged = response.data;
+            continue;
+          }
+          const remoteResults = Array.isArray(response.data.results) ? response.data.results : [];
+          const remoteStudents = Array.isArray(response.data.students) ? response.data.students : [];
+          const remoteExams = Array.isArray(response.data.exams) ? response.data.exams : [];
+          const remoteTeachers = Array.isArray(response.data.teachers) ? response.data.teachers : [];
+          if (remoteResults.length) {
+            merged.results = mergeResultsForTeacherCloudSync(merged.results || [], remoteResults, { preferCloudResults: true });
+          }
+          if (remoteStudents.length) {
+            merged.students = mergeRemoteCollection_(merged.students || [], remoteStudents, item => String(item.studentKey || item.id || item.code || ""), "طالب");
+          }
+          if (remoteExams.length) {
+            merged.exams = mergeRemoteCollection_(merged.exams || [], remoteExams, item => String(item.id || item.title || ""), "امتحان");
+          }
+          if (remoteTeachers.length) {
+            merged.teachers = mergeTeachersPreservingLocalAuth_(merged.teachers || [], remoteTeachers);
+          }
+        } catch (e) {}
+      }
+      if (!anyOk || !merged) throw new Error("No cloud backup found");
+      return merged;
+    })();
+  }
   return new Promise((resolve, reject) => {
     let index = 0;
     function tryFetchNext() {
-      if (index >= urlList.length) {
+      if (index >= uniqueUrls.length) {
         reject(new Error("No cloud backup found"));
         return;
       }
-      const rawUrl = urlList[index++];
+      const rawUrl = uniqueUrls[index++];
       const fetchUrl = buildArabyaCloudActionUrl(rawUrl, "get_backup", extraParams, secretOverride);
       if (!fetchUrl) {
         tryFetchNext();
@@ -7672,7 +7765,12 @@ function syncTeacherDataOnLogin(options = {}) {
     return Promise.resolve({ synced: false, reason: "no_url" });
   }
 
-  return fetchCloudBackupFromUrls(urls, { apiSecret })
+  const loginFetchOptions = {
+    apiSecret,
+    mergeAll: isSuperAdminTeacher() && urls.length > 1
+  };
+
+  return fetchCloudBackupFromUrls(urls, loginFetchOptions)
     .then(data => {
       const local = countLocalTeacherData();
       const cloud = countCloudBackupData(data);
@@ -7716,9 +7814,10 @@ function syncTeacherDataOnLogin(options = {}) {
       }
 
       applyCloudBackupData(data);
-      finishTeacherLoginNavigation({
-        message: options.message || "تم جلب بياناتك من السحابة بنجاح! ستجد امتحاناتك ونتائجك كما على جهازك الآخر."
-      });
+      const loginMsg = isSuperAdminTeacher() && urls.length > 1
+        ? `تم جلب بيانات المنصة من ${urls.length} قواعد بيانات: ${(systemState.results || []).length} نتيجة و${(systemState.students || []).length} طالب.`
+        : (options.message || "تم جلب بياناتك من السحابة بنجاح! ستجد امتحاناتك ونتائجك كما على جهازك الآخر.");
+      finishTeacherLoginNavigation({ message: loginMsg });
       return { synced: true };
     })
     .catch(err => {
