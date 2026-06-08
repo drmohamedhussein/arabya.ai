@@ -56,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.18");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.19");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -6399,13 +6399,20 @@ function formatCloudPullFailureMessage(syncResult) {
 }
 
 window.pullTeacherResultsFromCloud = async function(options = {}) {
+  reloadSystemStateFromLocalStorage();
   const el = document.getElementById("teacher-results-sync-status");
   if (el) {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
+  if (getArabyaWebAppUrls().length === 0) {
+    if (el) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">link_off</span> لم يُضبط رابط Web App — افتح تبويب الربط والصق رابط /exec ثم احفظ.`;
+    }
+    return false;
+  }
 
   const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
-  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: !!options.forcePull });
+  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: options.forcePull !== false });
   if (!syncResult.ok && syncResult.skipped && !options.forcePull && retryReasons.has(syncResult.reason)) {
     const retryDelays = [6000, 10000, 14000];
     for (const delayMs of retryDelays) {
@@ -6419,6 +6426,10 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
     }
   }
 
+  if (!syncResult.ok && systemState.results.length > 0 && isTeacherSessionActive()) {
+    await pushLocalStateToCloudNow("results_repair_push");
+    syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+  }
   if (syncResult.ok) {
     getResultsTableViewSettings().page = 1;
     getStudentsTableViewSettings().page = 1;
@@ -7079,6 +7090,10 @@ async function syncDatabaseFromCloud(options = {}) {
 
   if (pullResult.ok && response && response.data) {
     try {
+      const sheetRows = Number(response.sheetTotalRows || response.sheetResultRows || 0);
+      if (sheetRows > 0 && (!Array.isArray(systemState.results) || systemState.results.length === 0)) {
+        console.warn("[ARABYA] cloud pull returned 0 local results but sheet has", sheetRows, "rows — check API secret and GAS redeploy");
+      }
       applyDeletionTombstonesToLocalState();
       try {
         localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
@@ -10976,6 +10991,8 @@ async function submitFinishedExam() {
   resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
+  reconcileStudentsFromCloudData(systemState.results, systemState.students);
+  systemState.students = filterOutDeletedStudents(systemState.students);
   if (systemState.examDeviceProfile && studentLookupKey && systemState.currentExam?.id) {
     registerExamDeviceBinding(
       systemState.examDeviceProfile,
@@ -11104,20 +11121,35 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
 async function postAddResultToCloudUrls(urlList, slimPayload) {
   const targets = [...new Set((urlList || []).map(normalizeArabyaWebAppUrl).filter(Boolean))];
   if (!targets.length) return { ok: false, successCount: 0, total: 0, graded: null };
-  const outcomes = await Promise.all(targets.map(async url => {
+
+  async function postOne(url, payload) {
     try {
-      const response = await postToArabyaWebApp(url, slimPayload);
-      return { ok: true, graded: response?.graded || null };
+      const response = await postToArabyaWebApp(url, payload);
+      return { ok: true, graded: response?.graded || null, response };
     } catch (err) {
+      const errMsg = String(err?.message || err || "");
+      const tokenRelated = /invalid_attempt_token|attempt_token|جلسة الامتحان/i.test(errMsg);
+      if (tokenRelated && payload?.attemptToken) {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.attemptToken;
+        try {
+          const retryResponse = await postToArabyaWebApp(url, fallbackPayload);
+          return { ok: true, graded: retryResponse?.graded || null, response: retryResponse, retriedWithoutToken: true };
+        } catch (retryErr) {
+          console.warn("[ARABYA] add_result retry without token failed:", url, retryErr);
+        }
+      }
       console.warn("[ARABYA] add_result failed, retry no-cors:", url, err);
       try {
-        const sent = await postToArabyaWebAppNoCors(url, slimPayload);
+        const sent = await postToArabyaWebAppNoCors(url, payload);
         return { ok: !!sent, graded: null };
       } catch (e2) {
-        return { ok: false, graded: null };
+        return { ok: false, graded: null, error: errMsg };
       }
     }
-  }));
+  }
+
+  const outcomes = await Promise.all(targets.map(url => postOne(url, slimPayload)));
   const successCount = outcomes.filter(item => item.ok).length;
   const graded = outcomes.find(item => item.graded)?.graded || null;
   return { ok: successCount > 0, successCount, total: targets.length, graded };
@@ -13133,7 +13165,7 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
   }
   if (response?.status === "error") {
     const code = String(response.code || "").trim();
-    const advisoryCodes = new Set(["device_conflict", "device_registry_conflict"]);
+    const advisoryCodes = new Set(["device_conflict", "device_registry_conflict", "exam_not_found"]);
     if (advisoryCodes.has(code)) {
       console.warn("[ARABYA] register_exam_attempt advisory:", response.message || code);
       return { ok: true, attemptToken: "", advisory: code };

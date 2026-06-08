@@ -657,7 +657,11 @@ function registerArabyaExamAttempt_(data) {
   db.results = buildArabyaResultsForClient_(db);
   var exam = findArabyaExamInDb_(db, examId);
   if (!exam) {
-    return { error: "الامتحان غير موجود على الخادم.", code: "exam_not_found" };
+    exam = {
+      id: examId,
+      title: String(data.examTitle || "").trim() || examId,
+      maxCheatAttempts: 3
+    };
   }
   if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
     return { error: "تم رفض بدء الامتحان: يوجد محاولة سابقة مسجّلة لهذا الطالب.", code: "blocked_attempt" };
@@ -858,8 +862,10 @@ function processArabyaAddResult_(data, db) {
   if (attemptToken) {
     attempt = loadExamAttempt_(attemptToken);
     if (!attempt) {
-      return { error: "جلسة الامتحان غير صالحة أو منتهية. أعد بدء الامتحان من جديد.", code: "invalid_attempt_token" };
+      attemptToken = "";
     }
+  }
+  if (attemptToken && attempt) {
     if (String(attempt.examId || "") !== examId) {
       return { error: "معرّف الامتحان لا يطابق جلسة المحاولة.", code: "exam_mismatch" };
     }
@@ -1289,19 +1295,22 @@ function buildArabyaResultsForClient_(db) {
   var deletedResultKeys = db.deletedResultKeys || [];
   var deletedStudentKeys = db.deletedStudentKeys || [];
   var sheetResults = readArabyaResultsFromSheet_();
-  if (sheetResults.length > 0) {
-    var map = {};
-    sheetResults.forEach(function(result) {
-      if (isArabyaResultDeleted_(result, deletedResultKeys)) return;
-      if (isArabyaResultFromDeletedStudent_(result, deletedStudentKeys)) return;
-      var key = getArabyaRecordKey_(result, "results");
-      map[key] = result;
-    });
-    return Object.keys(map).map(function(key) { return map[key]; });
-  }
-  return filterArabyaResultsByDeletedKeys_(db.results || [], deletedResultKeys).filter(function(result) {
+  var dbResults = filterArabyaResultsByDeletedKeys_(db.results || [], deletedResultKeys).filter(function(result) {
     return !isArabyaResultFromDeletedStudent_(result, deletedStudentKeys);
   });
+  var map = {};
+  dbResults.forEach(function(result) {
+    if (!result) return;
+    var dbKey = getArabyaRecordKey_(result, "results");
+    map[dbKey] = result;
+  });
+  sheetResults.forEach(function(result) {
+    if (isArabyaResultDeleted_(result, deletedResultKeys)) return;
+    if (isArabyaResultFromDeletedStudent_(result, deletedStudentKeys)) return;
+    var key = getArabyaRecordKey_(result, "results");
+    map[key] = deepMergeArabyaObjects_(map[key] || {}, result);
+  });
+  return Object.keys(map).map(function(key) { return map[key]; });
 }
 
 function normalizeArabyaStudentId_(studentId) {
