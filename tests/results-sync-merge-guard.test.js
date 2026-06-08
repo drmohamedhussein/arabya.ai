@@ -15,6 +15,9 @@ assert.ok(appSource.includes("login_repair_empty_cloud"));
 assert.ok(appSource.includes("cloudLooksEmpty"));
 assert.ok(appSource.includes("retriedWithoutToken"));
 assert.ok(appSource.includes('"exam_not_found"'));
+assert.ok(appSource.includes("filterOutDeletedResultsSafe"));
+assert.ok(appSource.includes("emergencyRecoverResultsData"));
+assert.ok(appSource.includes("cloud merge would wipe local results"));
 assert.ok(gasSource.includes("attemptToken = \"\""));
 assert.ok(gasSource.includes("deepMergeArabyaObjects_(map[key] || {}, result)"));
 
