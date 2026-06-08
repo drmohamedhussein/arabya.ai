@@ -5455,11 +5455,11 @@ function tombstoneResultsForDeletedStudent(student) {
   systemState.results = filterOutDeletedResults(systemState.results);
 }
 
-function applyDeletionTombstonesToLocalState() {
+function applyDeletionTombstonesToLocalState(options = {}) {
   loadDeletedStudentKeysFromStorage();
   loadDeletedResultKeysFromStorage();
   systemState.students = filterOutDeletedStudents(systemState.students);
-  systemState.results = filterOutDeletedResultsSafe(systemState.results);
+  systemState.results = filterOutDeletedResultsSafe(systemState.results, options);
   persistDeletedStudentKeys();
   persistDeletedResultKeys();
 }
