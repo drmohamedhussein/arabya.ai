@@ -56,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.20");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.21");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -4458,6 +4458,53 @@ function compareResultsByRecency(a, b, indexMap) {
   return (indexMap.get(b) ?? 0) - (indexMap.get(a) ?? 0);
 }
 
+function getNewestResultSortTime(results) {
+  return (Array.isArray(results) ? results : []).reduce(
+    (max, res) => Math.max(max, getResultSortTime(res, 0)),
+    0
+  );
+}
+
+function mergeResultsForTeacherCloudSync(localResults, remoteResults, options = {}) {
+  const preferCloud = options.preferCloudResults !== false;
+  const remote = (remoteResults || []).filter(r => r && !isResultRecordDeleted(r) && !isResultFromDeletedStudent(r));
+  const local = (localResults || []).filter(r => r && !isResultRecordDeleted(r) && !isResultFromDeletedStudent(r));
+  if (!remote.length) return local;
+  const map = new Map();
+  const resultKey = res => {
+    if (res.recordId) return `id:${String(res.recordId)}`;
+    return `legacy:${res.studentLookupKey || ""}:${res.examId || res.examTitle || ""}:${res.timestamp || ""}:${res.score || ""}`;
+  };
+  remote.forEach(res => {
+    map.set(resultKey(res), { ...res });
+  });
+  local.forEach(res => {
+    const key = resultKey(res);
+    const existing = map.get(key);
+    if (!existing) {
+      if (!preferCloud) map.set(key, { ...res });
+      return;
+    }
+    const localTs = getResultSortTime(res, 0);
+    const remoteTs = getResultSortTime(existing, 0);
+    if (localTs > remoteTs) {
+      map.set(key, { ...existing, ...res });
+    } else if (preferCloud && remoteTs >= localTs) {
+      map.set(key, { ...existing, ...res });
+    }
+  });
+  if (preferCloud) {
+    remote.forEach(res => {
+      const key = resultKey(res);
+      const existing = map.get(key);
+      if (!existing || getResultSortTime(res, 0) >= getResultSortTime(existing, 0)) {
+        map.set(key, { ...existing, ...res });
+      }
+    });
+  }
+  return [...map.values()];
+}
+
 
 function buildResultIndexMap(sourceList) {
   const indexMap = new Map();
@@ -5662,10 +5709,12 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
     const remoteResults = remoteData.results.filter(
       r => r && !isResultRecordDeleted(r) && !isResultFromDeletedStudent(r)
     );
-    const mergedResults = mergeRemoteCollection_(systemState.results, remoteResults, item => {
-      if (item.recordId) return String(item.recordId);
-      return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
-    }, "نتيجة");
+    const mergedResults = mergeOptions.preferCloudResults
+      ? mergeResultsForTeacherCloudSync(systemState.results, remoteResults, mergeOptions)
+      : mergeRemoteCollection_(systemState.results, remoteResults, item => {
+        if (item.recordId) return String(item.recordId);
+        return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
+      }, "نتيجة");
     systemState.results = filterOutDeletedResultsSafe(mergedResults);
   } else {
     systemState.results = filterOutDeletedResultsSafe(systemState.results);
@@ -6508,7 +6557,11 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
   }
 
   const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
-  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: options.forcePull !== false });
+  let syncResult = await syncDatabaseFromCloud({
+    silent: false,
+    forcePull: options.forcePull !== false,
+    preferCloudResults: true
+  });
   if (!syncResult.ok && syncResult.skipped && !options.forcePull && retryReasons.has(syncResult.reason)) {
     const retryDelays = [6000, 10000, 14000];
     for (const delayMs of retryDelays) {
@@ -6516,7 +6569,7 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
         el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري انتظار اكتمال الرفع السحابي ثم إعادة الجلب...`;
       }
       await new Promise(resolve => setTimeout(resolve, delayMs));
-      syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+      syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true, preferCloudResults: true });
       if (syncResult.ok) break;
       if (!syncResult.skipped || !retryReasons.has(syncResult.reason)) break;
     }
@@ -6524,7 +6577,7 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
 
   if (!syncResult.ok && systemState.results.length > 0 && isTeacherSessionActive()) {
     await pushLocalStateToCloudNow("results_repair_push");
-    syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+    syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true, preferCloudResults: true });
   }
   if (syncResult.ok) {
     getResultsTableViewSettings().page = 1;
@@ -7171,6 +7224,7 @@ async function syncDatabaseFromCloud(options = {}) {
   const mergeOpts = scope === "exam_start"
     ? { scope: "exam_start", examId: options.examId || resolveStudentExamScopeId() }
     : {};
+  if (options.preferCloudResults) mergeOpts.preferCloudResults = true;
   const pullResult = await fetchAndMergeAllCloudBackups(mergeOpts, timeoutMs);
   const response = pullResult.lastResponse;
 
@@ -7450,11 +7504,7 @@ function applyCloudBackupData(data) {
     const remoteResults = data.results.filter(r => r && !isResultFromDeletedStudent(r));
     const localCount = Array.isArray(systemState.results) ? systemState.results.length : 0;
     if (remoteResults.length > 0 || localCount === 0) {
-      const resultKeyFn = item => {
-        if (item.recordId) return String(item.recordId);
-        return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
-      };
-      const mergedResults = mergeRemoteCollection_(systemState.results, remoteResults, resultKeyFn, "نتيجة");
+      const mergedResults = mergeResultsForTeacherCloudSync(systemState.results, remoteResults, { preferCloudResults: true });
       systemState.results = filterOutDeletedResultsSafe(mergedResults);
       localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
       ensureResultRecordIds();
@@ -7558,6 +7608,7 @@ function syncTeacherDataOnLogin(options = {}) {
       const cloud = countCloudBackupData(data);
       const fresh = isLikelyFreshLocalDatabase();
       const cloudHasMore = cloud.exams > local.exams || cloud.results > local.results || cloud.students > local.students;
+      const cloudHasNewerResults = getNewestResultSortTime(data.results) > getNewestResultSortTime(systemState.results);
       const cloudLooksEmpty = cloud.results === 0 && cloud.students === 0;
       const localHasData = local.results > 0 || local.students > 1 || local.exams > 0;
 
@@ -7567,7 +7618,22 @@ function syncTeacherDataOnLogin(options = {}) {
         return { synced: false, reason: "repair_push" };
       }
 
-      if (!fresh && !cloudHasMore) {
+      if (!fresh && !cloudHasMore && !cloudHasNewerResults && Array.isArray(data.results) && data.results.length) {
+        const mergedResults = mergeResultsForTeacherCloudSync(systemState.results, data.results, { preferCloudResults: true });
+        systemState.results = filterOutDeletedResultsSafe(mergedResults);
+        try {
+          localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+        } catch (e) {}
+        reconcileStudentsFromCloudData(systemState.results, data.students || systemState.students);
+        systemState.students = filterOutDeletedStudents(systemState.students);
+        try {
+          localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+        } catch (e) {}
+        finishTeacherLoginNavigation(options);
+        return { synced: true, reason: "results_refresh" };
+      }
+
+      if (!fresh && !cloudHasMore && !cloudHasNewerResults) {
         finishTeacherLoginNavigation(options);
         return { synced: false, reason: "local_current" };
       }
@@ -7675,7 +7741,7 @@ window.restoreDatabaseFromCloud = async function() {
   const btnRestore = document.getElementById("btn-cloud-restore");
   const originalText = btnRestore ? btnRestore.innerHTML : "";
   if (btnRestore) { btnRestore.disabled = true; btnRestore.innerHTML = `<span class="material-icons" style="animation:spin 1s infinite linear; vertical-align:middle;">sync</span> جاري جلب البيانات...`; }
-  const syncResult = await syncDatabaseFromCloud({ silent: false });
+  const syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true, preferCloudResults: true });
   if (btnRestore) { btnRestore.disabled = false; btnRestore.innerHTML = originalText; }
   if (syncResult && syncResult.ok) {
     finalizeDatabaseImportMessage();

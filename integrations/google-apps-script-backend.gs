@@ -1678,11 +1678,13 @@ function readArabyaDatabase_() {
 /** استعادة النتائج من ورقة «نتائج الطلاب» إذا كانت قاعدة البيانات فارغة */
 function hydrateArabyaDatabaseFromSheet_(db) {
   var hydrated = Object.assign(cloneArabyaDefaultDb_(), db || {});
-  if (!Array.isArray(hydrated.results) || !hydrated.results.length) {
-    var sheetResults = readArabyaResultsFromSheet_();
-    if (sheetResults.length) {
-      hydrated.results = sheetResults;
-    }
+  var sheetResults = readArabyaResultsFromSheet_();
+  if (sheetResults.length) {
+    hydrated.results = buildArabyaResultsForClient_({
+      results: hydrated.results || [],
+      deletedResultKeys: hydrated.deletedResultKeys || [],
+      deletedStudentKeys: hydrated.deletedStudentKeys || []
+    });
   }
   return hydrated;
 }
@@ -1746,12 +1748,16 @@ function readArabyaResultsFromSheet_() {
   var lastCol = Math.max(sheet.getLastColumn(), ARABYA_RESULTS_HEADERS.length);
   var values = sheet.getRange(2, 1, lastRow, lastCol).getValues();
   var out = [];
-  values.forEach(function(row) {
-    if (!row || !String(row[0] || "").trim()) return;
+  values.forEach(function(row, index) {
+    if (!row || !String(row[2] || "").trim()) return;
+    var recordId = String(row[0] || "").trim();
+    if (!recordId) {
+      recordId = "sheet_row_" + String(index + 2);
+    }
     var cheatLog = parseArabyaJsonField_(row[21], []);
     var deviceMeta = parseArabyaJsonField_(row[25], {});
     out.push({
-      recordId: String(row[0] || ""),
+      recordId: recordId,
       timestamp: row[1] ? String(row[1]) : "",
       name: String(row[2] || ""),
       id: String(row[3] || ""),
