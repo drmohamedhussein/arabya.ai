@@ -56,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.21");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.22");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -6498,6 +6498,76 @@ function formatCloudPullFailureMessage(syncResult) {
   }
   return "تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، وانسخ الكود الكامل من تبويب الربط ثم أعد النشر كإصدار جديد.";
 }
+
+window.runArabyaSyncDiagnostic = async function() {
+  reloadSystemStateFromLocalStorage();
+  const build = String(window.ARABYA_APP_BUILD_VERSION || ARABYA_APP_BUILD_VERSION || "").trim();
+  const domBuild = document.documentElement?.getAttribute("data-arabya-build") || "";
+  const urls = getArabyaWebAppUrls();
+  const apiSecretSet = !!getArabyaApiSecret();
+  let localResults = 0;
+  let tombstones = 0;
+  try {
+    localResults = JSON.parse(localStorage.getItem("arabya_results_db") || "[]").length;
+    tombstones = JSON.parse(localStorage.getItem("arabya_deleted_result_keys") || "[]").length;
+  } catch (e) {}
+  const lines = [
+    `إصدار التطبيق (كود): ${build || "—"}`,
+    `إصدار الصفحة (HTML): ${domBuild || "—"}`,
+    `نتائج محلية: ${localResults}`,
+    `سجلات حذف محلية: ${tombstones}`,
+    `روابط Web App: ${urls.length}`,
+    `سر API مضبوط: ${apiSecretSet ? "نعم" : "لا"}`
+  ];
+  if (!urls.length) {
+    lines.push("", "❌ لم يُضبط رابط Web App — افتح تبويب الربط والصق رابط /exec");
+    alert(lines.join("\n"));
+    return { ok: false, lines };
+  }
+  const url = urls[0];
+  lines.push("", `اختبار: ${url}`);
+  try {
+    const metaUrl = buildArabyaCloudActionUrl(url, "get_sync_meta");
+    const metaRes = await fetch(metaUrl, { method: "GET", headers: { Accept: "application/json" } });
+    const meta = await metaRes.json();
+    if (meta?.status === "success") {
+      lines.push("✓ get_sync_meta: ناجح");
+      if (meta.cloudRevision) lines.push(`  cloudRevision: ${meta.cloudRevision}`);
+    } else {
+      lines.push(`✗ get_sync_meta: ${meta?.code || meta?.message || metaRes.status}`);
+    }
+  } catch (metaErr) {
+    lines.push(`✗ get_sync_meta: ${metaErr?.message || metaErr}`);
+  }
+  try {
+    const backupUrl = buildArabyaCloudActionUrl(url, "get_backup");
+    const backupRes = await fetch(backupUrl, { method: "GET", headers: { Accept: "application/json" } });
+    const backup = await backupRes.json();
+    if (backup?.status === "success" && backup.data) {
+      const resultCount = Array.isArray(backup.data.results) ? backup.data.results.length : 0;
+      lines.push("✓ get_backup: ناجح");
+      lines.push(`  نتائج في الاستجابة: ${resultCount}`);
+      lines.push(`  صفوف الشيت: ${backup.sheetTotalRows ?? "—"}`);
+      lines.push(`  نتائج مستوردة: ${backup.sheetResultRows ?? "—"}`);
+      if (resultCount === 0 && (backup.sheetTotalRows || 0) > 0) {
+        lines.push("", "⚠ الشيت فيه صفوف لكن الاستجابة فارغة — أعد نشر Apps Script");
+      }
+    } else {
+      lines.push(`✗ get_backup: ${backup?.code || backup?.message || backupRes.status}`);
+      if (backup?.code === "unauthorized") {
+        lines.push("  → طابق ARABYA_API_SECRET بين Script Properties وتبويب الربط");
+      }
+    }
+  } catch (backupErr) {
+    lines.push(`✗ get_backup: ${backupErr?.message || backupErr}`);
+    lines.push("  → تأكد من نشر Web App كـ Anyone واستخدام رابط /exec");
+  }
+  if (domBuild && build && domBuild !== build) {
+    lines.push("", "⚠ المتصفح يعرض HTML قديم — اضغط Ctrl+Shift+R");
+  }
+  alert(lines.join("\n"));
+  return { ok: true, lines };
+};
 
 window.emergencyRecoverResultsData = async function() {
   reloadSystemStateFromLocalStorage();
