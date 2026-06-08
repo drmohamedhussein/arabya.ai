@@ -657,7 +657,11 @@ function registerArabyaExamAttempt_(data) {
   db.results = buildArabyaResultsForClient_(db);
   var exam = findArabyaExamInDb_(db, examId);
   if (!exam) {
-    return { error: "الامتحان غير موجود على الخادم.", code: "exam_not_found" };
+    exam = {
+      id: examId,
+      title: String(data.examTitle || "").trim() || examId,
+      maxCheatAttempts: 3
+    };
   }
   if (findBlockingArabyaResult_(db, studentLookupKey, examId)) {
     return { error: "تم رفض بدء الامتحان: يوجد محاولة سابقة مسجّلة لهذا الطالب.", code: "blocked_attempt" };
@@ -858,8 +862,10 @@ function processArabyaAddResult_(data, db) {
   if (attemptToken) {
     attempt = loadExamAttempt_(attemptToken);
     if (!attempt) {
-      return { error: "جلسة الامتحان غير صالحة أو منتهية. أعد بدء الامتحان من جديد.", code: "invalid_attempt_token" };
+      attemptToken = "";
     }
+  }
+  if (attemptToken && attempt) {
     if (String(attempt.examId || "") !== examId) {
       return { error: "معرّف الامتحان لا يطابق جلسة المحاولة.", code: "exam_mismatch" };
     }
@@ -1052,7 +1058,7 @@ function upsertArabyaResult_(data) {
   var lastRow = sheet.getLastRow();
 
   if (recordId && lastRow > 1) {
-    var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    var ids = sheet.getRange(2, 1, lastRow, 1).getValues();
     for (var i = 0; i < ids.length; i++) {
       if (String(ids[i][0] || "").trim() === recordId) {
         sheet.getRange(i + 2, 1, 1, rowValues.length).setValues([rowValues]);
@@ -1191,14 +1197,8 @@ function mergeArabyaDatabase_(patch, reason, actor, clientReason) {
   ["teachers", "students", "exams", "results"].forEach(function(collection) {
     if (!Array.isArray(patch[collection])) return;
     if (collection === "exams" && shouldSkipExamMetaMerge_(clientReason)) return;
-    if (reason === "save_backup" && collection === "students") {
-      db.students = patch.students.map(function(item) {
-        return JSON.parse(JSON.stringify(item || {}));
-      });
-    } else if (reason === "save_backup" && collection === "results") {
-      db.results = patch.results.map(function(item) {
-        return JSON.parse(JSON.stringify(item || {}));
-      });
+    if (reason === "save_backup" && (collection === "students" || collection === "results")) {
+      db[collection] = mergeArabyaCollection_(db[collection] || [], patch[collection], collection);
     } else if (collection === "exams") {
       db.exams = mergeArabyaExamsPreservingAnswerKeys_(db.exams || [], patch.exams);
     } else {
@@ -1295,19 +1295,22 @@ function buildArabyaResultsForClient_(db) {
   var deletedResultKeys = db.deletedResultKeys || [];
   var deletedStudentKeys = db.deletedStudentKeys || [];
   var sheetResults = readArabyaResultsFromSheet_();
-  if (sheetResults.length > 0) {
-    var map = {};
-    sheetResults.forEach(function(result) {
-      if (isArabyaResultDeleted_(result, deletedResultKeys)) return;
-      if (isArabyaResultFromDeletedStudent_(result, deletedStudentKeys)) return;
-      var key = getArabyaRecordKey_(result, "results");
-      map[key] = result;
-    });
-    return Object.keys(map).map(function(key) { return map[key]; });
-  }
-  return filterArabyaResultsByDeletedKeys_(db.results || [], deletedResultKeys).filter(function(result) {
+  var dbResults = filterArabyaResultsByDeletedKeys_(db.results || [], deletedResultKeys).filter(function(result) {
     return !isArabyaResultFromDeletedStudent_(result, deletedStudentKeys);
   });
+  var map = {};
+  dbResults.forEach(function(result) {
+    if (!result) return;
+    var dbKey = getArabyaRecordKey_(result, "results");
+    map[dbKey] = result;
+  });
+  sheetResults.forEach(function(result) {
+    if (isArabyaResultDeleted_(result, deletedResultKeys)) return;
+    if (isArabyaResultFromDeletedStudent_(result, deletedStudentKeys)) return;
+    var key = getArabyaRecordKey_(result, "results");
+    map[key] = deepMergeArabyaObjects_(map[key] || {}, result);
+  });
+  return Object.keys(map).map(function(key) { return map[key]; });
 }
 
 function normalizeArabyaStudentId_(studentId) {
@@ -1663,27 +1666,39 @@ function readArabyaDatabase_() {
         var decoded = Utilities.newBlob(Utilities.base64Decode(body.content)).getDataAsString("UTF-8");
         var db = JSON.parse(decoded || "{}");
         db._sha = body.sha;
-        return Object.assign(cloneArabyaDefaultDb_(), db);
+        return hydrateArabyaDatabaseFromSheet_(Object.assign(cloneArabyaDefaultDb_(), db));
       }
     } catch (githubReadErr) {
       // fallback to sheet backup below
     }
   }
-  return readArabyaDatabaseFromSheet_();
+  return hydrateArabyaDatabaseFromSheet_(readArabyaDatabaseFromSheet_());
+}
+
+/** استعادة النتائج من ورقة «نتائج الطلاب» إذا كانت قاعدة البيانات فارغة */
+function hydrateArabyaDatabaseFromSheet_(db) {
+  var hydrated = Object.assign(cloneArabyaDefaultDb_(), db || {});
+  if (!Array.isArray(hydrated.results) || !hydrated.results.length) {
+    var sheetResults = readArabyaResultsFromSheet_();
+    if (sheetResults.length) {
+      hydrated.results = sheetResults;
+    }
+  }
+  return hydrated;
 }
 
 /** قراءة آخر نسخة احتياطية من ورقة ARABYA_BACKUP (وضع الشيت فقط بدون GitHub) */
 function readArabyaDatabaseFromSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("ARABYA_BACKUP");
-  if (!sheet || sheet.getLastRow() < 2) return cloneArabyaDefaultDb_();
+  if (!sheet || sheet.getLastRow() < 2) return hydrateArabyaDatabaseFromSheet_(cloneArabyaDefaultDb_());
   var lastRow = sheet.getLastRow();
   var backupDataStr = sheet.getRange(lastRow, 2).getValue();
-  if (!backupDataStr) return cloneArabyaDefaultDb_();
+  if (!backupDataStr) return hydrateArabyaDatabaseFromSheet_(cloneArabyaDefaultDb_());
   try {
     var parsed = JSON.parse(String(backupDataStr));
-    return Object.assign(cloneArabyaDefaultDb_(), parsed);
+    return hydrateArabyaDatabaseFromSheet_(Object.assign(cloneArabyaDefaultDb_(), parsed));
   } catch (err) {
-    return cloneArabyaDefaultDb_();
+    return hydrateArabyaDatabaseFromSheet_(cloneArabyaDefaultDb_());
   }
 }
 

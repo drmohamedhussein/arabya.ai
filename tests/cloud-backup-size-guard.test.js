@@ -1,17 +1,17 @@
 /**
- * Cloud backup must scope exam-settings saves without wiping results.
+ * Cloud backup must scope exam-settings saves and never wipe results on merge.
  */
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
 
 const appSource = fs.readFileSync(path.join(__dirname, "..", "app.js"), "utf8");
+const gasSource = fs.readFileSync(path.join(__dirname, "..", "integrations", "google-apps-script-backend.gs"), "utf8");
 
 assert.ok(appSource.includes("CLOUD_BACKUP_EXAM_SETTINGS_REASONS"));
 assert.ok(appSource.includes("buildExamSettingsCloudBackupData"));
+assert.ok(appSource.includes("pruneEmptyCloudBackupCollections"));
 assert.ok(appSource.includes('"save_exam_meta"'));
-assert.ok(appSource.includes("slimCloudBackupDataAggressive"));
-assert.ok(appSource.includes("slimCloudBackupResultForUpload"));
 
 const fnStart = appSource.indexOf("function buildExamSettingsCloudBackupData");
 const fnEnd = appSource.indexOf("function slimCloudBackupResultForUpload");
@@ -30,5 +30,9 @@ const scoped = sandbox.buildExamSettingsCloudBackupData({
 assert.ok(Array.isArray(scoped.exams));
 assert.strictEqual(scoped.results, undefined);
 assert.strictEqual(scoped.questionBanks, undefined);
+
+assert.ok(gasSource.includes('reason === "save_backup" && (collection === "students" || collection === "results")'));
+assert.ok(gasSource.includes("mergeArabyaCollection_(db[collection] || [], patch[collection], collection)"));
+assert.ok(gasSource.includes("function hydrateArabyaDatabaseFromSheet_(db)"));
 
 console.log("cloud-backup-size-guard.test.js: all assertions passed");

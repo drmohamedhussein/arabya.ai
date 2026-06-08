@@ -56,7 +56,7 @@ function resolveEmbeddedAppBuildVersion(fallbackVersion) {
   }
 }
 
-const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.18");
+const ARABYA_APP_BUILD_VERSION = resolveEmbeddedAppBuildVersion("2026.06.07.20");
 window.ARABYA_APP_BUILD_VERSION = ARABYA_APP_BUILD_VERSION;
 window.ARABYA_APP_VERSION = ARABYA_APP_BUILD_VERSION;
 
@@ -1540,7 +1540,7 @@ function initDatabase() {
   loadDeletedStudentKeysFromStorage();
   loadDeletedResultKeysFromStorage();
   systemState.students = filterOutDeletedStudents(systemState.students);
-  systemState.results = filterOutDeletedResults(systemState.results);
+  systemState.results = filterOutDeletedResultsSafe(systemState.results);
   bootstrapPlatformAppVersionFromLocal();
 }
 
@@ -4820,10 +4820,14 @@ function activateTeacherTab(tabId, options = {}) {
   } else if (normalizedTab === "stats") {
     renderTeacherStatsDashboard();
   } else if (normalizedTab === "results") {
+    reloadSystemStateFromLocalStorage();
+    systemState.results = filterOutDeletedResultsSafe(systemState.results);
     renderStudentResultsTable();
-    if (typeof pullTeacherResultsFromCloud === "function") {
-      pullTeacherResultsFromCloud();
-    } else {
+    if (!options.skipCloudPull && typeof pullTeacherResultsFromCloud === "function") {
+      setTimeout(() => {
+        pullTeacherResultsFromCloud({ background: true }).catch(() => {});
+      }, 1200);
+    } else if (!options.skipCloudPull) {
       syncDatabaseFromCloud({ silent: true }).finally(() => renderStudentResultsTable());
     }
   } else if (normalizedTab === "students") {
@@ -5403,6 +5407,43 @@ function filterOutDeletedResults(results) {
   return (results || []).filter(r => !isResultRecordDeleted(r));
 }
 
+function filterOutDeletedResultsSafe(results, options = {}) {
+  const list = Array.isArray(results) ? results : [];
+  const filtered = filterOutDeletedResults(list);
+  if (!options.strict && filtered.length === 0 && list.length > 0) {
+    console.warn("[ARABYA] tombstones hid all results — showing unfiltered local records for recovery");
+    return list;
+  }
+  return filtered;
+}
+
+function resetResultsDeletionTombstones() {
+  systemState.deletedResultKeys = [];
+  try {
+    localStorage.removeItem(DELETED_RESULT_KEYS_STORAGE);
+  } catch (e) {}
+}
+
+function resetResultsTableFiltersState() {
+  try {
+    localStorage.removeItem("arabya_results_filters");
+    localStorage.removeItem("arabya_results_column_sort");
+    localStorage.setItem("arabya_results_sort", "newest");
+  } catch (e) {}
+  if (systemState.resultsTableView) {
+    systemState.resultsTableView.searchQuery = "";
+    systemState.resultsTableView.statusFilter = "all";
+    systemState.resultsTableView.examFilter = "";
+    systemState.resultsTableView.dateFilter = "all";
+    systemState.resultsTableView.dateFrom = "";
+    systemState.resultsTableView.dateTo = "";
+    systemState.resultsTableView.columnSort = null;
+    systemState.resultsTableView.page = 1;
+  }
+  const searchInput = document.getElementById("teacher-results-search-input");
+  if (searchInput) searchInput.value = "";
+}
+
 function tombstoneResultsForDeletedStudent(student) {
   if (!student) return;
   const ctx = buildStudentMatchContext(student);
@@ -5414,11 +5455,11 @@ function tombstoneResultsForDeletedStudent(student) {
   systemState.results = filterOutDeletedResults(systemState.results);
 }
 
-function applyDeletionTombstonesToLocalState() {
+function applyDeletionTombstonesToLocalState(options = {}) {
   loadDeletedStudentKeysFromStorage();
   loadDeletedResultKeysFromStorage();
   systemState.students = filterOutDeletedStudents(systemState.students);
-  systemState.results = filterOutDeletedResults(systemState.results);
+  systemState.results = filterOutDeletedResultsSafe(systemState.results, options);
   persistDeletedStudentKeys();
   persistDeletedResultKeys();
 }
@@ -5556,6 +5597,8 @@ function hydrateStudentsFromResults(results) {
 
 function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
   if (!remoteData || typeof remoteData !== "object") return false;
+  const localResultsSnapshot = JSON.parse(JSON.stringify(systemState.results || []));
+  const localResultsCountBefore = localResultsSnapshot.length;
   const examStartOnly = mergeOptions.scope === "exam_start";
   loadDeletedStudentKeysFromStorage();
   loadDeletedResultKeysFromStorage();
@@ -5623,9 +5666,18 @@ function mergeRemoteDatabaseIntoLocal(remoteData, mergeOptions = {}) {
       if (item.recordId) return String(item.recordId);
       return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
     }, "نتيجة");
-    systemState.results = filterOutDeletedResults(mergedResults);
+    systemState.results = filterOutDeletedResultsSafe(mergedResults);
   } else {
-    systemState.results = filterOutDeletedResults(systemState.results);
+    systemState.results = filterOutDeletedResultsSafe(systemState.results);
+  }
+  if (
+    !examStartOnly &&
+    !mergeOptions.allowEmptyResults &&
+    localResultsCountBefore > 0 &&
+    (systemState.results || []).length === 0
+  ) {
+    console.warn("[ARABYA] cloud merge would wipe local results — keeping local copy");
+    systemState.results = localResultsSnapshot;
   }
   if (!examStartOnly) {
     reconcileStudentsFromCloudData(systemState.results, remoteStudentsBackup);
@@ -5976,6 +6028,14 @@ function slimCloudBackupResultForUpload(res) {
   return copy;
 }
 
+function pruneEmptyCloudBackupCollections(data) {
+  if (!data || typeof data !== "object") return data;
+  const copy = { ...data };
+  if (Array.isArray(copy.results) && copy.results.length === 0) delete copy.results;
+  if (Array.isArray(copy.students) && copy.students.length === 0) delete copy.students;
+  return copy;
+}
+
 function slimCloudBackupDataForSize(data) {
   const slim = {
     ...data,
@@ -5999,7 +6059,7 @@ function slimCloudBackupDataForSize(data) {
 
 function slimCloudBackupDataAggressive(data) {
   const slim = buildExamSettingsCloudBackupData(data);
-  if (Array.isArray(data.results)) {
+  if (Array.isArray(data.results) && data.results.length) {
     slim.results = data.results.map(slimCloudBackupResultForUpload);
   }
   return slim;
@@ -6024,20 +6084,24 @@ function buildSaveBackupPayload(reason) {
   }
   const clientReason = String(reason || "push");
   const useExamSettingsScope = CLOUD_BACKUP_EXAM_SETTINGS_REASONS.has(clientReason);
-  let data = useExamSettingsScope ? buildExamSettingsCloudBackupData(fullData) : fullData;
+  let data = pruneEmptyCloudBackupCollections(
+    useExamSettingsScope ? buildExamSettingsCloudBackupData(fullData) : fullData
+  );
   data._clientReason = clientReason;
   let payload = { action: "save_backup", data, actor };
   let json = JSON.stringify(payload);
   if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
-    data = useExamSettingsScope
-      ? buildExamSettingsCloudBackupData(fullData)
-      : slimCloudBackupDataForSize(fullData);
+    data = pruneEmptyCloudBackupCollections(
+      useExamSettingsScope
+        ? buildExamSettingsCloudBackupData(fullData)
+        : slimCloudBackupDataForSize(fullData)
+    );
     data._clientReason = clientReason;
     payload = { action: "save_backup", data, actor };
     json = JSON.stringify(payload);
   }
   if (json.length > MAX_CLOUD_BACKUP_JSON_BYTES) {
-    data = slimCloudBackupDataAggressive(fullData);
+    data = pruneEmptyCloudBackupCollections(slimCloudBackupDataAggressive(fullData));
     data._clientReason = clientReason;
     payload = { action: "save_backup", data, actor };
     json = JSON.stringify(payload);
@@ -6386,14 +6450,65 @@ function formatCloudPullFailureMessage(syncResult) {
   return "تعذّر الجلب. تأكد من رابط /exec ونشر Web App للجميع (Anyone)، وانسخ الكود الكامل من تبويب الربط ثم أعد النشر كإصدار جديد.";
 }
 
+window.emergencyRecoverResultsData = async function() {
+  reloadSystemStateFromLocalStorage();
+  const raw = localStorage.getItem("arabya_results_db") || "[]";
+  let rawCount = 0;
+  try {
+    const parsed = JSON.parse(raw);
+    rawCount = Array.isArray(parsed) ? parsed.length : 0;
+  } catch (e) {}
+  if (!confirm(
+    "إصلاح طارئ لسجل النتائج:\n" +
+    `- سجلات محفوظة في المتصفح: ${rawCount}\n` +
+    "- سيتم مسح فلاتر العرض وسجل الحذف المحلي\n" +
+    "- ثم جلب النتائج من Google Sheets\n\n" +
+    "هل تريد المتابعة؟"
+  )) return false;
+
+  resetResultsTableFiltersState();
+  resetResultsDeletionTombstones();
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length) {
+      systemState.results = parsed;
+      localStorage.setItem("arabya_results_db", JSON.stringify(parsed));
+    }
+  } catch (e) {}
+  systemState.results = filterOutDeletedResultsSafe(systemState.results);
+  renderStudentResultsTable();
+
+  const pulled = await pullTeacherResultsFromCloud({ forcePull: true });
+  if ((systemState.results || []).length > 0) {
+    alert(`تم الإصلاح: ${systemState.results.length} نتيجة ظاهرة الآن في السجل.`);
+    return true;
+  }
+  alert(
+    "لم تُستعد نتائج بعد الإصلاح.\n\n" +
+    "تحقق من:\n" +
+    "1) نشر Apps Script كإصدار جديد (Anyone)\n" +
+    "2) تطابق سر API بين Script Properties وتبويب الربط\n" +
+    "3) وجود صفوف في ورقة «نتائج الطلاب» داخل Google Sheets المربوط"
+  );
+  return pulled;
+};
+
 window.pullTeacherResultsFromCloud = async function(options = {}) {
+  reloadSystemStateFromLocalStorage();
+  systemState.results = filterOutDeletedResultsSafe(systemState.results);
   const el = document.getElementById("teacher-results-sync-status");
   if (el) {
     el.innerHTML = `<span class="material-icons" style="vertical-align:middle; animation:spin 1s infinite linear; color:var(--secondary);">sync</span> جاري جلب النتائج من Google Sheets...`;
   }
+  if (getArabyaWebAppUrls().length === 0) {
+    if (el) {
+      el.innerHTML = `<span class="material-icons" style="vertical-align:middle; color:var(--error);">link_off</span> لم يُضبط رابط Web App — افتح تبويب الربط والصق رابط /exec ثم احفظ.`;
+    }
+    return false;
+  }
 
   const retryReasons = new Set(["local_push_guard", "push_in_progress", "pull_suspended_after_delete"]);
-  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: !!options.forcePull });
+  let syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: options.forcePull !== false });
   if (!syncResult.ok && syncResult.skipped && !options.forcePull && retryReasons.has(syncResult.reason)) {
     const retryDelays = [6000, 10000, 14000];
     for (const delayMs of retryDelays) {
@@ -6407,6 +6522,10 @@ window.pullTeacherResultsFromCloud = async function(options = {}) {
     }
   }
 
+  if (!syncResult.ok && systemState.results.length > 0 && isTeacherSessionActive()) {
+    await pushLocalStateToCloudNow("results_repair_push");
+    syncResult = await syncDatabaseFromCloud({ silent: false, forcePull: true });
+  }
   if (syncResult.ok) {
     getResultsTableViewSettings().page = 1;
     getStudentsTableViewSettings().page = 1;
@@ -7067,6 +7186,10 @@ async function syncDatabaseFromCloud(options = {}) {
 
   if (pullResult.ok && response && response.data) {
     try {
+      const sheetRows = Number(response.sheetTotalRows || response.sheetResultRows || 0);
+      if (sheetRows > 0 && (!Array.isArray(systemState.results) || systemState.results.length === 0)) {
+        console.warn("[ARABYA] cloud pull returned 0 local results but sheet has", sheetRows, "rows — check API secret and GAS redeploy");
+      }
       applyDeletionTombstonesToLocalState();
       try {
         localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
@@ -7324,17 +7447,24 @@ function applyCloudBackupData(data) {
     }
   }
   if (data.results && Array.isArray(data.results)) {
-    systemState.results = filterOutDeletedResults(
-      data.results.filter(r => r && !isResultFromDeletedStudent(r))
-    );
-    localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
-    ensureResultRecordIds();
-    reconcileStudentsFromCloudData(
-      systemState.results,
-      Array.isArray(data.students) ? data.students : systemState.students
-    );
-    systemState.students = filterOutDeletedStudents(systemState.students);
-    localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+    const remoteResults = data.results.filter(r => r && !isResultFromDeletedStudent(r));
+    const localCount = Array.isArray(systemState.results) ? systemState.results.length : 0;
+    if (remoteResults.length > 0 || localCount === 0) {
+      const resultKeyFn = item => {
+        if (item.recordId) return String(item.recordId);
+        return String([item.id, item.examId || item.examTitle, item.timestamp, item.score].join(":"));
+      };
+      const mergedResults = mergeRemoteCollection_(systemState.results, remoteResults, resultKeyFn, "نتيجة");
+      systemState.results = filterOutDeletedResultsSafe(mergedResults);
+      localStorage.setItem("arabya_results_db", JSON.stringify(systemState.results));
+      ensureResultRecordIds();
+      reconcileStudentsFromCloudData(
+        systemState.results,
+        Array.isArray(data.students) ? data.students : systemState.students
+      );
+      systemState.students = filterOutDeletedStudents(systemState.students);
+      localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
+    }
   } else if (data.students && Array.isArray(data.students)) {
     systemState.students = filterOutDeletedStudents(data.students);
     localStorage.setItem("arabya_students_db", JSON.stringify(systemState.students));
@@ -7428,6 +7558,14 @@ function syncTeacherDataOnLogin(options = {}) {
       const cloud = countCloudBackupData(data);
       const fresh = isLikelyFreshLocalDatabase();
       const cloudHasMore = cloud.exams > local.exams || cloud.results > local.results || cloud.students > local.students;
+      const cloudLooksEmpty = cloud.results === 0 && cloud.students === 0;
+      const localHasData = local.results > 0 || local.students > 1 || local.exams > 0;
+
+      if (!fresh && localHasData && cloudLooksEmpty) {
+        finishTeacherLoginNavigation(options);
+        void pushLocalStateToCloudNow("login_repair_empty_cloud");
+        return { synced: false, reason: "repair_push" };
+      }
 
       if (!fresh && !cloudHasMore) {
         finishTeacherLoginNavigation(options);
@@ -10949,6 +11087,8 @@ async function submitFinishedExam() {
   resultObj.attemptNumber = getNextAttemptNumber(studentLookupKey, systemState.currentExam.id);
   const archivedAttempts = markPriorResultsSuperseded(studentLookupKey, systemState.currentExam.id, resultObj.recordId);
   systemState.results.push(resultObj);
+  reconcileStudentsFromCloudData(systemState.results, systemState.students);
+  systemState.students = filterOutDeletedStudents(systemState.students);
   if (systemState.examDeviceProfile && studentLookupKey && systemState.currentExam?.id) {
     registerExamDeviceBinding(
       systemState.examDeviceProfile,
@@ -11077,20 +11217,35 @@ function buildAddResultCloudPayload(scoreString, details, resultRecordId = "", r
 async function postAddResultToCloudUrls(urlList, slimPayload) {
   const targets = [...new Set((urlList || []).map(normalizeArabyaWebAppUrl).filter(Boolean))];
   if (!targets.length) return { ok: false, successCount: 0, total: 0, graded: null };
-  const outcomes = await Promise.all(targets.map(async url => {
+
+  async function postOne(url, payload) {
     try {
-      const response = await postToArabyaWebApp(url, slimPayload);
-      return { ok: true, graded: response?.graded || null };
+      const response = await postToArabyaWebApp(url, payload);
+      return { ok: true, graded: response?.graded || null, response };
     } catch (err) {
+      const errMsg = String(err?.message || err || "");
+      const tokenRelated = /invalid_attempt_token|attempt_token|جلسة الامتحان/i.test(errMsg);
+      if (tokenRelated && payload?.attemptToken) {
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.attemptToken;
+        try {
+          const retryResponse = await postToArabyaWebApp(url, fallbackPayload);
+          return { ok: true, graded: retryResponse?.graded || null, response: retryResponse, retriedWithoutToken: true };
+        } catch (retryErr) {
+          console.warn("[ARABYA] add_result retry without token failed:", url, retryErr);
+        }
+      }
       console.warn("[ARABYA] add_result failed, retry no-cors:", url, err);
       try {
-        const sent = await postToArabyaWebAppNoCors(url, slimPayload);
+        const sent = await postToArabyaWebAppNoCors(url, payload);
         return { ok: !!sent, graded: null };
       } catch (e2) {
-        return { ok: false, graded: null };
+        return { ok: false, graded: null, error: errMsg };
       }
     }
-  }));
+  }
+
+  const outcomes = await Promise.all(targets.map(url => postOne(url, slimPayload)));
   const successCount = outcomes.filter(item => item.ok).length;
   const graded = outcomes.find(item => item.graded)?.graded || null;
   return { ok: successCount > 0, successCount, total: targets.length, graded };
@@ -12244,11 +12399,20 @@ function renderStudentResultsTable() {
 
   const filters = getResultsTableFilters();
   const filtersActive = isResultsTableFiltersActive(filters);
+  let rawStoredCount = 0;
+  try {
+    const rawStored = JSON.parse(localStorage.getItem("arabya_results_db") || "[]");
+    rawStoredCount = Array.isArray(rawStored) ? rawStored.length : 0;
+  } catch (e) {}
   const totalAll = systemState.results.length;
 
   if (totalAll === 0) {
     const hasCloud = getArabyaWebAppUrls().length > 0;
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات محلية.${hasCloud ? " اضغط «مزامنة من السحابة» أعلاه لجلب نتائج الطلاب من Google Sheets." : " اربط Google Sheets من تبويب الربط أولاً."}</td></tr>`;
+    const hiddenByTombstones = rawStoredCount > 0;
+    const recoveryHint = hiddenByTombstones
+      ? ` وُجد ${rawStoredCount} سجل محفوظ لكنه مخفي — اضغط «إصلاح طارئ للسجل».`
+      : (hasCloud ? " اضغط «مزامنة من السحابة» أو «إصلاح طارئ للسجل»." : " اربط Google Sheets من تبويب الربط أولاً.");
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">لا توجد سجلات ظاهرة.${recoveryHint}</td></tr>`;
     updateResultsPaginationUI(0, 1, getResultsTableViewSettings().pageSize, 0, filtersActive);
     return;
   }
@@ -13106,7 +13270,7 @@ async function registerExamAttemptWithCloud(examId, studentLookupKey, profile) {
   }
   if (response?.status === "error") {
     const code = String(response.code || "").trim();
-    const advisoryCodes = new Set(["device_conflict", "device_registry_conflict"]);
+    const advisoryCodes = new Set(["device_conflict", "device_registry_conflict", "exam_not_found"]);
     if (advisoryCodes.has(code)) {
       console.warn("[ARABYA] register_exam_attempt advisory:", response.message || code);
       return { ok: true, attemptToken: "", advisory: code };
