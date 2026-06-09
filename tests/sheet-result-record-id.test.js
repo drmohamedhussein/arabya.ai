@@ -32,6 +32,14 @@ assert.strictEqual(
   "generated legacy IDs must remain stable when a row shifts"
 );
 
+const sameRowAfterManualGradeEdit = legacyRow.slice();
+sameRowAfterManualGradeEdit[16] = "19/20";
+assert.strictEqual(
+  context.buildArabyaLegacySheetResultRecordId_(legacyRow),
+  context.buildArabyaLegacySheetResultRecordId_(sameRowAfterManualGradeEdit),
+  "generated legacy IDs must remain stable when a sheet grade is edited"
+);
+
 const shiftedRowResult = {
   recordId: context.buildArabyaLegacySheetResultRecordId_(sameRowAfterSheetShift),
   id: "S-001",

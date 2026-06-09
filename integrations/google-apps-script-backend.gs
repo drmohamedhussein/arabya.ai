@@ -1746,8 +1746,7 @@ function buildArabyaLegacySheetResultRecordId_(row) {
     row && row[4],  // access code
     row && row[9],  // exam ID
     row && row[8],  // exam title for older sheets
-    row && row[1],  // timestamp
-    row && row[16]  // score, to reduce collisions between same-minute attempts
+    row && row[1]   // timestamp
   ];
   return "legacy_sheet:" + parts.map(function(part) {
     return String(part || "").trim();
