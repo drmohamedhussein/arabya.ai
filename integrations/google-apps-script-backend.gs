@@ -1739,6 +1739,21 @@ function writeArabyaDatabaseToGitHub_(db) {
   }
 }
 
+function buildArabyaLegacySheetResultRecordId_(row) {
+  var parts = [
+    row && row[5],  // studentLookupKey when present
+    row && row[3],  // student ID
+    row && row[4],  // access code
+    row && row[9],  // exam ID
+    row && row[8],  // exam title for older sheets
+    row && row[1],  // timestamp
+    row && row[16]  // score, to reduce collisions between same-minute attempts
+  ];
+  return "legacy_sheet:" + parts.map(function(part) {
+    return String(part || "").trim();
+  }).join(":");
+}
+
 function readArabyaResultsFromSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("نتائج الطلاب");
   if (!sheet || sheet.getLastRow() < 2) return [];
@@ -1752,7 +1767,7 @@ function readArabyaResultsFromSheet_() {
     if (!row || !String(row[2] || "").trim()) return;
     var recordId = String(row[0] || "").trim();
     if (!recordId) {
-      recordId = "sheet_row_" + String(index + 2);
+      recordId = buildArabyaLegacySheetResultRecordId_(row);
     }
     var cheatLog = parseArabyaJsonField_(row[21], []);
     var deviceMeta = parseArabyaJsonField_(row[25], {});
